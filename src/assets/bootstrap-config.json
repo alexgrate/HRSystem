@@ -1,0 +1,35 @@
+{
+  "benefit_levels": [
+    { "name": "Basic Tier", "code": "BL1", "description": "Standard entry benefits package", "is_active": true },
+    { "name": "Executive Tier", "code": "BL5", "description": "Executive level allowance package", "is_active": true }
+  ],
+  "benefit_level_allowances": [],
+  "pay_grades": [
+    { "benefit_level_code": "BL1", "name": "G1 Grade Scaler", "code": "PG_G1", "min_salary": 180000, "max_salary": 320000, "currency": "NGN", "is_active": true },
+    { "benefit_level_code": "BL5", "name": "G5 Grade Scaler", "code": "PG_G5", "min_salary": 720000, "max_salary": 980000, "currency": "NGN", "is_active": true }
+  ],
+  "leave_types": [
+    { "benefit_level_code": "BL1", "name": "Annual Leave", "code": "LV_ANNUAL", "days_allowed": 20, "is_paid": true, "requires_approval": true, "description": "Standard paid vacation allowance", "is_active": true },
+    { "benefit_level_code": "BL1", "name": "Sick Leave", "code": "LV_SICK", "days_allowed": 14, "is_paid": true, "requires_approval": true, "description": "Standard paid medical allowance", "is_active": true }
+  ],
+  "approval_workflows": [],
+  "departments": [
+    { "name": "Technology", "code": "TECH", "description": "Core banking platforms & software engineering", "is_active": true },
+    { "name": "Operations", "code": "OPS", "description": "Back-office and branch banking operations", "is_active": true },
+    { "name": "Human Resources", "code": "HR", "description": "Talent acquisition & people operations", "is_active": true },
+    { "name": "Finance", "code": "FIN", "description": "General ledgers, taxation, and treasury compliance", "is_active": true }
+  ],
+  "job_roles": [
+    { "department_code": "TECH", "title": "Software Engineer", "code": "SWE", "description": "Maintains online and retail banking software", "is_active": true },
+    { "department_code": "TECH", "title": "Head, IT & Engineering", "code": "H_ENG", "description": "Responsible for core tech architecture", "is_active": true },
+    { "department_code": "HR", "title": "HR Lead", "code": "HR_L", "description": "Manages payroll and people strategy", "is_active": true },
+    { "department_code": "FIN", "title": "Finance Approver", "code": "FIN_A", "description": "Validates and locks in payroll run calculations", "is_active": true }
+  ],
+  "grades": [
+    { "name": "Entry Level", "code": "G1", "level": "1", "min_salary": 180000, "max_salary": 320000, "currency": "NGN", "description": "Entry grade bands", "is_active": true },
+    { "name": "Manager", "code": "G5", "level": "5", "min_salary": 720000, "max_salary": 980000, "currency": "NGN", "description": "Management grade bands", "is_active": true }
+  ],
+  "office_locations": [
+    { "country": "Nigeria", "state": "Lagos", "address": "12 Marina, Lagos Island", "headquarter": true }
+  ]
+}
