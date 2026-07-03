@@ -23,12 +23,27 @@ export const setupService = {
 
   getJobRoles: () => api.get('/api/job-roles/'),
   createJobRole: (data) => api.post('/api/job-roles/', data),
+  updateJobRole: (id, data) => api.put(`/api/job-roles/${id}`, data),
+  deleteJobRole: (id) => api.delete(`/api/job-roles/${id}`),
 
   getGrades: () => api.get('/api/grades/'),
   createGrade: (data) => api.post('/api/grades/', data),
+  updateGrade: (id, data) => api.put(`/api/grades/${id}`, data),
+  deleteGrade: (id) => api.delete(`/api/grades/${id}`),
+
+  getPayGroups: () => api.get('/api/pay-groups/'),
+  createPayGroup: (data) => api.post('/api/pay-groups/', data),
+  updatePayGroup: (id, data) => api.put(`/api/pay-groups/${id}`, data),
+  deletePayGroup: (id) => api.delete(`/api/pay-groups/${id}`),
+
+  getBenefitLevelAllowances: () => api.get('/api/setups/benefit-level-allowances'),
+  createBenefitLevelAllowance: (data) => api.post('/api/setups/benefit-level-allowances', data),
 
   getWorkflows: () => api.get('/api/setups/approval-workflows'),
   createWorkflow: (data) => api.post('/api/setups/approval-workflows', data),
+
+  getLeaveTypes: () => api.get('/api/setups/leave-types'),
+  createLeaveType: (data) => api.post('/api/setups/leave-types', data),
 
   bootstrapOrganization: (data) => api.post('/api/setups/bootstrap', data),
   getSetupOverview: () => api.get('/api/setups/overview'),

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, User, Users, Wallet, ShieldCheck, Plus, CheckCircle2, XCircle, MessageSquare, Trash2, HelpCircle } from "lucide-react";
+import { ArrowRight, Plus, Trash2, HelpCircle } from "lucide-react";
 import { setupService } from "../../services/setupService";
-import api from "../../services/api";
+import { usePermissions } from "../../context/PermissionContext";
+import { useToast } from "../../components/ui/Notifications";
+import { RESOURCE_CODES } from "../../config/resourceCodes";
 
 const getTypeColor = (type) => {
   const t = (type || "").toUpperCase();
@@ -14,9 +16,12 @@ const getTypeColor = (type) => {
 };
 
 const WorkflowPage = () => {
+  const { can } = usePermissions();
   const [workflows, setWorkflows] = useState([]);
   const [jobRoles, setJobRoles] = useState([]);
-  const [active, setActive] = useState(0);
+  // Track selection by workflow id, not array index — a refetch can reorder
+  // the list and an index would silently point at a different workflow.
+  const [activeId, setActiveId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
 
@@ -25,11 +30,8 @@ const WorkflowPage = () => {
     try {
       const [wList, rolesResponse] = await Promise.all([
         setupService.getWorkflows(),
-        api.get("/api/job-roles/")
+        setupService.getJobRoles(),
       ]);
-      
-      console.log("[WorkflowPage] GET Workflows API Response:", wList);
-      
       setWorkflows(wList || []);
       setJobRoles(rolesResponse || []);
     } catch (err) {
@@ -41,9 +43,9 @@ const WorkflowPage = () => {
 
   useEffect(() => {
     loadWorkflowData();
-  }, [showAdd]);
+  }, []);
 
-  const activeFlow = workflows[active];
+  const activeFlow = workflows.find((w) => w.workflow?.id === activeId) || workflows[0] || null;
 
   const getApproverTitle = (step) => {
     if (step.approver_job_role_code) return step.approver_job_role_code;
@@ -60,12 +62,14 @@ const WorkflowPage = () => {
           <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Approval Workflow Designer</h1>
           <p className="mt-1 text-sm text-slate-500">Configure multi-stage approval sequences for every HR process.</p>
         </div>
-        <button 
-          onClick={() => setShowAdd(true)} 
-          className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#4f1a60] to-[#8a2da8] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#4f1a60]/20 active:scale-95 transition-transform"
-        >
-          <Plus className="h-4 w-4" /> New workflow
-        </button>
+        {can(RESOURCE_CODES.APPROVAL_WORKFLOWS, "create") && (
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#4f1a60] to-[#8a2da8] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#4f1a60]/20 active:scale-95 transition-transform"
+          >
+            <Plus className="h-4 w-4" /> New workflow
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -82,14 +86,14 @@ const WorkflowPage = () => {
         <>
           <div className="grid gap-3 md:grid-cols-3">
             {workflows.map((p, i) => (
-              <button 
-                key={p.workflow?.id || i} 
-                onClick={() => setActive(i)} 
+              <button
+                key={p.workflow?.id || i}
+                onClick={() => setActiveId(p.workflow?.id)}
                 className={`rounded-2xl border-y border-r border-l-4 p-4 text-left transition-all ${
-                  active === i 
-                    ? "border-[#4f1a60] bg-gradient-to-br from-[#4f1a60]/5 to-white shadow-md" 
+                  p === activeFlow
+                    ? "border-[#4f1a60] bg-gradient-to-br from-[#4f1a60]/5 to-white shadow-md"
                     : "border-slate-200/80 bg-white hover:border-slate-300"
-                } ${getTypeColor(p.workflow?.workflow_type)}`} 
+                } ${getTypeColor(p.workflow?.workflow_type)}`}
               >
                 <div className="text-sm font-semibold text-slate-900 capitalize">
                   {p.workflow?.name || "Unnamed Workflow"}
@@ -159,9 +163,10 @@ const WorkflowPage = () => {
 
       <AnimatePresence>
         {showAdd && (
-          <WorkflowFormModal 
-            onClose={() => setShowAdd(false)} 
-            jobRoles={jobRoles} 
+          <WorkflowFormModal
+            onClose={() => setShowAdd(false)}
+            onSaved={loadWorkflowData}
+            jobRoles={jobRoles}
           />
         )}
       </AnimatePresence>
@@ -170,11 +175,12 @@ const WorkflowPage = () => {
 }
 
 
-function WorkflowFormModal({ onClose, jobRoles }) {
+function WorkflowFormModal({ onClose, onSaved, jobRoles }) {
+  const toast = useToast();
   const [name, setName] = useState("");
   const [workflowType, setWorkflowType] = useState("LEAVE_REQUEST");
   const [steps, setSteps] = useState([
-    { id: Date.now(), approver_job_role_id: "" }
+    { id: 1, approver_job_role_id: "" }
   ]);
 
   const addStep = () => {
@@ -206,13 +212,13 @@ function WorkflowFormModal({ onClose, jobRoles }) {
         }))
       };
 
-      console.log("[WorkflowPage] Dispatching payload to POST /api/setups/approval-workflows:", payload);
-
       await setupService.createWorkflow(payload);
+      toast.success("Workflow created.");
+      onSaved?.();
       onClose();
     } catch (err) {
       console.error("Workflow creation failed:", err);
-      alert(err?.error?.message || err?.message || "Error creating workflow chain.");
+      toast.error(err?.error?.message || err?.message || "Error creating workflow chain.");
     }
   };
 

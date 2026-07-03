@@ -1,40 +1,60 @@
-import React, { useState } from "react";
+import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "../context/AuthContext";
+import { PermissionProvider, usePermissions } from "../context/PermissionContext";
+import { ConfigProvider } from "../context/ConfigContext";
 import ProtectedRoute from "./ProtectedRoute";
+import AppLayout from "../components/layout/AppLayout";
 import Login from "../pages/auth/Login";
-import Shell from "../components/layout/Shell";
-import DirectoryPage from "../pages/admin/DirectoryPage";
-import WorkflowPage from "../pages/admin/WorkflowPage";
+import ForgotPassword from "../pages/auth/ForgotPassword";
+import { RESOURCES, pathFor } from "../config/resources";
+
+function IndexRedirect() {
+  const { can } = usePermissions();
+  const first = RESOURCES.find((r) => can(r.resource, r.action || "read"));
+  return <Navigate to={first ? pathFor(first) : "/login"} replace />;
+}
 
 export default function AppRoutes() {
-  const [activeTab, setActiveTab] = useState("directory");
-
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
+        <PermissionProvider>
+          <ConfigProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
 
-          <Route 
-            path="/app" 
-            element={
-              <ProtectedRoute>
-                <Shell active={activeTab} onChange={setActiveTab}>
-                  {activeTab === "directory" && <DirectoryPage />}
-                  {activeTab === "workflow" && <WorkflowPage />}
-                  {activeTab !== "directory" && (
-                    <div className="p-8 text-center text-slate-500 border border-dashed border-slate-200 rounded-2xl">
-                      Module <span className="font-semibold text-purple-600 capitalize">{activeTab}</span> is scheduled in future weeks!
-                    </div>
-                  )}
-                </Shell>
-              </ProtectedRoute>
-            } 
-          />
+            <Route
+              path="/app"
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<IndexRedirect />} />
+              {RESOURCES.map((r) => {
+                const Component = r.component;
+                return (
+                  <Route
+                    key={r.key}
+                    path={r.segment}
+                    element={
+                      <ProtectedRoute resource={r.resource} action={r.action || "read"}>
+                        <Component />
+                      </ProtectedRoute>
+                    }
+                  />
+                );
+              })}
+              <Route path="*" element={<Navigate to="/app" replace />} />
+            </Route>
 
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+          </ConfigProvider>
+        </PermissionProvider>
       </AuthProvider>
     </BrowserRouter>
   );

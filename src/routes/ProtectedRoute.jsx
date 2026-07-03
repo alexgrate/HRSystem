@@ -1,13 +1,13 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useCan } from '../context/PermissionContext';
 
-const ProtectedRoute = ({ children, allowedRoles = [] }) => {
+
+const ProtectedRoute = ({ children, resource = null, action = 'read' }) => {
   const { user, loading } = useAuth();
   const location = useLocation();
-
-  console.log("[ProtectedRoute] Evaluating session...");
-  console.log(" - User session details:", user);
+  const allowed = useCan(resource, action);
 
   if (loading) {
     return (
@@ -18,11 +18,18 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   }
 
   if (!user) {
-    console.warn("[ProtectedRoute] Rejection: No active user session. Redirecting to /login.");
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  console.log("[ProtectedRoute] Authentication verified. Access granted.");
+  if (resource && !allowed) {
+    return (
+      <div className="p-8 text-center text-slate-500 border border-dashed border-slate-200 rounded-2xl bg-white">
+        You don’t have access to this module. Ask an administrator to grant the
+        required permission.
+      </div>
+    );
+  }
+
   return children;
 };
 
