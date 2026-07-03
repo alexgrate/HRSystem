@@ -10,8 +10,12 @@ import ForgotPassword from "../pages/auth/ForgotPassword";
 import { RESOURCES, pathFor } from "../config/resources";
 
 function IndexRedirect() {
-  const { can } = usePermissions();
-  const first = RESOURCES.find((r) => can(r.resource, r.action || "read"));
+  const { can, canAccess } = usePermissions();
+  const first = RESOURCES.find((r) =>
+    Array.isArray(r.checks) && r.checks.length
+      ? canAccess(r.checks, "any")
+      : can(r.resource, r.action || "read")
+  );
   return <Navigate to={first ? pathFor(first) : "/login"} replace />;
 }
 
@@ -41,7 +45,11 @@ export default function AppRoutes() {
                     key={r.key}
                     path={r.segment}
                     element={
-                      <ProtectedRoute resource={r.resource} action={r.action || "read"}>
+                      <ProtectedRoute
+                        resource={r.resource}
+                        action={r.action || "read"}
+                        checks={r.checks}
+                      >
                         <Component />
                       </ProtectedRoute>
                     }

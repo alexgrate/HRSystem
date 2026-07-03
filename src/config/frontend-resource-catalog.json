@@ -1,0 +1,746 @@
+{
+  "schema_version": "1.0.0",
+  "application": "dashhr",
+  "description": "Frontend resource catalog for modules, pages, permissions, actions, entities, and workflow capabilities.",
+  "permission_flag_usage": {
+    "note": "canRead, canModify, canCreate, canReview and canAssign are runtime access flags returned by authorization APIs for a specific user, job role and attached resources.",
+    "catalog_permissions_field": "permissions",
+    "catalog_permissions_meaning": "Static required permission keys for pages/resources in this catalog"
+  },
+  "authorization_api_contract": {
+    "purpose": "Resolve user access by job role and role-resource attachments",
+    "response_shape": {
+      "user": {
+        "user_id": "string",
+        "employee_id": "string",
+        "organization_id": "string",
+        "job_role_id": "string",
+        "job_role_code": "string"
+      },
+      "resources": [
+        {
+          "resource_id": "string",
+          "resource_code": "string",
+          "resource_name": "string",
+          "module": "string",
+          "canRead": true,
+          "canModify": false,
+          "canCreate": false,
+          "canReview": false,
+          "canAssign": false
+        }
+      ]
+    },
+    "suggested_endpoint": {
+      "method": "GET",
+      "path": "/api/role-permissions/me/resources"
+    },
+    "mapping_from_role_resources": {
+      "canCreate": "can_create OR can_manage",
+      "canRead": "can_read OR can_manage",
+      "canModify": "can_update OR can_delete OR can_manage",
+      "canReview": "resource supports approval/review actions OR can_manage",
+      "canAssign": "resource supports assignment actions OR can_manage"
+    }
+  },
+  "defaults": {
+    "access_levels": ["none", "view", "create", "update", "delete", "approve", "admin"],
+    "route_guard_types": ["public", "authenticated", "admin"],
+    "http_methods": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+  },
+  "global_permissions": {
+    "module": [
+      "module:view",
+      "module:configure",
+      "module:admin"
+    ],
+    "page": [
+      "page:view",
+      "page:export",
+      "page:filter"
+    ],
+    "resource": [
+      "resource:list",
+      "resource:view",
+      "resource:create",
+      "resource:update",
+      "resource:delete",
+      "resource:assign",
+      "resource:approve",
+      "resource:reject",
+      "resource:seed",
+      "resource:initialize",
+      "resource:submit",
+      "resource:review",
+      "resource:publish",
+      "resource:archive",
+      "resource:download",
+      "resource:upload",
+      "resource:notify"
+    ],
+    "workflow": [
+      "workflow:view",
+      "workflow:create",
+      "workflow:update",
+      "workflow:activate",
+      "workflow:deactivate",
+      "workflow:approve",
+      "workflow:reject"
+    ]
+  },
+  "modules": [
+    {
+      "id": "authentication",
+      "name": "Authentication",
+      "base_api_prefix": "/api/auth",
+      "icon": "shield-check",
+      "pages": [
+        {
+          "id": "auth-login",
+          "name": "Login",
+          "frontend_route": "/auth/login",
+          "guard": "public",
+          "permissions": []
+        },
+        {
+          "id": "auth-register",
+          "name": "Register",
+          "frontend_route": "/auth/register",
+          "guard": "public",
+          "permissions": []
+        },
+        {
+          "id": "auth-forgot-password",
+          "name": "Forgot Password",
+          "frontend_route": "/auth/forgot-password",
+          "guard": "public",
+          "permissions": []
+        }
+      ],
+      "resources": [
+        {
+          "id": "auth-session",
+          "name": "Session",
+          "entity": "users/auth",
+          "supported_actions": ["login", "logout", "validate_token", "get_current_user", "request_password_reset", "reset_password", "validate_otp", "resend_otp"],
+          "permissions": ["resource:submit", "resource:view"]
+        }
+      ]
+    },
+    {
+      "id": "organizations",
+      "name": "Organizations",
+      "base_api_prefix": "/api/organizations",
+      "icon": "building-2",
+      "pages": [
+        {
+          "id": "organizations-list",
+          "name": "Organizations",
+          "frontend_route": "/organizations",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:list"]
+        },
+        {
+          "id": "organization-detail",
+          "name": "Organization Detail",
+          "frontend_route": "/organizations/:organizationId",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:view", "resource:update", "resource:delete"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "organization",
+          "name": "Organization",
+          "entity": "organization",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        }
+      ]
+    },
+    {
+      "id": "user-management",
+      "name": "User Management",
+      "base_api_prefix": "/api/users",
+      "icon": "users",
+      "pages": [
+        {
+          "id": "users-list",
+          "name": "Employees",
+          "frontend_route": "/users",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:list"]
+        },
+        {
+          "id": "user-detail",
+          "name": "Employee Profile",
+          "frontend_route": "/users/:userId",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:view"]
+        },
+        {
+          "id": "my-profile",
+          "name": "My Profile",
+          "frontend_route": "/me/profile",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:view", "resource:update"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "employee",
+          "name": "Employee",
+          "entity": "employees",
+          "supported_actions": ["list", "view", "create", "update", "delete", "activate", "deactivate", "assign_job_role", "assign_manager", "assign_department"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete", "resource:assign"]
+        },
+        {
+          "id": "employee-biodata",
+          "name": "Employee Biodata",
+          "entity": "employee_biodata",
+          "supported_actions": ["view", "update"],
+          "permissions": ["resource:view", "resource:update"]
+        },
+        {
+          "id": "employee-bank-details",
+          "name": "Employee Bank Details",
+          "entity": "employee_bank_details",
+          "supported_actions": ["view", "update"],
+          "permissions": ["resource:view", "resource:update"]
+        },
+        {
+          "id": "employee-education",
+          "name": "Employee Education",
+          "entity": "employee_education",
+          "supported_actions": ["list", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:create", "resource:update", "resource:delete"]
+        }
+      ]
+    },
+    {
+      "id": "profile",
+      "name": "Profile",
+      "base_api_prefix": "/api/profiles",
+      "icon": "id-card",
+      "pages": [
+        {
+          "id": "profile-editor",
+          "name": "Profile Editor",
+          "frontend_route": "/profile/edit",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:update"]
+        },
+        {
+          "id": "public-profile",
+          "name": "Public Profile",
+          "frontend_route": "/profile/:userId",
+          "guard": "public",
+          "permissions": ["page:view"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "profile-core",
+          "name": "Profile Core",
+          "entity": "profiles",
+          "supported_actions": ["view", "update", "update_public_profile"],
+          "permissions": ["resource:view", "resource:update"]
+        },
+        {
+          "id": "profile-experience",
+          "name": "Profile Experience",
+          "entity": "profile_experience",
+          "supported_actions": ["list", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "profile-certifications",
+          "name": "Profile Certifications",
+          "entity": "profile_certifications",
+          "supported_actions": ["list", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "profile-privacy-settings",
+          "name": "Profile Privacy Settings",
+          "entity": "profile_privacy_settings",
+          "supported_actions": ["view", "update"],
+          "permissions": ["resource:view", "resource:update"]
+        }
+      ]
+    },
+    {
+      "id": "profile-update-approval",
+      "name": "Profile Update Approval",
+      "base_api_prefix": "/api/profile-update-requests",
+      "icon": "clipboard-check",
+      "pages": [
+        {
+          "id": "profile-update-request-form",
+          "name": "Profile Update Request",
+          "frontend_route": "/profile-update-requests/new",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:submit"]
+        },
+        {
+          "id": "profile-update-approvals",
+          "name": "Profile Update Approvals",
+          "frontend_route": "/approvals/profile-updates",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:review", "resource:approve", "resource:reject"]
+        },
+        {
+          "id": "profile-permission-config",
+          "name": "Profile Permission Configuration",
+          "frontend_route": "/settings/profile-permissions",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:list", "resource:update", "resource:seed"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "profile-update-request",
+          "name": "Profile Update Request",
+          "entity": "approval_requests/profile_update",
+          "supported_actions": ["submit", "approve_item", "reject_item", "approve_all", "reject_all", "view"],
+          "permissions": ["resource:submit", "resource:view", "resource:review", "resource:approve", "resource:reject"]
+        },
+        {
+          "id": "profile-update-item",
+          "name": "Profile Update Item",
+          "entity": "approval_items/profile_update",
+          "supported_actions": ["list", "view", "approve", "reject"],
+          "permissions": ["resource:list", "resource:view", "resource:approve", "resource:reject"]
+        },
+        {
+          "id": "employee-profile-permission",
+          "name": "Employee Profile Permission",
+          "entity": "employee_profile_permissions",
+          "supported_actions": ["list", "seed_defaults", "upsert", "replace", "view_updatable_columns"],
+          "permissions": ["resource:list", "resource:seed", "resource:update", "resource:view"]
+        }
+      ]
+    },
+    {
+      "id": "setup",
+      "name": "Setup",
+      "base_api_prefix": "/api/setups",
+      "icon": "settings-2",
+      "pages": [
+        {
+          "id": "setup-wizard",
+          "name": "Setup Wizard",
+          "frontend_route": "/setup",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:initialize", "resource:create", "resource:update"]
+        },
+        {
+          "id": "setup-workflows",
+          "name": "Workflow Setup",
+          "frontend_route": "/setup/workflows",
+          "guard": "admin",
+          "permissions": ["page:view", "workflow:view", "workflow:create", "workflow:update", "workflow:activate"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "setup-initialization",
+          "name": "Setup Initialization",
+          "entity": "setup_tables",
+          "supported_actions": ["initialize", "overview", "bootstrap"],
+          "permissions": ["resource:initialize", "resource:view", "resource:create"]
+        },
+        {
+          "id": "approval-workflow-definition",
+          "name": "Approval Workflow Definition",
+          "entity": "setup_approval_workflows",
+          "supported_actions": ["list", "view", "create", "update", "activate", "deactivate"],
+          "permissions": ["workflow:view", "workflow:create", "workflow:update", "workflow:activate", "workflow:deactivate"]
+        },
+        {
+          "id": "approval-workflow-step",
+          "name": "Approval Workflow Step",
+          "entity": "setup_approval_workflow_steps",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "setup-approval-request",
+          "name": "Setup Approval Request",
+          "entity": "setup_approval_requests",
+          "supported_actions": ["submit", "list", "view", "review", "approve", "reject"],
+          "permissions": ["resource:submit", "resource:list", "resource:view", "resource:review", "resource:approve", "resource:reject"]
+        },
+        {
+          "id": "setup-approval-action",
+          "name": "Setup Approval Action",
+          "entity": "setup_approval_actions",
+          "supported_actions": ["create", "list", "view"],
+          "permissions": ["resource:create", "resource:list", "resource:view"]
+        }
+      ]
+    },
+    {
+      "id": "org-structure",
+      "name": "Organization Structure",
+      "icon": "network",
+      "pages": [
+        {
+          "id": "departments",
+          "name": "Departments",
+          "frontend_route": "/departments",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list"]
+        },
+        {
+          "id": "office-locations",
+          "name": "Office Locations",
+          "frontend_route": "/office-locations",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list"]
+        },
+        {
+          "id": "job-roles",
+          "name": "Job Roles",
+          "frontend_route": "/job-roles",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list"]
+        },
+        {
+          "id": "grades",
+          "name": "Grades",
+          "frontend_route": "/grades",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "department",
+          "name": "Department",
+          "entity": "departments",
+          "api_prefix": "/api/departments",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "office-location",
+          "name": "Office Location",
+          "entity": "organization_location",
+          "api_prefix": "/api/office-locations",
+          "supported_actions": ["list", "view", "create", "update", "mark_headquarter", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "job-role",
+          "name": "Job Role",
+          "entity": "job_roles",
+          "api_prefix": "/api/job-roles",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "job-role-required-document",
+          "name": "Job Role Required Document",
+          "entity": "job_role_required_documents",
+          "api_prefix": "/api/job-roles/:jobRoleId/required-documents",
+          "supported_actions": ["list", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "grade",
+          "name": "Grade",
+          "entity": "grades",
+          "api_prefix": "/api/grades",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        }
+      ]
+    },
+    {
+      "id": "compensation",
+      "name": "Compensation",
+      "icon": "wallet",
+      "pages": [
+        {
+          "id": "benefit-levels",
+          "name": "Benefit Levels",
+          "frontend_route": "/benefit-levels",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list"]
+        },
+        {
+          "id": "pay-grades",
+          "name": "Pay Grades",
+          "frontend_route": "/pay-grades",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list"]
+        },
+        {
+          "id": "pay-groups",
+          "name": "Pay Groups",
+          "frontend_route": "/pay-groups",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list"]
+        },
+        {
+          "id": "payroll-runs",
+          "name": "Payroll",
+          "frontend_route": "/payroll",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list", "resource:create", "resource:review"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "benefit-level",
+          "name": "Benefit Level",
+          "entity": "benefit_levels",
+          "api_prefix": "/api/benefit-levels",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "pay-grade",
+          "name": "Pay Grade",
+          "entity": "pay_grades",
+          "api_prefix": "/api/pay-grades",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "pay-group",
+          "name": "Pay Group",
+          "entity": "pay_groups",
+          "api_prefix": "/api/pay-groups",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "payroll-run",
+          "name": "Payroll Run",
+          "entity": "payroll_runs",
+          "api_prefix": "/api/payroll",
+          "supported_actions": ["initialize", "submit", "approve", "reject", "lock_in", "distribute", "adjust", "notify", "list", "view"],
+          "permissions": ["resource:create", "resource:submit", "resource:approve", "resource:reject", "resource:notify", "resource:list", "resource:view"]
+        },
+        {
+          "id": "payroll-adjustment",
+          "name": "Payroll Adjustment",
+          "entity": "payroll_adjustments",
+          "supported_actions": ["create", "update", "delete", "list", "view"],
+          "permissions": ["resource:create", "resource:update", "resource:delete", "resource:list", "resource:view"]
+        }
+      ]
+    },
+    {
+      "id": "leave",
+      "name": "Leave Management",
+      "base_api_prefix": "/api/leave-requests",
+      "icon": "calendar-days",
+      "pages": [
+        {
+          "id": "leave-request-form",
+          "name": "Request Leave",
+          "frontend_route": "/leave-requests/new",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:submit"]
+        },
+        {
+          "id": "leave-my-requests",
+          "name": "My Leave Requests",
+          "frontend_route": "/leave-requests",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list", "resource:view"]
+        },
+        {
+          "id": "leave-approvals",
+          "name": "Leave Approvals",
+          "frontend_route": "/approvals/leave-requests",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:review", "resource:approve", "resource:reject", "resource:notify"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "leave-request",
+          "name": "Leave Request",
+          "entity": "leave_requests",
+          "supported_actions": ["create", "list_mine", "view", "approve", "reject", "send_reminder"],
+          "permissions": ["resource:submit", "resource:list", "resource:view", "resource:approve", "resource:reject", "resource:notify"]
+        }
+      ]
+    },
+    {
+      "id": "documentation",
+      "name": "Documentation",
+      "base_api_prefix": "/api/documentations",
+      "icon": "file-text",
+      "pages": [
+        {
+          "id": "document-library",
+          "name": "Document Library",
+          "frontend_route": "/documents",
+          "guard": "authenticated",
+          "permissions": ["page:view", "resource:list", "resource:view", "resource:download"]
+        },
+        {
+          "id": "document-approvals",
+          "name": "Document Approvals",
+          "frontend_route": "/approvals/documents",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:review", "resource:approve", "resource:reject"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "document",
+          "name": "Document",
+          "entity": "documents",
+          "supported_actions": ["upload", "list", "view", "download", "approve", "reject", "delete"],
+          "permissions": ["resource:upload", "resource:list", "resource:view", "resource:download", "resource:approve", "resource:reject", "resource:delete"]
+        },
+        {
+          "id": "document-version",
+          "name": "Document Version",
+          "entity": "document_versions",
+          "supported_actions": ["list", "view", "approve", "reject"],
+          "permissions": ["resource:list", "resource:view", "resource:approve", "resource:reject"]
+        },
+        {
+          "id": "document-type",
+          "name": "Document Type",
+          "entity": "document_types",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        }
+      ]
+    },
+    {
+      "id": "rbac",
+      "name": "Role Based Access Control",
+      "base_api_prefix": "/api/role-permissions",
+      "icon": "key-round",
+      "pages": [
+        {
+          "id": "system-roles",
+          "name": "System Roles",
+          "frontend_route": "/access/roles",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:list", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "system-resources",
+          "name": "System Resources",
+          "frontend_route": "/access/resources",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:list", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "role-assignment",
+          "name": "Role Assignment",
+          "frontend_route": "/access/assignments",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:assign", "resource:view"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "system-role",
+          "name": "System Role",
+          "entity": "system_roles",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "system-resource",
+          "name": "System Resource",
+          "entity": "system_resources",
+          "supported_actions": ["list", "view", "create", "update", "delete"],
+          "permissions": ["resource:list", "resource:view", "resource:create", "resource:update", "resource:delete"]
+        },
+        {
+          "id": "job-role-system-role-mapping",
+          "name": "Job Role to System Role Mapping",
+          "entity": "job_role_system_roles",
+          "supported_actions": ["assign_roles", "list_assigned_roles"],
+          "permissions": ["resource:assign", "resource:view"]
+        },
+        {
+          "id": "role-resource-mapping",
+          "name": "Role to Resource Mapping",
+          "entity": "role_resources",
+          "supported_actions": ["assign_resources", "list_assigned_resources"],
+          "permissions": ["resource:assign", "resource:view"]
+        }
+      ]
+    },
+    {
+      "id": "system-configuration",
+      "name": "System Configuration",
+      "base_api_prefix": "/api/system-configuration",
+      "icon": "sliders-horizontal",
+      "pages": [
+        {
+          "id": "system-settings",
+          "name": "System Settings",
+          "frontend_route": "/settings/system",
+          "guard": "admin",
+          "permissions": ["page:view", "resource:view", "resource:create", "resource:update"]
+        }
+      ],
+      "resources": [
+        {
+          "id": "system-config",
+          "name": "System Configuration",
+          "entity": "system_configurations",
+          "supported_actions": ["view", "create", "update"],
+          "permissions": ["resource:view", "resource:create", "resource:update"]
+        }
+      ]
+    }
+  ],
+  "resource_statuses": {
+    "approval_status": ["pending", "partially_approved", "approved", "rejected"],
+    "document_status": ["pending", "approved", "rejected"],
+    "workflow_status": ["active", "inactive"],
+    "employment_status": ["probation", "active", "inactive", "terminated"],
+    "boolean_flags": [true, false]
+  },
+  "workflow_types": [
+    "BENEFIT_LEVEL",
+    "BENEFIT_ALLOWANCE",
+    "PAYROLL",
+    "PAYROLL_SUBMISSION",
+    "PAYROLL_LOCK_IN",
+    "PAYROLL_DISTRIBUTION",
+    "PAYROLL_ADJUSTMENT",
+    "LEAVE_TYPE",
+    "LEAVE_REQUEST",
+    "DOCUMENT_UPLOAD",
+    "EMPLOYEE_UPDATE",
+    "PROFILE_UPDATE"
+  ],
+  "navigation_groups": [
+    {
+      "id": "core",
+      "name": "Core",
+      "module_ids": ["authentication", "organizations", "user-management", "profile"]
+    },
+    {
+      "id": "people",
+      "name": "People",
+      "module_ids": ["org-structure", "leave", "profile-update-approval"]
+    },
+    {
+      "id": "payroll",
+      "name": "Payroll",
+      "module_ids": ["compensation"]
+    },
+    {
+      "id": "operations",
+      "name": "Operations",
+      "module_ids": ["documentation", "setup", "system-configuration", "rbac"]
+    }
+  ]
+}

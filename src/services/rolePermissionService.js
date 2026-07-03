@@ -8,10 +8,23 @@ export const rolePermissionService = {
     api.post(`/api/role-permissions/system-roles/${roleId}/resources`, { resources }),
 
   getJobRoles: () => api.get('/api/job-roles/'),
+  getJobRoleResources: (jobRoleId) =>
+    api
+      .get(`/api/role-permissions/job-roles/${jobRoleId}/resources`)
+      .then((res) => (Array.isArray(res) ? res : res?.resources || [])),
+  setJobRoleResources: (jobRoleId, resources) =>
+    api.post(`/api/role-permissions/job-roles/${jobRoleId}/resources`, { resources }),
   getJobRoleRoles: (jobRoleId) =>
     api.get(`/api/role-permissions/job-roles/${jobRoleId}/roles`),
   setJobRoleRoles: (jobRoleId, roleIds) =>
     api.post(`/api/role-permissions/job-roles/${jobRoleId}/roles`, { role_ids: roleIds }),
+  listUsers: (params = {}) => {
+    const page = params.page ?? 1;
+    const limit = params.limit ?? 300;
+    return api.get(`/api/users/?page=${page}&limit=${limit}`);
+  },
+  assignUserJobRole: (userId, jobRoleId) =>
+    api.put(`/api/users/${userId}`, { job_role_id: jobRoleId || null }),
 };
 
 export const EMPTY_PERMS = {

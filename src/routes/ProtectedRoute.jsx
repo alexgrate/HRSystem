@@ -1,13 +1,16 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useCan } from '../context/PermissionContext';
+import { usePermissions } from '../context/PermissionContext';
 
 
-const ProtectedRoute = ({ children, resource = null, action = 'read' }) => {
+const ProtectedRoute = ({ children, resource = null, action = 'read', checks = null }) => {
   const { user, loading } = useAuth();
+  const { can, canAccess } = usePermissions();
   const location = useLocation();
-  const allowed = useCan(resource, action);
+  const allowed = Array.isArray(checks) && checks.length
+    ? canAccess(checks, 'any')
+    : can(resource, action);
 
   if (loading) {
     return (

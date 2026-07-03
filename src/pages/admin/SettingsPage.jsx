@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Check, ShieldAlert, ShieldCheck, GitBranch } from "lucide-react";
+import { Check, ShieldAlert, ShieldCheck, Users, Search, X } from "lucide-react";
 import {
   rolePermissionService,
   EMPTY_PERMS,
@@ -9,6 +9,7 @@ import {
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
+import { getEmployeeName } from "../../utils/employee";
 
 const ACTIVE_CLASSES = {
   can_read: "border-emerald-500 bg-emerald-500 text-white",
@@ -20,26 +21,26 @@ const ACTIVE_CLASSES = {
 const INACTIVE_CLASS = "border-slate-200 bg-white text-slate-400 hover:border-slate-400";
 
 const VIEWS = [
-  { key: "permissions", label: "Permissions", Icon: ShieldCheck },
-  { key: "mapping", label: "Role Mapping", Icon: GitBranch },
+  { key: "job-title-resources", label: "Job Title Resources", Icon: ShieldCheck },
+  { key: "user-job-titles", label: "User Job Titles", Icon: Users },
 ];
 
 export function SettingsPage() {
-  const [view, setView] = useState("permissions");
+  const [view, setView] = useState("job-title-resources");
 
   return (
     <div className="space-y-6">
       <div>
         <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60]">Platform Security</div>
-        <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Users &amp; Permissions</h1>
+        <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900"> Roles Permissions</h1>
         <p className="mt-1 text-sm text-slate-500">
-          {view === "permissions"
-            ? "Assign Create / Read / Update / Delete / Manage rights per system resource, for each role."
-            : "Map each job title to the system roles it carries. Employees inherit permissions from their job title’s roles."}
+          {view === "job-title-resources"
+            ? "Directly assign system resources to each job title with fully customizable permissions."
+            : "Assign job titles to users. Users inherit all resource permissions from their assigned job title."}
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm w-fit">
+      {/* <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm w-fit">
         {VIEWS.map((v) => {
           const Icon = v.Icon;
           return (
@@ -51,44 +52,39 @@ export function SettingsPage() {
               }`}
             >
               {view === v.key && (
-                <motion.div layoutId="settings-tab" className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#4f1a60] to-[#8a2da8]" transition={{ type: "spring", stiffness: 400, damping: 32 }} />
+                <motion.div
+                  layoutId="settings-tab"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#4f1a60] to-[#8a2da8]"
+                  transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                />
               )}
               <Icon className="relative h-3.5 w-3.5" />
               <span className="relative">{v.label}</span>
             </button>
           );
         })}
-      </div>
+      </div> */}
 
-      {/* Both stay mounted so switching tabs doesn't refire the per-role
-          permission loads — only visibility changes. */}
-      <div className={view === "permissions" ? "" : "hidden"}><PermissionsMatrix /></div>
-      <div className={view === "mapping" ? "" : "hidden"}><RoleMappingMatrix /></div>
+      <div className={view === "job-title-resources" ? "" : "hidden"}><JobTitleResourceMatrix /></div>
+      <div className={view === "user-job-titles" ? "" : "hidden"}><UserJobTitleAssignment /></div>
     </div>
   );
 }
 
-// ── Tab 1: system role × resource (C/R/U/D/Manage) ──────────────────────────
-function PermissionsMatrix() {
+function JobTitleResourceMatrix() {
   const { can } = usePermissions();
   const toast = useToast();
-  const canManage = can(RESOURCE_CODES.ROLE_PERMISSIONS, "manage");
-  const [roles, setRoles] = useState([]);
+  const canManage = can(RESOURCE_CODES.ROLE_PERMISSIONS, "assign") || can(RESOURCE_CODES.ROLE_PERMISSIONS, "manage");
+
+  const [jobRoles, setJobRoles] = useState([]);
   const [resources, setResources] = useState([]);
-  const [matrix, setMatrix] = useState({});
+  const [matrixByJobRole, setMatrixByJobRole] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [savingRole, setSavingRole] = useState(null);
-
-  // matrixRef always holds the freshest matrix so save payloads are never
-  // built from a stale render snapshot; saveQueues serializes saves per role
-  // so overlapping full-set POSTs can't overwrite each other server-side.
-  const matrixRef = useRef({});
-  const saveQueues = useRef({});
-  const applyMatrix = (next) => {
-    matrixRef.current = next;
-    setMatrix(next);
-  };
+  const [activeJobRole, setActiveJobRole] = useState(null);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalSaving, setModalSaving] = useState(false);
+  const [modalDraft, setModalDraft] = useState({});
 
   useEffect(() => {
     const load = async () => {
@@ -96,42 +92,24 @@ function PermissionsMatrix() {
       setError(null);
       try {
         const [rolesList, resourcesList] = await Promise.all([
-          rolePermissionService.getSystemRoles(),
+          rolePermissionService.getJobRoles(),
           rolePermissionService.getSystemResources(),
         ]);
-        const activeRoles = rolesList || [];
+
+        const activeJobRoles = rolesList || [];
         const activeResources = resourcesList || [];
-        setRoles(activeRoles);
+        setJobRoles(activeJobRoles);
         setResources(activeResources);
 
-        const matrixMap = {};
-        await Promise.all(
-          activeRoles.map(async (role) => {
-            matrixMap[role.id] = {};
-            try {
-              const assigned = await rolePermissionService.getRoleResources(role.id);
-              (assigned || []).forEach((res) => {
-                matrixMap[role.id][res.resource_id] = {
-                  can_read: !!res.can_read,
-                  can_create: !!res.can_create,
-                  can_update: !!res.can_update,
-                  can_delete: !!res.can_delete,
-                  can_manage: !!res.can_manage,
-                };
-              });
-            } catch (err) {
-              console.error(`Error loading permissions for role ${role.name}:`, err);
-            }
-          })
-        );
-        applyMatrix(matrixMap);
+        setMatrixByJobRole({});
       } catch (err) {
-        console.error("[SettingsPage] Error loading permissions matrix:", err);
-        setError(err?.message || "Failed to load the permission matrix.");
+        console.error("[SettingsPage] Error loading job-role resource matrix:", err);
+        setError(err?.message || "Failed to load the job title resource matrix.");
       } finally {
         setLoading(false);
       }
     };
+
     load();
   }, []);
 
@@ -145,47 +123,80 @@ function PermissionsMatrix() {
     return Array.from(groups.entries());
   }, [resources]);
 
-  const toggle = (roleId, resourceId, actionKey) => {
-    if (!canManage) return;
-    const current = matrixRef.current[roleId]?.[resourceId] || EMPTY_PERMS;
-    const nextCell = { ...current, [actionKey]: !current[actionKey] };
-    applyMatrix({
-      ...matrixRef.current,
-      [roleId]: { ...matrixRef.current[roleId], [resourceId]: nextCell },
-    });
-    setSavingRole({ roleId, resourceId });
+  const normalizePermCell = (res) => ({
+    can_read: !!(res.can_read ?? res.canRead),
+    can_create: !!(res.can_create ?? res.canCreate),
+    can_update: !!(res.can_update ?? res.canUpdate ?? res.canModify),
+    can_delete: !!(res.can_delete ?? res.canDelete),
+    can_manage: !!(res.can_manage ?? res.canManage),
+  });
 
-    const run = async () => {
-      // Build the payload at send time from the freshest state, so a queued
-      // save includes every toggle applied before it.
-      const roleMatrix = matrixRef.current[roleId] || {};
-      const fullSet = resources.map((res) => ({
+  const ensureJobRoleLoaded = async (jobRoleId) => {
+    if (matrixByJobRole[jobRoleId]) return matrixByJobRole[jobRoleId];
+    const nextMap = {};
+    const assigned = await rolePermissionService.getJobRoleResources(jobRoleId);
+    (assigned || []).forEach((res) => {
+      nextMap[res.resource_id] = normalizePermCell(res);
+    });
+    setMatrixByJobRole((prev) => ({ ...prev, [jobRoleId]: nextMap }));
+    return nextMap;
+  };
+
+  const openEditor = async (jobRole) => {
+    setActiveJobRole(jobRole);
+    setModalLoading(true);
+    try {
+      const loaded = await ensureJobRoleLoaded(jobRole.id);
+      setModalDraft(loaded);
+    } catch (err) {
+      toast.error(err?.message || "Failed to load resources for this job title.");
+      setActiveJobRole(null);
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const toggleDraft = (resourceId, actionKey) => {
+    if (!canManage) return;
+    const current = modalDraft[resourceId] || EMPTY_PERMS;
+    setModalDraft((prev) => ({
+      ...prev,
+      [resourceId]: { ...current, [actionKey]: !current[actionKey] },
+    }));
+  };
+
+  const saveDraft = async () => {
+    if (!activeJobRole || !canManage) return;
+    setModalSaving(true);
+    try {
+      const payload = resources.map((res) => ({
         resource_id: res.id,
         ...EMPTY_PERMS,
-        ...(roleMatrix[res.id] || {}),
+        ...(modalDraft[res.id] || {}),
       }));
-      await rolePermissionService.setRoleResources(roleId, fullSet);
-    };
+      await rolePermissionService.setJobRoleResources(activeJobRole.id, payload);
+      setMatrixByJobRole((prev) => ({ ...prev, [activeJobRole.id]: modalDraft }));
+      toast.success("Resource permissions updated.");
+      setActiveJobRole(null);
+    } catch (err) {
+      toast.error(err?.message || "Failed to save resource permissions.");
+    } finally {
+      setModalSaving(false);
+    }
+  };
 
-    const prevQueue = saveQueues.current[roleId] || Promise.resolve();
-    saveQueues.current[roleId] = prevQueue
-      .then(run, run)
-      .catch((err) => {
-        console.error("[SettingsPage] Save failed, reverting:", err);
-        // Revert only the failed cell — never a whole-matrix snapshot, which
-        // would clobber other toggles made in the meantime.
-        applyMatrix({
-          ...matrixRef.current,
-          [roleId]: { ...matrixRef.current[roleId], [resourceId]: current },
-        });
-        toast.error(err?.message || "Failed to update permission. Reverted.");
-      })
-      .finally(() => setSavingRole(null));
+  const assignedCount = (jobRoleId) => {
+    const roleMatrix = matrixByJobRole[jobRoleId];
+    if (!roleMatrix) return null;
+    return Object.values(roleMatrix).filter((cell) =>
+      PERMISSION_ACTIONS.some((a) => !!cell[a.key])
+    ).length;
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Loading permission matrix…</div>;
+    return <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Loading job title resource matrix...</div>;
   }
+
   if (error) {
     return (
       <div className="p-12 text-center border border-dashed border-red-200 rounded-2xl bg-red-50/40">
@@ -194,12 +205,13 @@ function PermissionsMatrix() {
       </div>
     );
   }
-  if (resources.length === 0 || roles.length === 0) {
+
+  if (resources.length === 0 || jobRoles.length === 0) {
     return (
       <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
         <ShieldAlert className="mx-auto h-12 w-12 text-slate-300" />
-        <h3 className="mt-4 text-sm font-semibold text-slate-900">No roles or resources configured</h3>
-        <p className="mt-1 text-xs text-slate-500">Initialize your backend setup tables to populate the security matrix.</p>
+        <h3 className="mt-4 text-sm font-semibold text-slate-900">No resources or job titles configured</h3>
+        <p className="mt-1 text-xs text-slate-500">Create job titles first, then configure resource access here.</p>
       </div>
     );
   }
@@ -208,62 +220,34 @@ function PermissionsMatrix() {
     <div className="space-y-4">
       {!canManage && (
         <div className="inline-flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 border border-amber-200">
-          <ShieldAlert className="h-3.5 w-3.5" /> Read-only — you need Manage rights on Role Permissions to edit.
+          <ShieldAlert className="h-3.5 w-3.5" /> Read-only - you need Assign or Manage rights on Role Permissions.
         </div>
       )}
-      <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50/60">
-              <tr>
-                <th className="sticky left-0 z-10 bg-slate-50/60 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Resource</th>
-                {roles.map((r) => (
-                  <th key={r.id} className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#4f1a60] capitalize">{r.name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {groupedResources.map(([moduleName, mods]) => (
-                <React.Fragment key={moduleName}>
-                  <tr className="bg-slate-50/40">
-                    <td colSpan={roles.length + 1} className="px-4 py-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">{moduleName}</td>
-                  </tr>
-                  {mods.map((f, i) => (
-                    <motion.tr key={f.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.015 }} className="border-t border-slate-100">
-                      <td className="sticky left-0 z-10 bg-white px-4 py-3 font-semibold text-slate-800">
-                        <div>{f.name}</div>
-                        <div className="text-[10px] font-mono font-normal text-slate-400 uppercase tracking-wider mt-0.5">{f.code}</div>
-                      </td>
-                      {roles.map((r) => {
-                        const perms = matrix[r.id]?.[f.id] || EMPTY_PERMS;
-                        const isSaving = savingRole?.roleId === r.id && savingRole?.resourceId === f.id;
-                        return (
-                          <td key={r.id} className="px-3 py-3">
-                            <div className={`flex justify-center gap-1 transition-opacity ${isSaving ? "opacity-40 pointer-events-none" : ""}`}>
-                              {PERMISSION_ACTIONS.map((action) => {
-                                const on = perms[action.key];
-                                return (
-                                  <button
-                                    key={action.key}
-                                    title={action.label}
-                                    disabled={!canManage}
-                                    onClick={() => toggle(r.id, f.id, action.key)}
-                                    className={`flex h-7 w-7 items-center justify-center rounded-md border text-[10px] font-bold transition-all ${on ? ACTIVE_CLASSES[action.key] : INACTIVE_CLASS} ${!canManage ? "cursor-not-allowed opacity-60" : ""}`}
-                                  >
-                                    {on ? <Check className="h-3 w-3" /> : action.short}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </td>
-                        );
-                      })}
-                    </motion.tr>
-                  ))}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
+
+      <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm p-4 sm:p-5">
+        <div className="mb-4 text-xs text-slate-500">
+          Choose a job title, then assign resources in a focused editor.
+        </div>
+        <div className="space-y-2">
+          {jobRoles.map((jr) => {
+            const count = assignedCount(jr.id);
+            return (
+              <div key={jr.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-3">
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-900">{jr.title}</div>
+                  <div className="text-xs text-slate-500">
+                    {count === null ? "Permissions not loaded yet" : `${count} resources assigned`}
+                  </div>
+                </div>
+                <button
+                  onClick={() => openEditor(jr)}
+                  className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Assign Resources
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -275,101 +259,166 @@ function PermissionsMatrix() {
           </div>
         ))}
       </div>
+
+      {activeJobRole && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Assign Resources: {activeJobRole.title}</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Enable permissions per resource, then save.</p>
+              </div>
+              <button onClick={() => setActiveJobRole(null)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-5 overflow-y-auto max-h-[calc(90vh-138px)]">
+              {modalLoading ? (
+                <div className="p-10 text-center text-slate-500">Loading resources...</div>
+              ) : (
+                <div className="space-y-4">
+                  {groupedResources.map(([moduleName, mods]) => (
+                    <div key={moduleName} className="rounded-xl border border-slate-200 overflow-hidden">
+                      <div className="bg-slate-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">{moduleName}</div>
+                      <div className="divide-y divide-slate-100">
+                        {mods.map((resource) => {
+                          const perms = modalDraft[resource.id] || EMPTY_PERMS;
+                          return (
+                            <div key={resource.id} className="px-3 py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                              <div>
+                                <div className="text-sm font-semibold text-slate-900">{resource.name}</div>
+                                <div className="text-[11px] text-slate-500 font-mono">{resource.code}</div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {PERMISSION_ACTIONS.map((action) => {
+                                  const on = perms[action.key];
+                                  return (
+                                    <button
+                                      key={action.key}
+                                      title={action.label}
+                                      disabled={!canManage}
+                                      onClick={() => toggleDraft(resource.id, action.key)}
+                                      className={`flex h-8 w-8 items-center justify-center rounded-md border text-[10px] font-bold transition-all ${
+                                        on ? ACTIVE_CLASSES[action.key] : INACTIVE_CLASS
+                                      } ${!canManage ? "cursor-not-allowed opacity-60" : ""}`}
+                                    >
+                                      {on ? <Check className="h-3 w-3" /> : action.short}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3">
+              <button
+                onClick={() => setActiveJobRole(null)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveDraft}
+                disabled={!canManage || modalLoading || modalSaving}
+                className="rounded-lg bg-[#4f1a60] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+              >
+                {modalSaving ? "Saving..." : "Save Permissions"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── Tab 2: job role × system role (the missing link) ────────────────────────
-function RoleMappingMatrix() {
+function UserJobTitleAssignment() {
   const { can } = usePermissions();
   const toast = useToast();
-  const canManage = can(RESOURCE_CODES.ROLE_MAPPING, "manage");
-  const [systemRoles, setSystemRoles] = useState([]);
-  const [jobRoles, setJobRoles] = useState([]);
-  const [map, setMap] = useState({}); // { [jobRoleId]: Set(systemRoleId) }
+
+  const canManage = can(RESOURCE_CODES.EMPLOYEES, "update") || can(RESOURCE_CODES.ROLE_MAPPING, "assign");
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [saving, setSaving] = useState(null);
-
-  // Same freshest-state + per-row queue discipline as PermissionsMatrix.
-  const mapRef = useRef({});
-  const saveQueues = useRef({});
-  const applyMap = (next) => {
-    mapRef.current = next;
-    setMap(next);
-  };
+  const [savingId, setSavingId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [jobRoles, setJobRoles] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [drafts, setDrafts] = useState({});
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
-        const [sysRoles, jRoles] = await Promise.all([
-          rolePermissionService.getSystemRoles(),
+        const [rolesRes, usersRes] = await Promise.all([
           rolePermissionService.getJobRoles(),
+          rolePermissionService.listUsers({ page: 1, limit: 500 }),
         ]);
-        const activeSys = sysRoles || [];
-        const activeJobs = jRoles || [];
-        setSystemRoles(activeSys);
-        setJobRoles(activeJobs);
 
-        const mapping = {};
-        await Promise.all(
-          activeJobs.map(async (jr) => {
-            mapping[jr.id] = new Set();
-            try {
-              const assigned = await rolePermissionService.getJobRoleRoles(jr.id);
-              (assigned || []).forEach((r) => {
-                const id = r.role_id || r.system_role_id || r.system_role?.id || r.id;
-                if (id) mapping[jr.id].add(id);
-              });
-            } catch (err) {
-              console.error(`Error loading roles for job role ${jr.title}:`, err);
-            }
-          })
-        );
-        applyMap(mapping);
+        const allRoles = rolesRes || [];
+        const userRows = Array.isArray(usersRes) ? usersRes : usersRes?.users || [];
+
+        setJobRoles(allRoles);
+        setUsers(userRows);
+
+        const nextDrafts = {};
+        userRows.forEach((user) => {
+          nextDrafts[user.id] = user.job_role_id || "";
+        });
+        setDrafts(nextDrafts);
       } catch (err) {
-        console.error("[RoleMapping] Load failed:", err);
-        setError(err?.message || "Failed to load role mapping.");
+        console.error("[SettingsPage] Failed to load user job-title assignment data:", err);
+        setError(err?.message || "Failed to load users and job titles.");
       } finally {
         setLoading(false);
       }
     };
+
     load();
   }, []);
 
-  const toggle = (jobRoleId, systemRoleId) => {
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) => {
+      const name = getEmployeeName(u, "").toLowerCase();
+      const email = (u.email || "").toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
+  }, [search, users]);
+
+  const jobRoleName = (jobRoleId) => jobRoles.find((r) => r.id === jobRoleId)?.title || "Unassigned";
+
+  const save = async (userId) => {
     if (!canManage) return;
-    const before = new Set(mapRef.current[jobRoleId] || []);
-    const next = new Set(before);
-    if (next.has(systemRoleId)) next.delete(systemRoleId);
-    else next.add(systemRoleId);
+    const nextJobRoleId = drafts[userId] || null;
 
-    applyMap({ ...mapRef.current, [jobRoleId]: next });
-    setSaving(`${jobRoleId}:${systemRoleId}`);
-
-    const run = async () => {
-      // Read at send time so queued saves include earlier toggles on this row.
-      const roleIds = Array.from(mapRef.current[jobRoleId] || []);
-      await rolePermissionService.setJobRoleRoles(jobRoleId, roleIds);
-    };
-
-    const prevQueue = saveQueues.current[jobRoleId] || Promise.resolve();
-    saveQueues.current[jobRoleId] = prevQueue
-      .then(run, run)
-      .catch((err) => {
-        console.error("[RoleMapping] Save failed, reverting:", err);
-        // Revert only this row, not the whole map.
-        applyMap({ ...mapRef.current, [jobRoleId]: before });
-        toast.error(err?.message || "Failed to update role mapping. Reverted.");
-      })
-      .finally(() => setSaving(null));
+    setSavingId(userId);
+    try {
+      await rolePermissionService.assignUserJobRole(userId, nextJobRoleId);
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, job_role_id: nextJobRoleId } : u)));
+      toast.success("Job title assignment saved.");
+    } catch (err) {
+      console.error("[SettingsPage] Failed to save user job-title assignment:", err);
+      toast.error(err?.message || "Failed to save assignment.");
+    } finally {
+      setSavingId(null);
+    }
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Loading role mapping…</div>;
+    return <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Loading user assignments...</div>;
   }
+
   if (error) {
     return (
       <div className="p-12 text-center border border-dashed border-red-200 rounded-2xl bg-red-50/40">
@@ -378,68 +427,89 @@ function RoleMappingMatrix() {
       </div>
     );
   }
-  if (jobRoles.length === 0) {
-    return (
-      <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
-        <ShieldAlert className="mx-auto h-12 w-12 text-slate-300" />
-        <h3 className="mt-4 text-sm font-semibold text-slate-900">No job titles yet</h3>
-        <p className="mt-1 text-xs text-slate-500">Create job titles under Directory → Job Titles first, then map them here.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4">
       {!canManage && (
         <div className="inline-flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 border border-amber-200">
-          <ShieldAlert className="h-3.5 w-3.5" /> Read-only — you need Manage rights to edit role mapping.
+          <ShieldAlert className="h-3.5 w-3.5" /> Read-only - you need Employee Update or Role Mapping Assign rights.
         </div>
       )}
+
       <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+        <div className="border-b border-slate-100 p-4">
+          <div className="flex min-w-[240px] items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search users by name or email..."
+              className="w-full bg-transparent outline-none placeholder:text-slate-400"
+            />
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50/60">
+            <thead className="bg-slate-50/60 text-xs uppercase tracking-wider text-slate-500">
               <tr>
-                <th className="sticky left-0 z-10 bg-slate-50/60 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Job Title</th>
-                {systemRoles.map((r) => (
-                  <th key={r.id} className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#4f1a60] capitalize">{r.name}</th>
-                ))}
+                <th className="px-4 py-3 text-left font-semibold">User</th>
+                <th className="px-4 py-3 text-left font-semibold">Current Job Title</th>
+                <th className="px-4 py-3 text-left font-semibold">Assign Job Title</th>
+                <th className="px-4 py-3 text-right font-semibold">Action</th>
               </tr>
             </thead>
             <tbody>
-              {jobRoles.map((jr, i) => (
-                <motion.tr key={jr.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.015 }} className="border-t border-slate-100">
-                  <td className="sticky left-0 z-10 bg-white px-4 py-3 font-semibold text-slate-800">
-                    <div>{jr.title}</div>
-                    {jr.code && <div className="text-[10px] font-mono font-normal text-slate-400 uppercase tracking-wider mt-0.5">{jr.code}</div>}
-                  </td>
-                  {systemRoles.map((r) => {
-                    const on = map[jr.id]?.has(r.id);
-                    const isSaving = saving === `${jr.id}:${r.id}`;
-                    return (
-                      <td key={r.id} className="px-3 py-3 text-center">
-                        <button
-                          disabled={!canManage}
-                          onClick={() => toggle(jr.id, r.id)}
-                          title={on ? "Remove role" : "Assign role"}
-                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-[10px] font-bold transition-all ${
-                            on ? "border-[#4f1a60] bg-[#4f1a60] text-white" : INACTIVE_CLASS
-                          } ${!canManage ? "cursor-not-allowed opacity-60" : ""} ${isSaving ? "opacity-40 pointer-events-none" : ""}`}
+              {filteredUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-slate-400">No users found.</td>
+                </tr>
+              ) : (
+                filteredUsers.map((user) => {
+                  const draftValue = drafts[user.id] || "";
+                  const changed = (user.job_role_id || "") !== draftValue;
+                  const busy = savingId === user.id;
+
+                  return (
+                    <tr key={user.id} className="border-t border-slate-100">
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-slate-900">{getEmployeeName(user, "Employee")}</div>
+                        <div className="text-xs text-slate-500">{user.email || "-"}</div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{jobRoleName(user.job_role_id)}</td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={draftValue}
+                          onChange={(e) => setDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                          disabled={!canManage || busy}
+                          className="h-10 min-w-[240px] rounded-xl border border-slate-200 bg-white px-3 outline-none focus:border-[#4f1a60] disabled:opacity-60"
                         >
-                          {on ? <Check className="h-3 w-3" /> : ""}
+                          <option value="">Unassigned</option>
+                          {jobRoles.map((role) => (
+                            <option key={role.id} value={role.id}>{role.title}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => save(user.id)}
+                          disabled={!canManage || !changed || busy}
+                          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-40"
+                        >
+                          {busy ? "Saving..." : "Apply"}
                         </button>
                       </td>
-                    );
-                  })}
-                </motion.tr>
-              ))}
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
+
       <p className="text-xs text-slate-500">
-        Tick a cell to give a job title that system role. Employees with that job title then inherit every
-        permission the role grants (from the Permissions tab).
+        Job titles determine each user's resource access profile. Assigning a new job title updates inherited permissions.
       </p>
     </div>
   );

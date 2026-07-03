@@ -90,7 +90,7 @@ const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMo
 
 const AppLayout = () => {
   const { user, logout } = useAuth();
-  const { can, isAdmin } = usePermissions();
+  const { can, canAccess, isAdmin } = usePermissions();
   const { config } = useConfig();
   const navigate = useNavigate();
   const location = useLocation();
@@ -102,7 +102,11 @@ const AppLayout = () => {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  const items = RESOURCES.filter((r) => can(r.resource, r.action || "read"));
+  const items = RESOURCES.filter((r) =>
+    Array.isArray(r.checks) && r.checks.length
+      ? canAccess(r.checks, "any")
+      : can(r.resource, r.action || "read")
+  );
 
   const name = displayName(user);
 

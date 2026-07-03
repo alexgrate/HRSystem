@@ -9,11 +9,27 @@ export const AuthProvider = ({ children }) => {
 
   const refreshUser = useCallback(async () => {
     const me = await api.get('/api/auth/me');
+    let roleResources = null;
+
+    try {
+      roleResources = await api.get('/api/role-permissions/me/resources');
+    } catch {
+      // Keep auth resilient while backend endpoints roll out in phases.
+      roleResources = null;
+    }
+
     // Some auth endpoints wrap the record ({ authUser } / { user }); permission
     // checks read is_admin/permissions off the top level, so unwrap here.
     const normalized = me?.authUser || me?.user || me;
-    setUser(normalized);
-    return normalized;
+    const permissionResources = roleResources?.resources || roleResources?.data?.resources || roleResources?.permissions || [];
+
+    const merged = {
+      ...normalized,
+      permissions: permissionResources.length ? permissionResources : (normalized?.permissions || []),
+      roleResources: permissionResources,
+    };
+    setUser(merged);
+    return merged;
   }, []);
 
   useEffect(() => {

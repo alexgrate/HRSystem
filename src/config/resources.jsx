@@ -10,6 +10,7 @@ import {
   Building2,
   Inbox,
 } from "lucide-react";
+import frontendResourceCatalog from "./frontend-resource-catalog.json";
 
 import DirectoryPage from "../pages/admin/DirectoryPage";
 import ESSPage from "../pages/ess/ESSPage";
@@ -21,6 +22,47 @@ import ApprovalsInboxPage from "../pages/admin/ApprovalsInboxPage";
 
 import { RESOURCE_CODES } from "./resourceCodes";
 export { RESOURCE_CODES };
+
+const CATALOG_ROUTE_RESOURCE = {
+  "/setup": RESOURCE_CODES.SETUP,
+  "/setup/workflows": RESOURCE_CODES.APPROVAL_WORKFLOWS,
+  "/users": RESOURCE_CODES.EMPLOYEES,
+  "/departments": RESOURCE_CODES.DEPARTMENTS,
+  "/office-locations": RESOURCE_CODES.OFFICE_LOCATIONS,
+  "/job-roles": RESOURCE_CODES.JOB_ROLES,
+  "/grades": RESOURCE_CODES.GRADES,
+  "/benefit-levels": RESOURCE_CODES.BENEFIT_LEVELS,
+  "/pay-grades": RESOURCE_CODES.PAY_GRADES,
+  "/pay-groups": RESOURCE_CODES.PAY_GROUPS,
+  "/payroll": RESOURCE_CODES.PAYROLL,
+  "/leave-requests": RESOURCE_CODES.LEAVE_REQUESTS,
+  "/approvals/leave-requests": RESOURCE_CODES.LEAVE_REQUESTS,
+  "/approvals/documents": RESOURCE_CODES.DOCUMENTS,
+  "/approvals/profile-updates": RESOURCE_CODES.PROFILE_UPDATE,
+  "/access/roles": RESOURCE_CODES.ROLE_PERMISSIONS,
+  "/access/resources": RESOURCE_CODES.ROLE_PERMISSIONS,
+  "/access/assignments": RESOURCE_CODES.ROLE_MAPPING,
+  "/settings/system": RESOURCE_CODES.SYSTEM_CONFIG,
+};
+
+const PAGE_PERMISSIONS_BY_ROUTE = new Map(
+  (frontendResourceCatalog?.modules || []).flatMap((moduleDef) =>
+    (moduleDef.pages || []).map((page) => [page.frontend_route, page.permissions || []])
+  )
+);
+
+function checkFromCatalogRoute(route) {
+  const resource = CATALOG_ROUTE_RESOURCE[route];
+  if (!resource) return null;
+  return {
+    resource,
+    permissions: PAGE_PERMISSIONS_BY_ROUTE.get(route) || [],
+  };
+}
+
+function checksFromRoutes(routes = []) {
+  return routes.map((route) => checkFromCatalogRoute(route)).filter(Boolean);
+}
 
 function ComingSoon({ label }) {
   return (
@@ -47,7 +89,8 @@ export const RESOURCES = [
     segment: "setup",
     Icon: Rocket,
     resource: RESOURCE_CODES.SETUP,
-    action: "read",
+    action: "create",
+    checks: checksFromRoutes(["/setup"]),
     component: OnboardingPage,
   },
   {
@@ -57,6 +100,16 @@ export const RESOURCES = [
     Icon: Users,
     resource: RESOURCE_CODES.EMPLOYEES,
     action: "read",
+    checks: checksFromRoutes([
+      "/users",
+      "/departments",
+      "/office-locations",
+      "/job-roles",
+      "/grades",
+      "/benefit-levels",
+      "/pay-grades",
+      "/pay-groups",
+    ]),
     component: DirectoryPage,
   },
   {
@@ -74,6 +127,7 @@ export const RESOURCES = [
     Icon: GitBranch,
     resource: RESOURCE_CODES.APPROVAL_WORKFLOWS,
     action: "read",
+    checks: checksFromRoutes(["/setup/workflows"]),
     component: WorkflowPage,
   },
   {
@@ -84,6 +138,11 @@ export const RESOURCES = [
     // The inbox multiplexes three approval types — access with any of them.
     resource: [RESOURCE_CODES.LEAVE_REQUESTS, RESOURCE_CODES.DOCUMENTS, RESOURCE_CODES.PROFILE_UPDATE],
     action: "read",
+    checks: checksFromRoutes([
+      "/approvals/leave-requests",
+      "/approvals/documents",
+      "/approvals/profile-updates",
+    ]),
     component: ApprovalsInboxPage,
   },
   {
@@ -93,6 +152,7 @@ export const RESOURCES = [
     Icon: Wallet,
     resource: RESOURCE_CODES.PAYROLL,
     action: "read",
+    checks: checksFromRoutes(["/payroll"]),
     component: () => <ComingSoon label="payroll" />,
   },
   {
@@ -102,6 +162,7 @@ export const RESOURCES = [
     Icon: CalendarDays,
     resource: RESOURCE_CODES.LEAVE_REQUESTS,
     action: "read",
+    checks: checksFromRoutes(["/leave-requests"]),
     component: () => <ComingSoon label="leave" />,
   },
   {
@@ -111,6 +172,7 @@ export const RESOURCES = [
     Icon: ShieldCheck,
     resource: RESOURCE_CODES.ROLE_PERMISSIONS,
     action: "read",
+    checks: checksFromRoutes(["/access/roles", "/access/resources", "/access/assignments"]),
     component: SettingsPage,
   },
   {
@@ -120,6 +182,7 @@ export const RESOURCES = [
     Icon: Building2,
     resource: RESOURCE_CODES.SYSTEM_CONFIG,
     action: "read",
+    checks: checksFromRoutes(["/settings/system"]),
     component: OrganizationSettingsPage,
   },
 ];
