@@ -20,7 +20,7 @@ export const rolePermissionService = {
     api.post(`/api/role-permissions/job-roles/${jobRoleId}/roles`, { role_ids: roleIds }),
   listUsers: (params = {}) => {
     const page = params.page ?? 1;
-    const limit = params.limit ?? 300;
+    const limit = Math.min(params.limit ?? 100, 100);
     return api.get(`/api/users/?page=${page}&limit=${limit}`);
   },
   assignUserJobRole: (userId, jobRoleId) =>

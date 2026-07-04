@@ -17,8 +17,6 @@ const fmtDate = (d) => {
   return s;
 };
 
-// Each tab carries its own services so load/act never dispatch on the wrong
-// endpoint, and a tab only renders if the user can read its resource.
 const TABS = [
   {
     key: "leave", label: "Leave Requests", Icon: CalendarDays,
@@ -43,8 +41,14 @@ const TABS = [
   },
 ];
 
-// Field-code → label for rendering a request's `changes` payload.
 const prettyField = (k) => k.replace(/_/g, " ");
+
+const changeEntries = (item) => {
+  const obj = item.changes || item.payload?.changes;
+  if (obj && typeof obj === "object") return Object.entries(obj);
+  const rows = item.items || item.request_items || [];
+  return rows.map((r) => [r.column || r.column_name || r.field || "field", r.new_value ?? r.value ?? ""]);
+};
 
 const ApprovalsInboxPage = () => {
   const { can } = usePermissions();
@@ -62,9 +66,7 @@ const ApprovalsInboxPage = () => {
 
   useEffect(() => {
     if (!activeTab) return;
-    // Stale guard: a slow response from a previously selected tab must never
-    // populate the current tab's list (its rows would be actioned against the
-    // wrong endpoints).
+
     let stale = false;
     setLoading(true);
     (async () => {
@@ -79,7 +81,7 @@ const ApprovalsInboxPage = () => {
       }
     })();
     return () => { stale = true; };
-  }, [activeTab?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab?.key]); 
 
   const act = async (item, action) => {
     const isApprove = action === "approve";
@@ -172,7 +174,7 @@ const ApprovalsInboxPage = () => {
                     <div className="mt-1 text-sm text-slate-600">
                       <span className="font-medium">Requested changes</span>
                       <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
-                        {Object.entries(item.changes || item.payload?.changes || {}).map(([k, v]) => (
+                        {changeEntries(item).map(([k, v]) => (
                           <li key={k}>
                             <span className="font-semibold capitalize text-slate-600">{prettyField(k)}:</span> {String(v)}
                           </li>

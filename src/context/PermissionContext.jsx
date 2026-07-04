@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthContext";
+import api from "../services/api";
 
 const PermissionContext = createContext(null);
 
@@ -121,21 +122,58 @@ export function PermissionProvider({ children }) {
   const { user } = useAuth();
   const mock = readMockPerms();
 
-  const isAdmin = mock
-    ? !!mock.isAdmin
-    : !!(user?.is_admin || user?.isAdmin);
+  const [tick, setTick] = useState(0);
+  const [loaded, setLoaded] = useState({ key: null, rows: null });
+  const reqKey = user ? `${user.id || user.auth_id || user.email || "user"}:${tick}` : null;
+
+  useEffect(() => {
+    if (!reqKey) return;
+    let stale = false;
+    (async () => {
+      let rows = null;
+      try {
+        const res = await api.get("/api/role-permissions/me/resources");
+        rows = Array.isArray(res) ? res : res?.resources || res?.permissions || res?.items || null;
+
+        if (Array.isArray(rows) && rows.length && rows.some((r) => !(r.resource_code || r.code || r.resource?.code))) {
+          try {
+            const cat = await api.get("/api/role-permissions/system-resources");
+            const catalog = Array.isArray(cat) ? cat : cat?.resources || [];
+            const codeById = Object.fromEntries(catalog.map((c) => [c.id, c.code]));
+            rows = rows.map((r) => ({
+              ...r,
+              resource_code: r.resource_code || r.code || r.resource?.code || codeById[r.resource_id],
+            }));
+          } catch (joinErr) {
+            console.error("[Permissions] Couldn't resolve resource codes from catalog:", joinErr);
+          }
+        }
+      } catch (err) {
+        console.error("[Permissions] Failed to load effective permissions:", err);
+      }
+      if (import.meta.env.DEV) {
+        console.info("[Permissions] user flags:", { is_admin: user?.is_admin, isAdmin: user?.isAdmin, role: user?.role });
+        console.info("[Permissions] effective rows:", rows);
+      }
+      if (!stale) setLoaded({ key: reqKey, rows: Array.isArray(rows) ? rows : null });
+    })();
+    return () => { stale = true; };
+  }, [reqKey]);
+
+  const isAdmin = mock ? !!mock.isAdmin : !!(user?.is_admin || user?.isAdmin);
 
   const permissionMap = useMemo(
-    () => buildPermissionMap(mock ? mock.permissions : user?.permissions),
-    [user, mock]
+    () => buildPermissionMap(mock ? mock.permissions : loaded.rows),
+    [mock, loaded]
   );
+
+  const ready = !user || !!mock || isAdmin || loaded.key === reqKey;
 
   const value = useMemo(() => {
     const can = (resourceCode, action = "read") => {
       if (!user) return false;
       if (isAdmin) return true;
       if (!resourceCode) return true;
-      // An array means "any of these resources grants access".
       if (Array.isArray(resourceCode)) return resourceCode.some((code) => can(code, action));
       const entry = permissionMap[String(resourceCode).toUpperCase()];
       if (!entry) return false;
@@ -189,8 +227,10 @@ export function PermissionProvider({ children }) {
       return list.some(evaluator);
     };
 
-    return { can, canForPermissions, canAccess, isAdmin, permissionMap };
-  }, [user, isAdmin, permissionMap]);
+    const refreshPermissions = () => setTick((t) => t + 1);
+
+    return { can, canForPermissions, canAccess, isAdmin, permissionMap, ready, refreshPermissions };
+  }, [user, isAdmin, permissionMap, ready]);
 
   return (
     <PermissionContext.Provider value={value}>

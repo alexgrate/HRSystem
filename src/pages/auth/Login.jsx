@@ -157,7 +157,7 @@ const Login = () => {
               <div className="flex items-center justify-between pt-1 text-xs">
                 <label className="flex items-center gap-2 text-slate-600 cursor-pointer">
                   <input type="checkbox" className="h-3.5 w-3.5 rounded border-slate-300 text-[#4f1a60] focus:ring-[#4f1a60]" defaultChecked />
-                  Trust this device
+                  Remember me 
                 </label>
                 <Link className="font-semibold text-[#4f1a60] hover:underline" to="/forgot-password">Forgot password?</Link>
               </div>

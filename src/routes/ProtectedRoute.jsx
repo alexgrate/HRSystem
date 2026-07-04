@@ -6,13 +6,13 @@ import { usePermissions } from '../context/PermissionContext';
 
 const ProtectedRoute = ({ children, resource = null, action = 'read', checks = null }) => {
   const { user, loading } = useAuth();
-  const { can, canAccess } = usePermissions();
+  const { can, canAccess, ready } = usePermissions();
   const location = useLocation();
   const allowed = Array.isArray(checks) && checks.length
     ? canAccess(checks, 'any')
     : can(resource, action);
 
-  if (loading) {
+  if (loading || (user && !ready)) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-slate-50">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-600 border-t-transparent" />

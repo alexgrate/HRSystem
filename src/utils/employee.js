@@ -1,6 +1,3 @@
-// Single source of truth for deriving an employee's display name.
-// The backend surfaces the name under `employee_biodata` on some endpoints
-// and `biodata` on others; always handle both plus the email fallback.
 export function getEmployeeName(user, fallback = "—") {
   if (!user) return fallback;
   const bio = user.employee_biodata || user.biodata || {};

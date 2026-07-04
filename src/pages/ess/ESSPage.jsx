@@ -221,16 +221,17 @@ function ProfileChange() {
     );
 }
 
-// Status history of the employee's own profile-change requests. Hidden
-// entirely if the backend doesn't expose the listing endpoint yet.
 function MyProfileRequests() {
+    const { user } = useAuth();
     const [state, setState] = useState({ loading: true, items: [], unavailable: false });
+    const employeeId = user?.id;
 
     useEffect(() => {
+        if (!employeeId) return;
         let mounted = true;
         (async () => {
             try {
-                const res = await approvalService.getMyProfileUpdates();
+                const res = await approvalService.getMyProfileUpdates(employeeId);
                 const items = Array.isArray(res) ? res : res?.requests || res?.items || res?.data || [];
                 if (mounted) setState({ loading: false, items, unavailable: false });
             } catch (err) {
@@ -239,7 +240,7 @@ function MyProfileRequests() {
             }
         })();
         return () => { mounted = false; };
-    }, []);
+    }, [employeeId]);
 
     if (state.loading || state.unavailable) return null;
 
@@ -286,8 +287,6 @@ function MyProfileRequests() {
     );
 }
 
-// Colleagues in the same department. GET /api/users/ may be admin-gated —
-// if the call is rejected we show a friendly notice instead of an error.
 function TeamDirectory({ departmentId, departmentName, jobRoles = [] }) {
     const { user } = useAuth();
     const [members, setMembers] = useState([]);

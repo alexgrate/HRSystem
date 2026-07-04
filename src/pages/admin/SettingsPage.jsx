@@ -40,7 +40,7 @@ export function SettingsPage() {
         </p>
       </div>
 
-      {/* <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm w-fit">
+      <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm w-fit">
         {VIEWS.map((v) => {
           const Icon = v.Icon;
           return (
@@ -63,7 +63,7 @@ export function SettingsPage() {
             </button>
           );
         })}
-      </div> */}
+      </div>
 
       <div className={view === "job-title-resources" ? "" : "hidden"}><JobTitleResourceMatrix /></div>
       <div className={view === "user-job-titles" ? "" : "hidden"}><UserJobTitleAssignment /></div>
@@ -72,7 +72,7 @@ export function SettingsPage() {
 }
 
 function JobTitleResourceMatrix() {
-  const { can } = usePermissions();
+  const { can, refreshPermissions } = usePermissions();
   const toast = useToast();
   const canManage = can(RESOURCE_CODES.ROLE_PERMISSIONS, "assign") || can(RESOURCE_CODES.ROLE_PERMISSIONS, "manage");
 
@@ -176,6 +176,7 @@ function JobTitleResourceMatrix() {
       }));
       await rolePermissionService.setJobRoleResources(activeJobRole.id, payload);
       setMatrixByJobRole((prev) => ({ ...prev, [activeJobRole.id]: modalDraft }));
+      refreshPermissions?.();
       toast.success("Resource permissions updated.");
       setActiveJobRole(null);
     } catch (err) {
@@ -341,7 +342,7 @@ function JobTitleResourceMatrix() {
 }
 
 function UserJobTitleAssignment() {
-  const { can } = usePermissions();
+  const { can, refreshPermissions } = usePermissions();
   const toast = useToast();
 
   const canManage = can(RESOURCE_CODES.EMPLOYEES, "update") || can(RESOURCE_CODES.ROLE_MAPPING, "assign");
@@ -361,7 +362,7 @@ function UserJobTitleAssignment() {
       try {
         const [rolesRes, usersRes] = await Promise.all([
           rolePermissionService.getJobRoles(),
-          rolePermissionService.listUsers({ page: 1, limit: 500 }),
+          rolePermissionService.listUsers({ page: 1, limit: 100 }),
         ]);
 
         const allRoles = rolesRes || [];
@@ -406,6 +407,7 @@ function UserJobTitleAssignment() {
     try {
       await rolePermissionService.assignUserJobRole(userId, nextJobRoleId);
       setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, job_role_id: nextJobRoleId } : u)));
+      refreshPermissions?.(); // in case the admin reassigned their own title
       toast.success("Job title assignment saved.");
     } catch (err) {
       console.error("[SettingsPage] Failed to save user job-title assignment:", err);

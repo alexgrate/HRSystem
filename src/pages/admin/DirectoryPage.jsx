@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, X, Plus, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Pencil, Trash2, UserX, UserCheck } from "lucide-react";
-import { useAuth } from "../../context/AuthContext";
+import { Search, X, Plus, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Pencil, Trash2, UserX, UserCheck, Mail } from "lucide-react";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { setupService } from "../../services/setupService";
+import { authService } from "../../services/authService";
 import { getEmployeeName } from "../../utils/employee";
 import api from "../../services/api";
 
@@ -28,8 +28,17 @@ const resolvePayGradeId = (value, grades) => {
   return match ? match.id : "";
 };
 
+const genThrowawayPassword = () => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("") + "!2a";
+};
+
+const activationLinkFor = (email) =>
+  `${window.location.origin}/forgot-password?mode=activate&email=${encodeURIComponent(email)}`;
+
 const DirectoryPage = () => {
-  const { user } = useAuth();
   const { can } = usePermissions();
   const toast = useToast();
   const confirm = useConfirm();
@@ -58,7 +67,7 @@ const DirectoryPage = () => {
 
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showAddEmployee, setShowAddEmployee] = useState(false);
-  const [setupModal, setSetupModal] = useState(null); // { mode: 'create'|'edit', record }
+  const [setupModal, setSetupModal] = useState(null); 
 
   const canUpdateEmployee = can(RESOURCE_CODES.EMPLOYEES, "update");
 
@@ -218,7 +227,7 @@ const DirectoryPage = () => {
       ],
     },
     Allowances: {
-      resource: RESOURCE_CODES.BENEFIT_LEVELS, // allowances hang off benefit levels
+      resource: RESOURCE_CODES.BENEFIT_LEVELS, 
       singular: "Allowance",
       list: () => setupService.getBenefitLevelAllowances(),
       create: (d) => setupService.createBenefitLevelAllowance(d),
@@ -240,7 +249,7 @@ const DirectoryPage = () => {
       ],
     },
     "Leave Types": {
-      resource: RESOURCE_CODES.LEAVE_REQUESTS, // no dedicated LEAVE_TYPE resource; gate by leave
+      resource: RESOURCE_CODES.LEAVE_REQUESTS, // no dedicated LEAVE_TYPE resource gate by leave
       singular: "Leave Type",
       list: () => setupService.getLeaveTypes(),
       create: (d) => setupService.createLeaveType(d),
@@ -256,7 +265,6 @@ const DirectoryPage = () => {
       fields: [
         { key: "name", label: "Leave Type Name", type: "text", required: true, placeholder: "e.g. Annual Leave" },
         { key: "code", label: "Code", type: "text", placeholder: "e.g. LV_ANNUAL" },
-        // Backend rejects leave types without a benefit level attached.
         { key: "benefit_level_id", label: "Benefit Level", type: "select", required: true, options: allBenefitLevels.map((b) => ({ value: b.id, label: b.name })) },
         { key: "days_allowed", label: "Days Allowed", type: "number" },
         { key: "is_paid", label: "Paid Leave", type: "checkbox", default: true },
@@ -294,17 +302,11 @@ const DirectoryPage = () => {
   const employeeSearch = tab === "Employees" ? q.trim() : "";
 
   useEffect(() => {
-    // Stale guard: a slow response from a previously selected tab must never
-    // land in the current tab's table — its rows would be edited/deleted
-    // against the wrong endpoints.
     let stale = false;
     const fetchTabData = async () => {
       setLoading(true);
       try {
         if (tab === "Employees") {
-          // While searching, pull a wide window so the filter covers the whole
-          // directory (the backend has no search param yet), not just the
-          // currently visible page.
           const url = employeeSearch
             ? `/api/users/?page=1&limit=100`
             : `/api/users/?page=${page}&limit=${PAGE_SIZE}`;
@@ -332,17 +334,14 @@ const DirectoryPage = () => {
         if (!stale) setLoading(false);
       }
     };
-    // Debounce keystroke-driven refetches on the Employees tab only.
     const timer = setTimeout(fetchTabData, employeeSearch ? 300 : 0);
     return () => {
       stale = true;
       clearTimeout(timer);
     };
-    // SETUPS list fns don't depend on the memo's inputs, so it's safe to omit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [tab, page, refreshTick, employeeSearch]);
 
-  // Lookups so we can show real names instead of raw ids.
   const empName = (u) => getEmployeeName(u);
   const deptName = (id) => allDepartments.find((d) => d.id === id)?.name || "—";
   const roleTitle = (id) => allJobRoles.find((r) => r.id === id)?.title || "—";
@@ -381,7 +380,6 @@ const DirectoryPage = () => {
     }
   };
 
-  // Soft offboarding — flip `active` rather than hard-deleting the person.
   const handleToggleActive = async (item) => {
     const isActive = item.active !== false;
     const ok = await confirm({
@@ -397,6 +395,26 @@ const DirectoryPage = () => {
       toast.success(`${empName(item)} ${isActive ? "deactivated" : "reactivated"}.`);
     } catch (err) {
       toast.error(err?.message || "Failed to update employee status.");
+    }
+  };
+
+  const handleSendInvite = async (item) => {
+    const ok = await confirm({
+      title: `Send password setup email to ${empName(item)}?`,
+      message: `A setup code will be emailed to ${item.email}. They enter it on the activation page to choose their password.`,
+      confirmLabel: "Send email",
+    });
+    if (!ok) return;
+    try {
+      await authService.requestPasswordReset(item.email);
+      try {
+        await navigator.clipboard.writeText(activationLinkFor(item.email));
+        toast.success("Setup email sent — the activation link was also copied to your clipboard to share.");
+      } catch {
+        toast.success("Setup email sent.");
+      }
+    } catch (err) {
+      toast.error(err?.message || "Couldn’t send the setup email.");
     }
   };
 
@@ -520,6 +538,9 @@ const DirectoryPage = () => {
                               <button onClick={() => setSelectedEmployee(item)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#4f1a60]" title="Edit">
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
+                              <button onClick={() => handleSendInvite(item)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#4f1a60]" title="Send password setup email">
+                                <Mail className="h-3.5 w-3.5" />
+                              </button>
                               <button
                                 onClick={() => handleToggleActive(item)}
                                 className={`rounded-lg p-1.5 text-slate-400 ${inactive ? "hover:bg-emerald-50 hover:text-emerald-600" : "hover:bg-amber-50 hover:text-amber-600"}`}
@@ -618,26 +639,25 @@ const DirectoryPage = () => {
             staff={allStaff}
             onClose={() => setShowAddEmployee(false)}
             onSubmit={async (data) => {
+              const email = data.email.trim();
               try {
-                // DEPLOY-TIME SWITCH: replace this POST /api/users create with
-                // POST /api/auth/register (firstName, lastName, email, password,
-                // contract). register provisions a real auth identity (so the
-                // employee can log in) and attaches the org from the request host
-                // — which is why it only works once deployed per-tenant, not on
-                // localhost. Keep the follow-up PUT below for department/role/etc.
-                //
-                // 1) Create the account — only the fields createUserSchema accepts.
-                const created = await api.post("/api/users/", {
-                  email: data.email.trim(),
-                  organization_id: user?.organization_id,
-                  contract_type: data.contract_type || "permanent",
-                  employment_status: data.employment_status || "probation",
-                  active: true,
-                  biodata: { firstname: data.firstName.trim(), lastname: data.lastName.trim() },
+                await api.post("/api/auth/register", {
+                  firstName: data.firstName.trim(),
+                  lastName: data.lastName.trim(),
+                  email,
+                  password: genThrowawayPassword(),
+                  contract: data.contract_type || "permanent",
                 });
 
-                // 2) Persist the rest of the profile via update (create can't take these).
-                const newId = created?.id || created?.user?.id || created?.data?.id;
+                let newId = null;
+                try {
+                  const res = await api.get(`/api/users/?page=1&limit=100`);
+                  const list = Array.isArray(res) ? res : res?.users || [];
+                  newId = list.find((u) => (u.email || "").toLowerCase() === email.toLowerCase())?.id || null;
+                } catch (lookupErr) {
+                  console.error("[DirectoryPage] New-employee lookup failed:", lookupErr);
+                }
+
                 if (newId) {
                   try {
                     const details = pruneEmpty({
@@ -647,16 +667,22 @@ const DirectoryPage = () => {
                       manager_id: data.manager_id,
                       pay_grade: data.pay_grade,
                       base_salary: data.baseSalary ? Number(data.baseSalary) : "",
+                      employment_status: data.employment_status || "probation",
                     });
                     if (Object.keys(details).length) await api.put(`/api/users/${newId}`, details);
-                    toast.success("Employee onboarded successfully!");
                   } catch (putErr) {
-                    // The account exists — only the extra fields failed. Don't lose the create.
                     console.error("[DirectoryPage] Profile details save failed:", putErr);
-                    toast.info(`Employee created, but the profile details didn’t save (${putErr?.message || "unknown error"}). Open the row to finish.`);
+                    toast.info(`Account created, but the profile details didn’t save (${putErr?.message || "unknown error"}). Open the row to finish.`);
                   }
                 } else {
-                  toast.info("Employee created, but the extra details couldn’t be saved automatically — open the row to finish the profile.");
+                  toast.info("Account created, but the profile details couldn’t be attached automatically — open the row to finish.");
+                }
+                try {
+                  await authService.requestPasswordReset(email);
+                  toast.success(`Employee onboarded — a password setup email is on its way to ${email}.`);
+                } catch (mailErr) {
+                  console.error("[DirectoryPage] Invite email failed:", mailErr);
+                  toast.info("Employee created, but the setup email didn’t send — use the mail icon on their row to resend it.");
                 }
 
                 setShowAddEmployee(false);
@@ -673,7 +699,6 @@ const DirectoryPage = () => {
   );
 };
 
-// Generic create/edit modal driven by a setup config's `fields`.
 function SetupModal({ config, record, onClose, onSaved }) {
   const toast = useToast();
   const isEdit = !!record;
@@ -874,8 +899,7 @@ function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrade
     e.preventDefault();
     setSaving(true);
     try {
-      // "" (e.g. "— None —" selected) means CLEAR the field: send null so the
-      // backend actually removes the value. pruneEmpty would silently drop it.
+
       const nullable = (v) => (v === "" || v === undefined ? null : v);
       const payload = {
         phone: nullable(form.phone.trim()),
@@ -887,9 +911,6 @@ function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrade
         employment_status: form.employment_status,
         contract_type: form.contract_type,
       };
-      // NOTE: `biodata` (name) is intentionally NOT sent — the backend's biodata
-      // UPDATE path 500s ("could not determine data type"). Names are set at
-      // creation; re-enable here once the backend fixes that query.
 
       await api.put(`/api/users/${employee.id}`, payload);
       toast.success("Profile updated.");
