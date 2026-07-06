@@ -107,7 +107,7 @@ const ApprovalsInboxPage = () => {
 
   if (!activeTab) {
     return (
-      <div className="p-8 text-center text-slate-500 border border-dashed border-slate-200 rounded-2xl bg-white">
+      <div className="p-8 text-center text-ink-muted border border-dashed border-line rounded-2xl bg-card">
         You don’t have access to any approval queues. Ask an administrator for the required permission.
       </div>
     );
@@ -116,12 +116,12 @@ const ApprovalsInboxPage = () => {
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60]">Approvals</div>
-        <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Approvals Inbox</h1>
-        <p className="mt-1 text-sm text-slate-500">Review and action requests waiting on you.</p>
+        <div className="text-xs font-semibold uppercase tracking-wider text-brand">Approvals</div>
+        <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink">Approvals Inbox</h1>
+        <p className="mt-1 text-sm text-ink-muted">Review and action requests waiting on you.</p>
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm w-fit">
+      <div className="flex flex-wrap gap-1 rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit">
         {visibleTabs.map((t) => {
           const Icon = t.Icon;
           const isActive = activeTab.key === t.key;
@@ -129,9 +129,9 @@ const ApprovalsInboxPage = () => {
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`relative inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${isActive ? "text-white" : "text-slate-600"}`}
+              className={`relative inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${isActive ? "text-white" : "text-ink-muted"}`}
             >
-              {isActive && <motion.div layoutId="approvals-tab" className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#4f1a60] to-[#8a2da8]" transition={{ type: "spring", stiffness: 400, damping: 32 }} />}
+              {isActive && <motion.div layoutId="approvals-tab" className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2" transition={{ type: "spring", stiffness: 400, damping: 32 }} />}
               <Icon className="relative h-3.5 w-3.5" />
               <span className="relative">{t.label}</span>
             </button>
@@ -140,12 +140,12 @@ const ApprovalsInboxPage = () => {
       </div>
 
       {loading ? (
-        <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Loading pending approvals…</div>
+        <div className="p-12 text-center text-ink-muted bg-card rounded-2xl border border-line-soft">Loading pending approvals…</div>
       ) : items.length === 0 ? (
-        <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
-          <Inbox className="mx-auto h-12 w-12 text-slate-300" />
-          <h3 className="mt-4 text-sm font-semibold text-slate-900">Nothing pending</h3>
-          <p className="mt-1 text-xs text-slate-500">No {activeTab.noun}s are waiting for approval.</p>
+        <div className="p-12 text-center border border-dashed border-line rounded-2xl bg-card">
+          <Inbox className="mx-auto h-12 w-12 text-ink-ghost" />
+          <h3 className="mt-4 text-sm font-semibold text-ink">Nothing pending</h3>
+          <p className="mt-1 text-xs text-ink-muted">No {activeTab.noun}s are waiting for approval.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -157,35 +157,35 @@ const ApprovalsInboxPage = () => {
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, x: -20 }}
-                className={`flex items-start justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm ${busyId === item.id ? "opacity-50 pointer-events-none" : ""}`}
+                className={`flex items-start justify-between gap-4 rounded-2xl border border-line/80 bg-card p-4 shadow-sm ${busyId === item.id ? "opacity-50 pointer-events-none" : ""}`}
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-slate-900">{personName(item)}</span>
+                    <span className="font-semibold text-ink">{personName(item)}</span>
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">Pending</span>
                   </div>
                   {activeTab.key === "leave" ? (
-                    <div className="mt-1 text-sm text-slate-600">
+                    <div className="mt-1 text-sm text-ink-muted">
                       <span className="font-medium">{item.leave_type?.name || item.leave_type_name || "Leave"}</span>
                       {" · "}{fmtDate(item.start_date)} → {fmtDate(item.end_date)}
-                      {item.reason && <div className="mt-0.5 text-xs text-slate-500">“{item.reason}”</div>}
+                      {item.reason && <div className="mt-0.5 text-xs text-ink-muted">“{item.reason}”</div>}
                     </div>
                   ) : activeTab.key === "profile" ? (
-                    <div className="mt-1 text-sm text-slate-600">
+                    <div className="mt-1 text-sm text-ink-muted">
                       <span className="font-medium">Requested changes</span>
-                      <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
+                      <ul className="mt-1 space-y-0.5 text-xs text-ink-muted">
                         {changeEntries(item).map(([k, v]) => (
                           <li key={k}>
-                            <span className="font-semibold capitalize text-slate-600">{prettyField(k)}:</span> {String(v)}
+                            <span className="font-semibold capitalize text-ink-muted">{prettyField(k)}:</span> {String(v)}
                           </li>
                         ))}
                       </ul>
                     </div>
                   ) : (
-                    <div className="mt-1 text-sm text-slate-600">
+                    <div className="mt-1 text-sm text-ink-muted">
                       <span className="font-medium">{item.name || item.document_type?.name || item.file_name || "Document"}</span>
                       {(item.file_url || item.url) && (
-                        <a href={item.file_url || item.url} target="_blank" rel="noreferrer" className="ml-2 text-xs font-semibold text-[#4f1a60] hover:underline">View</a>
+                        <a href={item.file_url || item.url} target="_blank" rel="noreferrer" className="ml-2 text-xs font-semibold text-brand hover:underline">View</a>
                       )}
                     </div>
                   )}
@@ -196,7 +196,7 @@ const ApprovalsInboxPage = () => {
                     <button onClick={() => act(item, "approve")} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">
                       <Check className="h-3.5 w-3.5" /> Approve
                     </button>
-                    <button onClick={() => act(item, "reject")} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-red-50 hover:text-red-600">
+                    <button onClick={() => act(item, "reject")} className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-muted hover:bg-red-50 hover:text-red-600">
                       <X className="h-3.5 w-3.5" /> Reject
                     </button>
                   </div>

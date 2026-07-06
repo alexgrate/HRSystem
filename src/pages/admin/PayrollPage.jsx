@@ -16,7 +16,7 @@ const MONTHS = [
 ];
 
 const STATUS_META = {
-  draft: { label: "Draft", cls: "bg-slate-100 text-slate-600", step: 0 },
+  draft: { label: "Draft", cls: "bg-sunken text-ink-muted", step: 0 },
   preview_generated: { label: "Preview ready", cls: "bg-sky-50 text-sky-700", step: 1 },
   submitted_pending_approval: { label: "Awaiting approval", cls: "bg-amber-50 text-amber-700", step: 2 },
   approved: { label: "Approved", cls: "bg-emerald-50 text-emerald-700", step: 3 },
@@ -33,7 +33,7 @@ const MILESTONES = [
   { label: "Distribution", at: 7 },
 ];
 
-const statusMeta = (status) => STATUS_META[status] || { label: status || "Unknown", cls: "bg-slate-100 text-slate-600", step: 0 };
+const statusMeta = (status) => STATUS_META[status] || { label: status || "Unknown", cls: "bg-sunken text-ink-muted", step: 0 };
 
 const fmtMoney = (v, currency = "NGN") => {
   const n = Number(v) || 0;
@@ -229,14 +229,14 @@ const PayrollPage = () => {
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60]">Payroll Engine</div>
-          <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Payroll Processing</h1>
-          <p className="mt-1 text-sm text-slate-500">Preview, approve, lock in and distribute monthly payroll per pay group.</p>
+          <div className="text-xs font-semibold uppercase tracking-wider text-brand">Payroll Engine</div>
+          <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink">Payroll Processing</h1>
+          <p className="mt-1 text-sm text-ink-muted">Preview, approve, lock in and distribute monthly payroll per pay group.</p>
         </div>
         {canCreate && (
           <button
             onClick={() => setShowNewRun(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#4f1a60] to-[#8a2da8] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
           >
             <Plus className="h-4 w-4" /> Run payroll
           </button>
@@ -244,12 +244,12 @@ const PayrollPage = () => {
       </div>
 
       {loading ? (
-        <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Loading payroll runs…</div>
+        <div className="p-12 text-center text-ink-muted bg-card rounded-2xl border border-line-soft">Loading payroll runs…</div>
       ) : runs.length === 0 ? (
-        <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
-          <CheckCircle2 className="mx-auto h-12 w-12 text-slate-300" />
-          <h3 className="mt-4 text-sm font-semibold text-slate-900">No payroll runs yet</h3>
-          <p className="mt-1 text-xs text-slate-500">
+        <div className="p-12 text-center border border-dashed border-line rounded-2xl bg-card">
+          <CheckCircle2 className="mx-auto h-12 w-12 text-ink-ghost" />
+          <h3 className="mt-4 text-sm font-semibold text-ink">No payroll runs yet</h3>
+          <p className="mt-1 text-xs text-ink-muted">
             Press “Run payroll” to generate a preview for a month and pay group.
           </p>
         </div>
@@ -265,33 +265,33 @@ const PayrollPage = () => {
                   key={r.id}
                   onClick={() => setSelectedId(r.id)}
                   className={`w-full rounded-2xl border p-4 text-left transition-all ${
-                    isSel ? "border-[#4f1a60] bg-gradient-to-br from-[#4f1a60]/5 to-white shadow-md" : "border-slate-200/80 bg-white hover:border-slate-300"
+                    isSel ? "border-brand bg-gradient-to-br from-brand/5 to-card shadow-md" : "border-line/80 bg-card hover:border-line"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="font-semibold text-slate-900">
+                    <div className="font-semibold text-ink">
                       {MONTHS[(r.month || 1) - 1]} {r.year}
                     </div>
                     <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${m.cls}`}>{m.label}</span>
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">
+                  <div className="mt-1 text-xs text-ink-muted">
                     {payGroupName(r.pay_group)} · {r.total_employees ?? "—"} employees
                   </div>
-                  <div className="mt-1 text-sm font-semibold text-[#4f1a60]">{fmtMoney(r.total_net, r.currency)} net</div>
+                  <div className="mt-1 text-sm font-semibold text-brand">{fmtMoney(r.total_net, r.currency)} net</div>
                 </button>
               );
             })}
           </div>
 
           {/* Run detail */}
-          <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+          <div className="rounded-2xl border border-line/80 bg-card shadow-sm">
             {!selectedRun ? (
-              <div className="p-12 text-center text-slate-400 text-sm">Select a payroll run to see its lifecycle and actions.</div>
+              <div className="p-12 text-center text-ink-faint text-sm">Select a payroll run to see its lifecycle and actions.</div>
             ) : (
               <div className="p-5 sm:p-6 space-y-5">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div>
-                    <h3 className="text-lg font-bold text-slate-900">
+                    <h3 className="text-lg font-bold text-ink">
                       {MONTHS[(selectedRun.month || 1) - 1]} {selectedRun.year} · {payGroupName(selectedRun.pay_group)}
                     </h3>
                     <span className={`mt-1 inline-block rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${meta.cls}`}>
@@ -308,7 +308,7 @@ const PayrollPage = () => {
                             ? setApproveModal({ action: { ...a, exec: a.exec }, target: "run", id: selectedRun.id })
                             : runPlainAction(a)
                         }
-                        className="rounded-xl bg-[#4f1a60] px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-60"
+                        className="rounded-xl bg-brand px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-60"
                       >
                         {a.label}
                       </button>
@@ -328,16 +328,16 @@ const PayrollPage = () => {
                     const active = meta.step === ms.at - 1;
                     return (
                       <React.Fragment key={ms.label}>
-                        {i > 0 && <div className={`h-0.5 flex-1 rounded ${done || active ? "bg-[#4f1a60]/50" : "bg-slate-200"}`} />}
+                        {i > 0 && <div className={`h-0.5 flex-1 rounded ${done || active ? "bg-brand/50" : "bg-slate-200"}`} />}
                         <div className="flex flex-col items-center gap-1">
                           <div
                             className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold ${
-                              done ? "bg-[#4f1a60] text-white" : active ? "border-2 border-[#4f1a60] text-[#4f1a60] animate-pulse" : "border border-slate-300 text-slate-400"
+                              done ? "bg-brand text-white" : active ? "border-2 border-brand text-brand animate-pulse" : "border border-line text-ink-faint"
                             }`}
                           >
                             {done ? <Check className="h-3.5 w-3.5" /> : i + 1}
                           </div>
-                          <span className={`text-[10px] font-semibold ${done || active ? "text-[#4f1a60]" : "text-slate-400"}`}>{ms.label}</span>
+                          <span className={`text-[10px] font-semibold ${done || active ? "text-brand" : "text-ink-faint"}`}>{ms.label}</span>
                         </div>
                       </React.Fragment>
                     );
@@ -351,20 +351,20 @@ const PayrollPage = () => {
                     ["Total gross", fmtMoney(selectedRun.total_gross, selectedRun.currency)],
                     ["Total net", fmtMoney(selectedRun.total_net, selectedRun.currency)],
                   ].map(([label, value]) => (
-                    <div key={label} className="rounded-xl border border-slate-200 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</div>
-                      <div className="mt-0.5 text-sm font-bold text-slate-900">{value}</div>
+                    <div key={label} className="rounded-xl border border-line p-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint">{label}</div>
+                      <div className="mt-0.5 text-sm font-bold text-ink">{value}</div>
                     </div>
                   ))}
                 </div>
 
                 {/* Payslip lines, when the API provides them */}
                 {detailLoading ? (
-                  <div className="p-6 text-center text-xs text-slate-400">Loading run details…</div>
+                  <div className="p-6 text-center text-xs text-ink-faint">Loading run details…</div>
                 ) : runLines.length > 0 ? (
-                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <div className="overflow-x-auto rounded-xl border border-line">
                     <table className="w-full text-sm">
-                      <thead className="bg-slate-50/60 text-[10px] uppercase tracking-wider text-slate-500">
+                      <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
                         <tr>
                           <th className="px-3 py-2 text-left font-semibold">Employee</th>
                           <th className="px-3 py-2 text-right font-semibold">Gross</th>
@@ -374,8 +374,8 @@ const PayrollPage = () => {
                       </thead>
                       <tbody>
                         {runLines.map((l, i) => (
-                          <tr key={l.id || i} className="border-t border-slate-100">
-                            <td className="px-3 py-2 font-medium text-slate-800">
+                          <tr key={l.id || i} className="border-t border-line-soft">
+                            <td className="px-3 py-2 font-medium text-ink-2">
                               {l.employee_name || getEmployeeName(l.employee, null) || staffName(l.employee_id)}
                             </td>
                             <td className="px-3 py-2 text-right">{fmtMoney(l.gross_pay ?? l.gross ?? l.total_gross, selectedRun.currency)}</td>
@@ -389,37 +389,37 @@ const PayrollPage = () => {
                 ) : null}
 
                 {/* Adjustments */}
-                <div className="rounded-xl border border-slate-200">
-                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <div className="rounded-xl border border-line">
+                  <div className="flex items-center justify-between border-b border-line-soft px-4 py-3">
                     <div>
-                      <h4 className="text-sm font-semibold text-slate-900">Adjustments</h4>
-                      <p className="text-[11px] text-slate-500">One-off earnings or deductions for this run{adjustable ? "" : " (locked)"}.</p>
+                      <h4 className="text-sm font-semibold text-ink">Adjustments</h4>
+                      <p className="text-[11px] text-ink-muted">One-off earnings or deductions for this run{adjustable ? "" : " (locked)"}.</p>
                     </div>
                     {canUpdate && adjustable && (
                       <button
                         onClick={() => setShowAdjustment(true)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-[#4f1a60] hover:bg-slate-50"
+                        className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-sunken"
                       >
                         <Plus className="h-3.5 w-3.5" /> Add
                       </button>
                     )}
                   </div>
                   {runAdjustments.length === 0 ? (
-                    <div className="p-5 text-center text-xs text-slate-400">No adjustments on this run.</div>
+                    <div className="p-5 text-center text-xs text-ink-faint">No adjustments on this run.</div>
                   ) : (
-                    <ul className="divide-y divide-slate-100">
+                    <ul className="divide-y divide-line-soft">
                       {runAdjustments.map((a) => {
                         const st = String(a.status || "draft").toLowerCase();
                         return (
                           <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
                             <div className="min-w-0">
-                              <div className="text-sm font-semibold text-slate-900">
+                              <div className="text-sm font-semibold text-ink">
                                 {staffName(a.employee_id)}
                                 <span className={`ml-2 text-xs font-bold ${a.adjustment_type === "deduction" ? "text-red-600" : "text-emerald-600"}`}>
                                   {a.adjustment_type === "deduction" ? "−" : "+"}{fmtMoney(a.amount, selectedRun.currency)}
                                 </span>
                               </div>
-                              <div className="truncate text-xs text-slate-500">
+                              <div className="truncate text-xs text-ink-muted">
                                 {a.reason} · <span className="uppercase text-[10px] font-bold tracking-wider">{st.replace(/_/g, " ")}</span>
                               </div>
                             </div>
@@ -437,7 +437,7 @@ const PayrollPage = () => {
                                       toast.error(err?.message || "Couldn't submit adjustment.");
                                     } finally { setBusy(false); }
                                   }}
-                                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                                  className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:bg-sunken"
                                 >
                                   Submit
                                 </button>
@@ -462,7 +462,7 @@ const PayrollPage = () => {
                                       target: "adjustment",
                                       id: a.id,
                                     })}
-                                    className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-red-50 hover:text-red-600"
+                                    className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-ink-muted hover:bg-red-50 hover:text-red-600"
                                   >
                                     Reject
                                   </button>
@@ -533,8 +533,8 @@ const PayrollPage = () => {
   );
 };
 
-const inputCls = "w-full h-11 border border-slate-200 bg-white rounded-xl px-3 outline-none mt-1 focus:border-[#4f1a60]";
-const labelCls = "text-xs font-semibold text-slate-500 uppercase tracking-wider";
+const inputCls = "w-full h-11 border border-line bg-card rounded-xl px-3 outline-none mt-1 focus:border-brand";
+const labelCls = "text-xs font-semibold text-ink-muted uppercase tracking-wider";
 
 function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
   const now = new Date();
@@ -568,10 +568,10 @@ function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
-          <h3 className="text-lg font-bold text-slate-900">Run payroll</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          <h3 className="text-lg font-bold text-ink">Run payroll</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
         </div>
         <form onSubmit={submit} className="mt-4 space-y-4">
           {error && (
@@ -607,8 +607,8 @@ function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
             <input value={currency} onChange={(e) => setCurrency(e.target.value)} className={inputCls} placeholder="NGN" />
           </div>
           <div className="flex gap-2 justify-end pt-2">
-            <button type="button" onClick={onClose} className="h-11 border border-slate-200 rounded-xl px-4 text-sm font-semibold text-slate-600">Cancel</button>
-            <button type="submit" disabled={saving} className="h-11 bg-[#4f1a60] text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+            <button type="submit" disabled={saving} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">
               {saving ? "Generating…" : "Generate preview"}
             </button>
           </div>
@@ -622,10 +622,10 @@ function ApproveModal({ title, busy, onClose, onSubmit }) {
   const [comment, setComment] = useState("");
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
-          <h3 className="text-lg font-bold text-slate-900">{title}</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          <h3 className="text-lg font-bold text-ink">{title}</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
         </div>
         <div className="mt-4 space-y-4">
           <div>
@@ -633,11 +633,11 @@ function ApproveModal({ title, busy, onClose, onSubmit }) {
             <textarea value={comment} onChange={(e) => setComment(e.target.value)} className={`${inputCls} h-20 py-2 resize-none`} placeholder="Visible in the approval trail…" />
           </div>
           <div className="flex gap-2 justify-end">
-            <button type="button" onClick={onClose} className="h-11 border border-slate-200 rounded-xl px-4 text-sm font-semibold text-slate-600">Cancel</button>
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
             <button
               onClick={() => onSubmit(comment.trim() || null)}
               disabled={busy}
-              className="h-11 bg-[#4f1a60] text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70"
+              className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70"
             >
               {busy ? "Working…" : "Confirm"}
             </button>
@@ -672,10 +672,10 @@ function AdjustmentModal({ run, staff, busy, onClose, onSubmit }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
-          <h3 className="text-lg font-bold text-slate-900">Add adjustment</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          <h3 className="text-lg font-bold text-ink">Add adjustment</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
         </div>
         <form onSubmit={submit} className="mt-4 space-y-4">
           {error && (
@@ -708,8 +708,8 @@ function AdjustmentModal({ run, staff, busy, onClose, onSubmit }) {
             <textarea value={reason} onChange={(e) => setReason(e.target.value)} className={`${inputCls} h-20 py-2 resize-none`} placeholder="e.g. Overtime for June inventory count" />
           </div>
           <div className="flex gap-2 justify-end pt-1">
-            <button type="button" onClick={onClose} className="h-11 border border-slate-200 rounded-xl px-4 text-sm font-semibold text-slate-600">Cancel</button>
-            <button type="submit" disabled={busy} className="h-11 bg-[#4f1a60] text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+            <button type="submit" disabled={busy} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">
               {busy ? "Saving…" : "Add adjustment"}
             </button>
           </div>

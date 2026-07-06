@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Building2, Palette, Globe, ShieldCheck, GitBranch, Save } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Building2, Palette, Globe, ShieldCheck, GitBranch, Save, Upload, X, ImageIcon } from "lucide-react";
 import { configService } from "../../services/configService";
 import { useConfig } from "../../context/ConfigContext";
 import { usePermissions } from "../../context/PermissionContext";
@@ -32,28 +32,120 @@ const DEFAULTS = {
 };
 
 const Section = ({ icon: Icon, title, subtitle, children }) => (
-  <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
-    <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#4f1a60]/10 text-[#4f1a60]">
+  <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
+    <div className="flex items-center gap-3 border-b border-line-soft pb-4">
+      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand/10 text-brand">
         <Icon className="h-4.5 w-4.5" />
       </div>
       <div>
-        <h3 className="font-semibold text-slate-900">{title}</h3>
-        {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
+        <h3 className="font-semibold text-ink">{title}</h3>
+        {subtitle && <p className="text-xs text-ink-muted">{subtitle}</p>}
       </div>
     </div>
     <div className="mt-5 grid gap-4 sm:grid-cols-2">{children}</div>
   </div>
 );
 
-const labelCls = "text-xs font-semibold text-slate-500 uppercase tracking-wider block";
-const inputCls = "w-full h-11 border border-slate-200 bg-white rounded-xl px-3 outline-none mt-1.5 focus:border-[#4f1a60]";
+const labelCls = "text-xs font-semibold text-ink-muted uppercase tracking-wider block";
+const inputCls = "w-full h-11 border border-line bg-card rounded-xl px-3 outline-none mt-1.5 focus:border-brand";
 
 function Text({ label, value, onChange, disabled, placeholder, full }) {
   return (
     <div className={full ? "sm:col-span-2" : ""}>
       <label className={labelCls}>{label}</label>
       <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} placeholder={placeholder} className={inputCls} />
+    </div>
+  );
+}
+
+const fileToDataUri = (file, maxDim) =>
+  new Promise((resolve, reject) => {
+    if (file.size > 2 * 1024 * 1024) return reject(new Error("Image is too large — pick a file under 2 MB."));
+    if (file.type === "image/svg+xml") {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Couldn't read the file."));
+      return reader.readAsDataURL(file);
+    }
+    if (!/^image\/(png|jpe?g|webp|gif|x-icon|vnd\.microsoft\.icon)$/.test(file.type)) {
+      return reject(new Error("Use a PNG, JPG, WebP, SVG or ICO image."));
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("That file doesn't look like a valid image."));
+    };
+    img.src = url;
+  });
+
+function ImageField({ label, value, onChange, disabled, maxDim, hint }) {
+  const inputRef = useRef(null);
+  const [error, setError] = useState("");
+
+  const pick = async (file) => {
+    if (!file) return;
+    try {
+      setError("");
+      onChange(await fileToDataUri(file, maxDim));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div>
+      <label className={labelCls}>{label}</label>
+      <div className="mt-1.5 flex items-center gap-3">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-line bg-sunken">
+          {value ? (
+            <img src={value} alt={label} className="h-full w-full object-contain" />
+          ) : (
+            <ImageIcon className="h-5 w-5 text-ink-ghost" />
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => inputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-ink-2 hover:bg-sunken disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Upload className="h-3.5 w-3.5" /> {value ? "Replace" : "Upload"}
+          </button>
+          {value && !disabled && (
+            <button
+              type="button"
+              onClick={() => { setError(""); onChange(""); }}
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-semibold text-ink-muted hover:bg-red-50 hover:text-red-600"
+            >
+              <X className="h-3.5 w-3.5" /> Remove
+            </button>
+          )}
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif,image/x-icon,.ico"
+          className="hidden"
+          onChange={(e) => {
+            pick(e.target.files?.[0]);
+            e.target.value = ""; // allow re-picking the same file
+          }}
+        />
+      </div>
+      <p className={`mt-1 text-[11px] ${error ? "text-red-600" : "text-ink-faint"}`}>
+        {error || hint}
+      </p>
     </div>
   );
 }
@@ -83,8 +175,8 @@ function Color({ label, value, onChange, disabled }) {
     <div>
       <label className={labelCls}>{label}</label>
       <div className="mt-1.5 flex items-center gap-2">
-        <input type="color" value={value || "#000000"} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="h-11 w-14 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 disabled:cursor-not-allowed" />
-        <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="h-11 flex-1 rounded-xl border border-slate-200 px-3 font-mono text-sm outline-none focus:border-[#4f1a60]" />
+        <input type="color" value={value || "#000000"} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="h-11 w-14 cursor-pointer rounded-lg border border-line bg-card p-1 disabled:cursor-not-allowed" />
+        <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="h-11 flex-1 rounded-xl border border-line px-3 font-mono text-sm outline-none focus:border-brand" />
       </div>
     </div>
   );
@@ -92,19 +184,19 @@ function Color({ label, value, onChange, disabled }) {
 
 function Toggle({ label, description, value, onChange, disabled }) {
   return (
-    <label className={`flex items-start justify-between gap-4 rounded-xl border border-slate-200 p-3 sm:col-span-2 ${disabled ? "opacity-70" : "cursor-pointer"}`}>
+    <label className={`flex items-start justify-between gap-4 rounded-xl border border-line p-3 sm:col-span-2 ${disabled ? "opacity-70" : "cursor-pointer"}`}>
       <div>
-        <div className="text-sm font-semibold text-slate-800">{label}</div>
-        {description && <div className="text-xs text-slate-500">{description}</div>}
+        <div className="text-sm font-semibold text-ink-2">{label}</div>
+        {description && <div className="text-xs text-ink-muted">{description}</div>}
       </div>
       <button
         type="button"
         disabled={disabled}
         onClick={() => onChange(!value)}
-        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors ${value ? "bg-[#4f1a60]" : "bg-slate-300"} disabled:cursor-not-allowed`}
+        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors ${value ? "bg-brand" : "bg-slate-300"} disabled:cursor-not-allowed`}
         aria-pressed={value}
       >
-        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${value ? "left-[22px]" : "left-0.5"}`} />
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-card shadow transition-all ${value ? "left-[22px]" : "left-0.5"}`} />
       </button>
     </label>
   );
@@ -119,9 +211,7 @@ const OrganizationSettingsPage = () => {
   const [form, setForm] = useState(DEFAULTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  // Whether a config row already exists — decided by what we actually fetched,
-  // not by the context (which can lag or fail independently). Getting this
-  // wrong makes Save POST a duplicate create for an existing config.
+
   const [hasConfig, setHasConfig] = useState(false);
 
   useEffect(() => {
@@ -133,7 +223,7 @@ const OrganizationSettingsPage = () => {
         if (mounted && cfg) {
           setForm({ ...DEFAULTS, ...cfg });
           setHasConfig(true);
-          if (!config) setConfig(cfg); // share what we fetched with the rest of the app
+          if (!config) setConfig(cfg);
         }
       } catch (err) {
         console.error("[OrgSettings] load failed:", err);
@@ -187,19 +277,19 @@ const OrganizationSettingsPage = () => {
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Loading organization settings…</div>;
+    return <div className="p-12 text-center text-ink-muted bg-card rounded-2xl border border-line-soft">Loading organization settings…</div>;
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60]">Organization</div>
-          <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Company Settings</h1>
-          <p className="mt-1 text-sm text-slate-500">Branding, localization, security and approval rules for your organization.</p>
+          <div className="text-xs font-semibold uppercase tracking-wider text-brand">Organization</div>
+          <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink">Company Settings</h1>
+          <p className="mt-1 text-sm text-ink-muted">Branding, localization, security and approval rules for your organization.</p>
         </div>
         {canEdit && (
-          <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#4f1a60] to-[#8a2da8] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-70">
+          <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-70">
             <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save changes"}
           </button>
         )}
@@ -214,11 +304,25 @@ const OrganizationSettingsPage = () => {
       <Section icon={Building2} title="Organization" subtitle="Names and logos shown across the workspace.">
         <Text label="Organization name" value={form.organization_name} onChange={(v) => set("organization_name", v)} disabled={!canEdit} placeholder="Acme Corp" />
         <Text label="Legal name" value={form.organization_legal_name} onChange={(v) => set("organization_legal_name", v)} disabled={!canEdit} placeholder="Acme Corporation Ltd" />
-        <Text label="Logo URL" value={form.logo_url} onChange={(v) => set("logo_url", v)} disabled={!canEdit} placeholder="https://…/logo.png" />
-        <Text label="Favicon URL" value={form.favicon_url} onChange={(v) => set("favicon_url", v)} disabled={!canEdit} placeholder="https://…/favicon.ico" />
+        <ImageField
+          label="Company logo"
+          value={form.logo_url}
+          onChange={(v) => set("logo_url", v)}
+          disabled={!canEdit}
+          maxDim={512}
+          hint="PNG, JPG or SVG — shown in the sidebar. Resized and embedded automatically."
+        />
+        <ImageField
+          label="Favicon"
+          value={form.favicon_url}
+          onChange={(v) => set("favicon_url", v)}
+          disabled={!canEdit}
+          maxDim={64}
+          hint="Square image for the browser tab — shrunk to 64px."
+        />
       </Section>
 
-      <Section icon={Palette} title="Branding" subtitle="Theme colors (saved now; live theming comes later).">
+      <Section icon={Palette} title="Branding" subtitle="Applied live across the whole workspace after saving.">
         <Color label="Primary color" value={form.primary_color} onChange={(v) => set("primary_color", v)} disabled={!canEdit} />
         <Color label="Secondary color" value={form.secondary_color} onChange={(v) => set("secondary_color", v)} disabled={!canEdit} />
         <Color label="Accent color" value={form.accent_color} onChange={(v) => set("accent_color", v)} disabled={!canEdit} />

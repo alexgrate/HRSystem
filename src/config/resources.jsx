@@ -20,6 +20,7 @@ import OnboardingPage from "../pages/admin/OnboardingPage";
 import OrganizationSettingsPage from "../pages/admin/OrganizationSettingsPage";
 import ApprovalsInboxPage from "../pages/admin/ApprovalsInboxPage";
 import PayrollPage from "../pages/admin/PayrollPage";
+import DashboardPage from "../pages/DashboardPage";
 
 import { RESOURCE_CODES } from "./resourceCodes";
 export { RESOURCE_CODES };
@@ -67,9 +68,9 @@ function checksFromRoutes(routes = []) {
 
 function ComingSoon({ label }) {
   return (
-    <div className="p-8 text-center text-slate-500 border border-dashed border-slate-200 rounded-2xl bg-white">
+    <div className="p-8 text-center text-ink-muted border border-dashed border-line rounded-2xl bg-card">
       Module{" "}
-      <span className="font-semibold text-[#4f1a60] capitalize">{label}</span>{" "}
+      <span className="font-semibold text-brand capitalize">{label}</span>{" "}
       is scheduled for a future milestone.
     </div>
   );
@@ -82,7 +83,7 @@ export const RESOURCES = [
     segment: "dashboard",
     Icon: LayoutDashboard,
     resource: null, // visible to all authenticated users
-    component: () => <ComingSoon label="dashboard" />,
+    component: DashboardPage,
   },
   {
     key: "setup",

@@ -1,6 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { motion } from "framer-motion";
 import {
   Mail, Lock, KeyRound, ArrowRight, ArrowLeft, AlertCircle,
   CheckCircle2, Eye, EyeOff,
@@ -10,8 +9,8 @@ import { authService } from "../../services/authService";
 const emailValid = (e) => /^\S+@\S+\.\S+$/.test(e);
 
 const Field = ({ icon: Icon, children }) => (
-  <div className="flex items-center gap-2.5 border-b border-slate-300 py-2.5 focus-within:border-[#4f1a60] transition-colors">
-    <Icon className="h-4.5 w-4.5 text-slate-400" />
+  <div className="flex items-center gap-2.5 border-b border-line py-2.5 focus-within:border-brand transition-colors">
+    <Icon className="h-4.5 w-4.5 text-ink-faint" />
     {children}
   </div>
 );
@@ -31,6 +30,16 @@ const ForgotPassword = () => {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Cursor glow on the brand panel — CSS variables via ref, no re-renders.
+  const brandRef = useRef(null);
+  const moveSpot = (e) => {
+    const el = brandRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty("--spot-x", `${e.clientX - r.left}px`);
+    el.style.setProperty("--spot-y", `${e.clientY - r.top}px`);
+  };
 
   const copy = isActivate
     ? {
@@ -94,12 +103,22 @@ const ForgotPassword = () => {
   };
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#faf8f3] text-slate-900">
+    <div className="relative h-screen w-screen overflow-hidden bg-[#faf8f3] text-ink" style={{ height: "100dvh" }}>
       <div className="relative mx-auto h-full w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-[1.15fr_1fr]">
         {/* Brand panel */}
-        <div className="relative hidden h-full flex-col justify-between overflow-hidden bg-gradient-to-br from-[#2a0d35] via-[#3d1248] to-[#4f1a60] p-12 text-white lg:flex xl:p-16">
-          <div className="pointer-events-none absolute -right-32 -top-32 h-[420px] w-[420px] rounded-full bg-[#e9a8ff]/10 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-40 -left-20 h-[360px] w-[360px] rounded-full bg-[#8a2da8]/30 blur-3xl" />
+        <div
+          ref={brandRef}
+          onMouseMove={moveSpot}
+          className="relative hidden h-full flex-col justify-between overflow-hidden bg-gradient-to-br from-brand-darkest via-brand-dark to-brand p-12 text-white lg:flex xl:p-16"
+        >
+          <div className="pointer-events-none absolute inset-0 anim-zoom">
+            <div className="absolute -right-32 -top-32 h-[420px] w-[420px] rounded-full bg-accent/10 blur-3xl" />
+            <div className="absolute -bottom-40 -left-20 h-[360px] w-[360px] rounded-full bg-brand-2/30 blur-3xl" />
+          </div>
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{ background: "radial-gradient(340px circle at var(--spot-x, 65%) var(--spot-y, 30%), color-mix(in srgb, var(--brand-accent) 16%, transparent), transparent 70%)" }}
+          />
           <div className="relative flex items-center gap-3.5">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 ring-1 ring-inset ring-white/15 backdrop-blur font-bold">
               D
@@ -108,27 +127,23 @@ const ForgotPassword = () => {
               <span className="italic font-bold">dash</span>.
             </div>
           </div>
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-            className="relative max-w-xl my-auto py-16"
-          >
-            <div className="text-[11px] uppercase tracking-[0.34em] text-white/55">
+          <div className="relative max-w-xl my-auto py-16">
+            <div className="anim anim-fade text-[11px] uppercase tracking-[0.34em] text-white/55" style={{ animationDelay: "0.1s" }}>
               Account Security
             </div>
             <h1 className="mt-5 font-serif text-[56px] leading-[0.95] tracking-tight xl:text-[68px] font-bold">
-              {isActivate ? (
-                <>A workspace,<br /><span className="italic text-[#e9a8ff]">made yours</span>.</>
-              ) : (
-                <>Back in,<br /><span className="italic text-[#e9a8ff]">securely</span>.</>
-              )}
+              <span className="anim anim-reveal block" style={{ animationDelay: "0.2s" }}>
+                {isActivate ? "A workspace," : "Back in,"}
+              </span>
+              <span className="anim anim-reveal block" style={{ animationDelay: "0.36s" }}>
+                <span className="italic text-accent">{isActivate ? "made yours" : "securely"}</span>.
+              </span>
             </h1>
-            <p className="mt-6 max-w-md text-sm leading-relaxed text-white/60">
+            <p className="anim anim-fade mt-6 max-w-md text-sm leading-relaxed text-white/60" style={{ animationDelay: "0.7s" }}>
               We verify it’s really you with a one-time code before any password
               is set. Codes expire quickly and can only be used once.
             </p>
-          </motion.div>
+          </div>
           <div className="relative text-[10px] uppercase tracking-[0.25em] text-white/40">
             Powered by Dash © 2026
           </div>
@@ -136,28 +151,23 @@ const ForgotPassword = () => {
 
         {/* Form panel */}
         <div className="relative flex h-full flex-col justify-center px-6 py-12 sm:px-16 lg:px-20">
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="mx-auto w-full max-w-md space-y-6"
-          >
+          <div className="anim anim-fade mx-auto w-full max-w-md space-y-6" style={{ animationDelay: "0.25s" }}>
             {phase === "done" ? (
               <div className="space-y-6 text-center">
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
                   <CheckCircle2 className="h-7 w-7" />
                 </div>
                 <div>
-                  <h2 className="font-serif text-3xl font-bold text-slate-900">
+                  <h2 className="font-serif text-3xl font-bold text-ink">
                     {isActivate ? "Account activated" : "Password updated"}
                   </h2>
-                  <p className="mt-2 text-sm text-slate-500">
+                  <p className="mt-2 text-sm text-ink-muted">
                     You can now sign in with your new password.
                   </p>
                 </div>
                 <button
                   onClick={() => navigate("/login")}
-                  className="group flex w-full items-center justify-between rounded-full bg-[#4f1a60] px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-white shadow-md hover:bg-[#3d1248]"
+                  className="group flex w-full items-center justify-between rounded-full bg-brand px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-white shadow-md hover:bg-brand-dark"
                 >
                   <span>Continue to sign in</span>
                   <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 transition-transform group-hover:translate-x-0.5">
@@ -168,13 +178,13 @@ const ForgotPassword = () => {
             ) : (
               <>
                 <div>
-                  <div className="text-[11px] uppercase tracking-[0.3em] text-[#4f1a60]/70">
+                  <div className="text-[11px] uppercase tracking-[0.3em] text-brand/70">
                     {isActivate ? "Welcome" : "Account recovery"}
                   </div>
-                  <h2 className="mt-2 font-serif text-[38px] leading-[1.02] text-slate-900 sm:text-[44px] font-bold">
+                  <h2 className="mt-2 font-serif text-[38px] leading-[1.02] text-ink sm:text-[44px] font-bold">
                     {copy.title}
                   </h2>
-                  <p className="mt-2.5 text-sm text-slate-500 leading-relaxed">
+                  <p className="mt-2.5 text-sm text-ink-muted leading-relaxed">
                     {copy.subtitle}
                   </p>
                 </div>
@@ -195,7 +205,7 @@ const ForgotPassword = () => {
                 {phase === "request" ? (
                   <form onSubmit={sendCode} className="space-y-6 pt-2">
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
                         Work email
                       </label>
                       <Field icon={Mail}>
@@ -203,7 +213,7 @@ const ForgotPassword = () => {
                           type="email"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
-                          className="w-full bg-transparent text-[15px] outline-none placeholder:text-slate-400"
+                          className="w-full bg-transparent text-[15px] outline-none placeholder:text-ink-faint"
                           placeholder="name@company.com"
                           required
                         />
@@ -212,7 +222,7 @@ const ForgotPassword = () => {
                     <button
                       type="submit"
                       disabled={busy}
-                      className="group flex w-full items-center justify-between rounded-full bg-[#4f1a60] px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-white shadow-md hover:bg-[#3d1248] disabled:opacity-70"
+                      className="group flex w-full items-center justify-between rounded-full bg-brand px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-white shadow-md hover:bg-brand-dark disabled:opacity-70"
                     >
                       <span>{busy ? "Sending…" : "Send verification code"}</span>
                       <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 transition-transform group-hover:translate-x-0.5">
@@ -223,7 +233,7 @@ const ForgotPassword = () => {
                 ) : (
                   <form onSubmit={submitReset} className="space-y-5 pt-2">
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
                         Verification code
                       </label>
                       <Field icon={KeyRound}>
@@ -231,7 +241,7 @@ const ForgotPassword = () => {
                           inputMode="numeric"
                           value={otp}
                           onChange={(e) => setOtp(e.target.value)}
-                          className="w-full bg-transparent text-[15px] tracking-[0.3em] outline-none placeholder:tracking-normal placeholder:text-slate-400"
+                          className="w-full bg-transparent text-[15px] tracking-[0.3em] outline-none placeholder:tracking-normal placeholder:text-ink-faint"
                           placeholder="Enter the code"
                           required
                         />
@@ -240,14 +250,14 @@ const ForgotPassword = () => {
                         type="button"
                         onClick={resend}
                         disabled={busy}
-                        className="text-[11px] font-semibold text-[#4f1a60] hover:underline disabled:opacity-60"
+                        className="text-[11px] font-semibold text-brand hover:underline disabled:opacity-60"
                       >
                         Didn’t get it? Resend code
                       </button>
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
                         New password
                       </label>
                       <div className="relative">
@@ -263,7 +273,7 @@ const ForgotPassword = () => {
                           <button
                             type="button"
                             onClick={() => setShowPw((s) => !s)}
-                            className="absolute right-0 text-slate-400 hover:text-[#4f1a60]"
+                            className="absolute right-0 text-ink-faint hover:text-brand"
                             aria-label={showPw ? "Hide password" : "Show password"}
                           >
                             {showPw ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
@@ -273,7 +283,7 @@ const ForgotPassword = () => {
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
                         Confirm password
                       </label>
                       <Field icon={Lock}>
@@ -291,7 +301,7 @@ const ForgotPassword = () => {
                     <button
                       type="submit"
                       disabled={busy}
-                      className="group flex w-full items-center justify-between rounded-full bg-[#4f1a60] px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-white shadow-md hover:bg-[#3d1248] disabled:opacity-70"
+                      className="group flex w-full items-center justify-between rounded-full bg-brand px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-white shadow-md hover:bg-brand-dark disabled:opacity-70"
                     >
                       <span>{busy ? "Saving…" : copy.cta}</span>
                       <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 transition-transform group-hover:translate-x-0.5">
@@ -303,13 +313,13 @@ const ForgotPassword = () => {
 
                 <Link
                   to="/login"
-                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-[#4f1a60]"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-brand"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" /> Back to sign in
                 </Link>
               </>
             )}
-          </motion.div>
+          </div>
         </div>
       </div>
     </div>

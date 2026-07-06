@@ -15,7 +15,7 @@ const TABS = ["Employees", "Offices", "Departments", "Job Titles", "Grades", "Pa
 const PAGE_SIZE = 10;
 
 const StatusBadge = ({ active }) => (
-  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${active ? "bg-emerald-50 text-emerald-700" : "bg-sunken text-ink-muted"}`}>
     {active ? "Active" : "Inactive"}
   </span>
 );
@@ -27,6 +27,14 @@ const pruneEmpty = (obj) =>
 const resolvePayGradeId = (value, grades) => {
   if (!value) return "";
   const match = grades.find((g) => g.id === value || g.name === value || g.code === value);
+  return match ? match.id : "";
+};
+
+// pay_group is a uuid reference on the backend despite the spec typing it as
+// a string — accept an id, name or code and normalize to the id.
+const resolvePayGroupId = (value, groups) => {
+  if (!value) return "";
+  const match = groups.find((g) => g.id === value || g.name === value || g.code === value);
   return match ? match.id : "";
 };
 
@@ -140,14 +148,14 @@ const DirectoryPage = () => {
       update: (id, d) => setupService.updateOffice(id, d),
       remove: (id) => setupService.deleteOffice(id),
       columns: [
-        { header: "Address", render: (r) => <span className="font-semibold text-slate-900">{r.address}</span> },
+        { header: "Address", render: (r) => <span className="font-semibold text-ink">{r.address}</span> },
         { header: "State", render: (r) => r.state },
         { header: "Country", render: (r) => r.country },
         {
           header: "Type",
           render: (r) => r.headquarter
-            ? <span className="rounded bg-purple-50 px-2.5 py-1 text-xs text-[#4f1a60] font-semibold">Headquarters</span>
-            : <span className="rounded bg-slate-100 px-2.5 py-1 text-xs text-slate-600">Branch</span>,
+            ? <span className="rounded bg-purple-50 px-2.5 py-1 text-xs text-brand font-semibold">Headquarters</span>
+            : <span className="rounded bg-sunken px-2.5 py-1 text-xs text-ink-muted">Branch</span>,
         },
       ],
       fields: [
@@ -165,8 +173,8 @@ const DirectoryPage = () => {
       update: (id, d) => setupService.updateDepartment(id, d),
       remove: (id) => setupService.deleteDepartment(id),
       columns: [
-        { header: "Code", render: (r) => <span className="font-mono text-[#4f1a60] font-semibold">{r.code}</span> },
-        { header: "Name", render: (r) => <span className="font-medium text-slate-900">{r.name}</span> },
+        { header: "Code", render: (r) => <span className="font-mono text-brand font-semibold">{r.code}</span> },
+        { header: "Name", render: (r) => <span className="font-medium text-ink">{r.name}</span> },
         { header: "Status", render: (r) => <StatusBadge active={r.is_active !== false} /> },
       ],
       fields: [
@@ -184,8 +192,8 @@ const DirectoryPage = () => {
       update: (id, d) => setupService.updateJobRole(id, d),
       remove: (id) => setupService.deleteJobRole(id),
       columns: [
-        { header: "Code", render: (r) => <span className="font-mono text-[#4f1a60] font-semibold">{r.code || "—"}</span> },
-        { header: "Title", render: (r) => <span className="font-medium text-slate-900">{r.title}</span> },
+        { header: "Code", render: (r) => <span className="font-mono text-brand font-semibold">{r.code || "—"}</span> },
+        { header: "Title", render: (r) => <span className="font-medium text-ink">{r.title}</span> },
         { header: "Department", render: (r) => allDepartments.find((d) => d.id === r.department_id)?.name || "—" },
         { header: "Required Docs", render: (r) => (r.required_documents?.length ? `${r.required_documents.length} doc${r.required_documents.length > 1 ? "s" : ""}` : "—") },
         { header: "Status", render: (r) => <StatusBadge active={r.is_active !== false} /> },
@@ -207,8 +215,8 @@ const DirectoryPage = () => {
       update: (id, d) => setupService.updatePayGrade(id, d),
       remove: (id) => setupService.deletePayGrade(id),
       columns: [
-        { header: "Code", render: (r) => <span className="font-mono text-[#4f1a60] font-semibold">{r.code || "—"}</span> },
-        { header: "Name", render: (r) => <span className="font-medium text-slate-900">{r.name}</span> },
+        { header: "Code", render: (r) => <span className="font-mono text-brand font-semibold">{r.code || "—"}</span> },
+        { header: "Name", render: (r) => <span className="font-medium text-ink">{r.name}</span> },
         { header: "Range", render: (r) => `₦${(Number(r.min_salary) || 0).toLocaleString()} - ₦${(Number(r.max_salary) || 0).toLocaleString()}` },
         { header: "Status", render: (r) => <StatusBadge active={r.is_active !== false} /> },
       ],
@@ -231,8 +239,8 @@ const DirectoryPage = () => {
       update: (id, d) => setupService.updateBenefitLevel(id, d),
       remove: (id) => setupService.deleteBenefitLevel(id),
       columns: [
-        { header: "Code", render: (r) => <span className="font-mono text-[#4f1a60] font-semibold">{r.code || "—"}</span> },
-        { header: "Name", render: (r) => <span className="font-medium text-slate-900">{r.name}</span> },
+        { header: "Code", render: (r) => <span className="font-mono text-brand font-semibold">{r.code || "—"}</span> },
+        { header: "Name", render: (r) => <span className="font-medium text-ink">{r.name}</span> },
         { header: "Status", render: (r) => <StatusBadge active={r.is_active !== false} /> },
       ],
       fields: [
@@ -250,8 +258,8 @@ const DirectoryPage = () => {
       update: (id, d) => setupService.updateGrade(id, d),
       remove: (id) => setupService.deleteGrade(id),
       columns: [
-        { header: "Code", render: (r) => <span className="font-mono text-[#4f1a60] font-semibold">{r.code || "—"}</span> },
-        { header: "Name", render: (r) => <span className="font-medium text-slate-900">{r.name}</span> },
+        { header: "Code", render: (r) => <span className="font-mono text-brand font-semibold">{r.code || "—"}</span> },
+        { header: "Name", render: (r) => <span className="font-medium text-ink">{r.name}</span> },
         { header: "Level", render: (r) => r.level ?? "—" },
         { header: "Range", render: (r) => `₦${(Number(r.min_salary) || 0).toLocaleString()} - ₦${(Number(r.max_salary) || 0).toLocaleString()}` },
         { header: "Status", render: (r) => <StatusBadge active={r.is_active !== false} /> },
@@ -275,8 +283,8 @@ const DirectoryPage = () => {
       update: (id, d) => setupService.updatePayGroup(id, d),
       remove: (id) => setupService.deletePayGroup(id),
       columns: [
-        { header: "Code", render: (r) => <span className="font-mono text-[#4f1a60] font-semibold">{r.code || "—"}</span> },
-        { header: "Name", render: (r) => <span className="font-medium text-slate-900">{r.name}</span> },
+        { header: "Code", render: (r) => <span className="font-mono text-brand font-semibold">{r.code || "—"}</span> },
+        { header: "Name", render: (r) => <span className="font-medium text-ink">{r.name}</span> },
         { header: "Status", render: (r) => <StatusBadge active={r.is_active !== false} /> },
       ],
       fields: [
@@ -293,7 +301,7 @@ const DirectoryPage = () => {
       create: (d) => setupService.createBenefitLevelAllowance(d),
       // list + create only — backend has no PUT/DELETE for allowances yet
       columns: [
-        { header: "Name", render: (r) => <span className="font-medium text-slate-900">{r.name || "—"}</span> },
+        { header: "Name", render: (r) => <span className="font-medium text-ink">{r.name || "—"}</span> },
         { header: "Benefit Level", render: (r) => allBenefitLevels.find((b) => b.id === r.benefit_level_id)?.name || "—" },
         { header: "Amount", render: (r) => (r.amount != null ? `₦${Number(r.amount).toLocaleString()}` : "—") },
         { header: "Status", render: (r) => <StatusBadge active={r.is_active !== false} /> },
@@ -315,8 +323,8 @@ const DirectoryPage = () => {
       create: (d) => setupService.createLeaveType(d),
       // no update/remove — backend exposes list + create only for leave types
       columns: [
-        { header: "Code", render: (r) => <span className="font-mono text-[#4f1a60] font-semibold">{r.code || "—"}</span> },
-        { header: "Name", render: (r) => <span className="font-medium text-slate-900">{r.name}</span> },
+        { header: "Code", render: (r) => <span className="font-mono text-brand font-semibold">{r.code || "—"}</span> },
+        { header: "Name", render: (r) => <span className="font-medium text-ink">{r.name}</span> },
         { header: "Days", render: (r) => r.days_allowed ?? "—" },
         { header: "Paid", render: (r) => (r.is_paid ? "Yes" : "No") },
         { header: "Approval", render: (r) => (r.requires_approval ? "Required" : "Auto") },
@@ -702,11 +710,11 @@ const DirectoryPage = () => {
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60]">HRIS Hub</div>
-          <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+          <div className="text-xs font-semibold uppercase tracking-wider text-brand">HRIS Hub</div>
+          <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink">
             {tab === "Employees" ? "Employee Directory" : `${tab} Configurations`}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-ink-muted">
             {tab === "Employees"
               ? "Centralised dynamic registry of active profiles."
               : "Configure organizational setup models for your enterprise."}
@@ -715,7 +723,7 @@ const DirectoryPage = () => {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={downloadBulkTemplate}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            className="inline-flex items-center gap-2 rounded-xl border border-line bg-card px-4 py-2.5 text-sm font-semibold text-ink-2 shadow-sm hover:bg-sunken"
           >
             <Download className="h-4 w-4" /> Template
           </button>
@@ -723,50 +731,50 @@ const DirectoryPage = () => {
             (tab !== "Employees" && can(activeSetup.resource, "create"))) && (
             <button
               onClick={() => setBulkModalOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+              className="inline-flex items-center gap-2 rounded-xl border border-line bg-card px-4 py-2.5 text-sm font-semibold text-ink-2 shadow-sm hover:bg-sunken"
             >
               <Upload className="h-4 w-4" /> Bulk upload
             </button>
           )}
           {tab === "Employees"
             ? can(RESOURCE_CODES.EMPLOYEES, "create") && (
-                <button onClick={() => setShowAddEmployee(true)} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#4f1a60] to-[#8a2da8] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95">
+                <button onClick={() => setShowAddEmployee(true)} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95">
                   <Plus className="h-4 w-4" /> New employee
                 </button>
               )
             : can(activeSetup.resource, "create") && (
-                <button onClick={() => setSetupModal({ mode: "create" })} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#4f1a60] to-[#8a2da8] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95">
+                <button onClick={() => setSetupModal({ mode: "create" })} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95">
                   <Plus className="h-4 w-4" /> Add {activeSetup.singular}
                 </button>
               )}
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm">
+      <div className="flex flex-wrap gap-1 rounded-xl border border-line/80 bg-card p-1 shadow-sm">
         {TABS.map((t) => (
-          <button key={t} onClick={() => switchTab(t)} className="relative rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600">
+          <button key={t} onClick={() => switchTab(t)} className="relative rounded-lg px-3 py-1.5 text-xs font-semibold text-ink-muted">
             {tab === t && (
-              <motion.div layoutId="dir-tab" className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#4f1a60] to-[#8a2da8]" transition={{ type: "spring", stiffness: 400, damping: 32 }} />
+              <motion.div layoutId="dir-tab" className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2" transition={{ type: "spring", stiffness: 400, damping: 32 }} />
             )}
             <span className={`relative ${tab === t ? "text-white" : ""}`}>{t}</span>
           </button>
         ))}
       </div>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4">
-          <div className="flex flex-1 min-w-[240px] items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
-            <Search className="h-4 w-4 text-slate-400" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Filter ${tab.toLowerCase()}...`} className="w-full bg-transparent outline-none placeholder:text-slate-400" />
+      <div className="rounded-2xl border border-line/80 bg-card shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 border-b border-line-soft p-4">
+          <div className="flex flex-1 min-w-[240px] items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm">
+            <Search className="h-4 w-4 text-ink-faint" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Filter ${tab.toLowerCase()}...`} className="w-full bg-transparent outline-none placeholder:text-ink-faint" />
           </div>
         </div>
 
         <div className="overflow-x-auto">
           {loading ? (
-            <div className="p-8 text-center text-slate-500">Retrieving records from database...</div>
+            <div className="p-8 text-center text-ink-muted">Retrieving records from database...</div>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-slate-50/60 text-xs uppercase tracking-wider text-slate-500">
+              <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
                 <tr>
                   {tab === "Employees" ? (
                     <>
@@ -791,7 +799,7 @@ const DirectoryPage = () => {
               <tbody>
                 {filteredData.length === 0 ? (
                   <tr>
-                    <td colSpan={tab === "Employees" ? 7 : setupColSpan} className="p-8 text-center text-slate-400">
+                    <td colSpan={tab === "Employees" ? 7 : setupColSpan} className="p-8 text-center text-ink-faint">
                       No active records registered.
                     </td>
                   </tr>
@@ -802,34 +810,34 @@ const DirectoryPage = () => {
                       <tr
                         key={item.id || i}
                         onClick={() => { if (canUpdateEmployee) setSelectedEmployee(item); }}
-                        className={`border-t border-slate-100 hover:bg-slate-50/70 ${canUpdateEmployee ? "cursor-pointer" : ""} ${inactive ? "opacity-60" : ""}`}
+                        className={`border-t border-line-soft hover:bg-sunken/70 ${canUpdateEmployee ? "cursor-pointer" : ""} ${inactive ? "opacity-60" : ""}`}
                       >
-                        <td className="px-4 py-3 font-semibold text-slate-900">{empName(item)}</td>
-                        <td className="px-4 py-3 text-slate-600">{roleTitle(item.job_role_id)}</td>
-                        <td className="px-4 py-3 text-slate-600">{deptName(item.department_id)}</td>
+                        <td className="px-4 py-3 font-semibold text-ink">{empName(item)}</td>
+                        <td className="px-4 py-3 text-ink-muted">{roleTitle(item.job_role_id)}</td>
+                        <td className="px-4 py-3 text-ink-muted">{deptName(item.department_id)}</td>
                         <td className="px-4 py-3">
                           {inactive ? (
-                            <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">Inactive</span>
+                            <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs font-semibold text-ink-muted">Inactive</span>
                           ) : (
-                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-600">
+                            <span className="rounded-full bg-sunken px-2.5 py-1 text-xs font-semibold capitalize text-ink-muted">
                               {(item.employment_status || "—").replace(/_/g, " ")}
                             </span>
                           )}
                         </td>
                         <td className="px-4 py-3">₦{(Number(item.base_salary) || 0).toLocaleString()}</td>
-                        <td className="px-4 py-3 text-slate-500">{item.email}</td>
+                        <td className="px-4 py-3 text-ink-muted">{item.email}</td>
                         <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                           {canUpdateEmployee && (
                             <div className="flex items-center justify-end gap-1">
-                              <button onClick={() => setSelectedEmployee(item)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#4f1a60]" title="Edit">
+                              <button onClick={() => setSelectedEmployee(item)} className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken hover:text-brand" title="Edit">
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
-                              <button onClick={() => handleSendInvite(item)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#4f1a60]" title="Send password setup email">
+                              <button onClick={() => handleSendInvite(item)} className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken hover:text-brand" title="Send password setup email">
                                 <Mail className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 onClick={() => handleToggleActive(item)}
-                                className={`rounded-lg p-1.5 text-slate-400 ${inactive ? "hover:bg-emerald-50 hover:text-emerald-600" : "hover:bg-amber-50 hover:text-amber-600"}`}
+                                className={`rounded-lg p-1.5 text-ink-faint ${inactive ? "hover:bg-emerald-50 hover:text-emerald-600" : "hover:bg-amber-50 hover:text-amber-600"}`}
                                 title={inactive ? "Reactivate" : "Deactivate"}
                               >
                                 {inactive ? <UserCheck className="h-3.5 w-3.5" /> : <UserX className="h-3.5 w-3.5" />}
@@ -845,22 +853,22 @@ const DirectoryPage = () => {
                     const canUpd = !!activeSetup.update && can(activeSetup.resource, "update");
                     const canDel = !!activeSetup.remove && can(activeSetup.resource, "delete");
                     return (
-                      <tr key={item.id || i} className="border-t border-slate-100 hover:bg-slate-50/70">
+                      <tr key={item.id || i} className="border-t border-line-soft hover:bg-sunken/70">
                         {activeSetup.columns.map((c) => (
-                          <td key={c.header} className="px-4 py-3 text-slate-600">{c.render(item)}</td>
+                          <td key={c.header} className="px-4 py-3 text-ink-muted">{c.render(item)}</td>
                         ))}
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           {canUpd && (
-                            <button onClick={() => setSetupModal({ mode: "edit", record: item })} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#4f1a60]" title="Edit">
+                            <button onClick={() => setSetupModal({ mode: "edit", record: item })} className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken hover:text-brand" title="Edit">
                               <Pencil className="h-3.5 w-3.5" />
                             </button>
                           )}
                           {canDel && (
-                            <button onClick={() => handleDelete(item)} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete">
+                            <button onClick={() => handleDelete(item)} className="rounded-lg p-1.5 text-ink-faint hover:bg-red-50 hover:text-red-600" title="Delete">
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           )}
-                          {!canUpd && !canDel && <span className="text-xs text-slate-300">—</span>}
+                          {!canUpd && !canDel && <span className="text-xs text-ink-ghost">—</span>}
                         </td>
                       </tr>
                     );
@@ -872,22 +880,22 @@ const DirectoryPage = () => {
         </div>
 
         {tab === "Employees" && searchCapped && (
-          <div className="border-t border-slate-100 p-3 text-center text-xs text-amber-700 bg-amber-50/60">
+          <div className="border-t border-line-soft p-3 text-center text-xs text-amber-700 bg-amber-50/60">
             Search covers the first 100 employees — refine the search if who you’re looking for isn’t shown.
           </div>
         )}
 
         {tab === "Employees" && pagination && totalPages > 1 && (
-          <div className="flex items-center justify-between gap-3 border-t border-slate-100 p-4">
-            <span className="text-xs text-slate-500">
+          <div className="flex items-center justify-between gap-3 border-t border-line-soft p-4">
+            <span className="text-xs text-ink-muted">
               Page {pagination.page || page} of {totalPages}
               {typeof pagination.total === "number" ? ` · ${pagination.total} employees` : ""}
             </span>
             <div className="flex items-center gap-2">
-              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 disabled:opacity-40">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-muted disabled:opacity-40">
                 <ChevronLeft className="h-3.5 w-3.5" /> Prev
               </button>
-              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 disabled:opacity-40">
+              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-muted disabled:opacity-40">
                 Next <ChevronRight className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -1024,10 +1032,10 @@ function BulkUploadModal({ tab, onClose, onSubmit }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
+      <div className="w-full max-w-lg rounded-2xl bg-card shadow-xl">
         <div className="flex items-center justify-between border-b px-6 py-4">
-          <h3 className="text-lg font-bold text-slate-900">Bulk Upload · {tab}</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+          <h3 className="text-lg font-bold text-ink">Bulk Upload · {tab}</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1040,18 +1048,18 @@ function BulkUploadModal({ tab, onClose, onSubmit }) {
             </div>
           )}
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-600">
-            <p className="font-semibold text-slate-800">Supported formats</p>
+          <div className="rounded-xl border border-line bg-sunken/60 p-4 text-sm text-ink-muted">
+            <p className="font-semibold text-ink-2">Supported formats</p>
             <p className="mt-1">Upload either a CSV or JSON array file. CSV headers should match the template column names.</p>
           </div>
 
           <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">Data file</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Data file</span>
             <input
               type="file"
               accept=".csv,.json"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-slate-700"
+              className="mt-1.5 block w-full rounded-xl border border-line bg-card px-3 py-2 text-sm text-ink-2 file:mr-3 file:rounded-lg file:border-0 file:bg-sunken file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-ink-2"
             />
           </label>
 
@@ -1062,8 +1070,8 @@ function BulkUploadModal({ tab, onClose, onSubmit }) {
           )}
 
           <div className="flex gap-2 justify-end pt-1">
-            <button type="button" onClick={onClose} className="h-11 border border-slate-200 rounded-xl px-4 text-sm font-semibold text-slate-600">Cancel</button>
-            <button type="submit" disabled={saving} className="h-11 bg-[#4f1a60] text-white rounded-xl px-5 text-sm font-semibold disabled:opacity-75">
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+            <button type="submit" disabled={saving} className="h-11 bg-brand text-white rounded-xl px-5 text-sm font-semibold disabled:opacity-75">
               {saving ? "Uploading…" : "Upload and Create"}
             </button>
           </div>
@@ -1131,15 +1139,15 @@ function SetupModal({ config, record, onClose, onSaved }) {
     }
   };
 
-  const inputCls = "w-full h-11 border border-slate-200 bg-white rounded-xl px-3 outline-none mt-1 focus:border-[#4f1a60]";
-  const labelCls = "text-xs font-semibold text-slate-500 uppercase tracking-wider";
+  const inputCls = "w-full h-11 border border-line bg-card rounded-xl px-3 outline-none mt-1 focus:border-brand";
+  const labelCls = "text-xs font-semibold text-ink-muted uppercase tracking-wider";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-xl max-h-[90vh] flex flex-col">
+      <div className="w-full max-w-md rounded-2xl bg-card shadow-xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between border-b px-6 py-4">
-          <h3 className="text-lg font-bold text-slate-900">{isEdit ? "Edit" : "Add"} {config.singular}</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+          <h3 className="text-lg font-bold text-ink">{isEdit ? "Edit" : "Add"} {config.singular}</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1157,8 +1165,8 @@ function SetupModal({ config, record, onClose, onSaved }) {
               if (f.type === "checkbox") {
                 return (
                   <label key={f.key} className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={!!form[f.key]} onChange={(e) => set(f.key, e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-[#4f1a60]" />
-                    <span className="text-sm font-semibold text-slate-700">{f.label}</span>
+                    <input type="checkbox" checked={!!form[f.key]} onChange={(e) => set(f.key, e.target.checked)} className="h-4 w-4 rounded border-line text-brand" />
+                    <span className="text-sm font-semibold text-ink-2">{f.label}</span>
                   </label>
                 );
               }
@@ -1172,13 +1180,13 @@ function SetupModal({ config, record, onClose, onSaved }) {
                       <button
                         type="button"
                         onClick={() => set(f.key, [...docs, { name: "", is_mandatory: true }])}
-                        className="inline-flex items-center gap-1 text-xs font-bold text-[#4f1a60]"
+                        className="inline-flex items-center gap-1 text-xs font-bold text-brand"
                       >
                         <Plus className="h-3 w-3" /> {f.addLabel || "Add"}
                       </button>
                     </div>
                     {docs.length === 0 ? (
-                      <p className="mt-1.5 text-xs text-slate-400">
+                      <p className="mt-1.5 text-xs text-ink-faint">
                         None yet — employees hired into this title won’t be asked to upload documents.
                       </p>
                     ) : (
@@ -1189,21 +1197,21 @@ function SetupModal({ config, record, onClose, onSaved }) {
                               value={d.name || ""}
                               onChange={(e) => patch(i, { name: e.target.value })}
                               placeholder={f.placeholder || ""}
-                              className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#4f1a60]"
+                              className="h-10 min-w-0 flex-1 rounded-xl border border-line px-3 text-sm outline-none focus:border-brand"
                             />
-                            <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-slate-600 cursor-pointer">
+                            <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-ink-muted cursor-pointer">
                               <input
                                 type="checkbox"
                                 checked={d.is_mandatory !== false}
                                 onChange={(e) => patch(i, { is_mandatory: e.target.checked })}
-                                className="h-3.5 w-3.5 rounded border-slate-300 text-[#4f1a60]"
+                                className="h-3.5 w-3.5 rounded border-line text-brand"
                               />
                               Mandatory
                             </label>
                             <button
                               type="button"
                               onClick={() => set(f.key, docs.filter((_, j) => j !== i))}
-                              className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                              className="rounded-lg p-1.5 text-ink-faint hover:bg-red-50 hover:text-red-600"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -1241,8 +1249,8 @@ function SetupModal({ config, record, onClose, onSaved }) {
           </div>
 
           <div className="flex gap-2 justify-end border-t px-6 py-4">
-            <button type="button" onClick={onClose} className="h-11 border border-slate-200 rounded-xl px-4 text-sm font-semibold text-slate-600">Cancel</button>
-            <button type="submit" disabled={saving} className="h-11 bg-[#4f1a60] text-white rounded-xl px-5 text-sm font-semibold disabled:opacity-75">
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+            <button type="submit" disabled={saving} className="h-11 bg-brand text-white rounded-xl px-5 text-sm font-semibold disabled:opacity-75">
               {saving ? "Saving…" : isEdit ? "Save Changes" : `Create ${config.singular}`}
             </button>
           </div>
@@ -1305,15 +1313,15 @@ function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrade
     [form.firstName, form.lastName].filter(Boolean).join(" ") ||
     (employee?.email ? employee.email.split("@")[0] : "Employee");
 
-  const inputCls = "w-full h-11 border border-slate-200 bg-white rounded-xl px-3 outline-none mt-1.5 focus:border-[#4f1a60]";
-  const labelCls = "text-xs font-semibold text-slate-500 uppercase tracking-wider block";
+  const inputCls = "w-full h-11 border border-line bg-card rounded-xl px-3 outline-none mt-1.5 focus:border-brand";
+  const labelCls = "text-xs font-semibold text-ink-muted uppercase tracking-wider block";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl max-h-[90vh] flex flex-col">
+      <div className="w-full max-w-lg rounded-2xl bg-card shadow-xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between border-b px-6 py-4">
-          <h3 className="text-lg font-bold text-slate-900">Edit Profile · {displayName}</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+          <h3 className="text-lg font-bold text-ink">Edit Profile · {displayName}</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1322,13 +1330,13 @@ function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrade
           <div className="flex-1 overflow-y-auto px-6 py-5 grid gap-4 sm:grid-cols-2">
             <div>
               <label className={labelCls}>First name</label>
-              <input value={form.firstName} disabled className={`${inputCls} bg-slate-50 text-slate-500 cursor-not-allowed`} />
+              <input value={form.firstName} disabled className={`${inputCls} bg-sunken text-ink-muted cursor-not-allowed`} />
             </div>
             <div>
               <label className={labelCls}>Last name</label>
-              <input value={form.lastName} disabled className={`${inputCls} bg-slate-50 text-slate-500 cursor-not-allowed`} />
+              <input value={form.lastName} disabled className={`${inputCls} bg-sunken text-ink-muted cursor-not-allowed`} />
             </div>
-            <p className="sm:col-span-2 -mt-2 text-[11px] text-slate-400">
+            <p className="sm:col-span-2 -mt-2 text-[11px] text-ink-faint">
               Name is set when the employee is created and can’t be edited here yet.
             </p>
             <div>
@@ -1399,8 +1407,8 @@ function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrade
           </div>
 
           <div className="flex gap-2 justify-end border-t px-6 py-4">
-            <button type="button" onClick={onClose} className="h-11 border border-slate-200 rounded-xl px-4 text-sm font-semibold text-slate-600">Cancel</button>
-            <button type="submit" disabled={saving} className="h-11 bg-[#4f1a60] text-white rounded-xl px-5 text-sm font-semibold disabled:opacity-75">
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+            <button type="submit" disabled={saving} className="h-11 bg-brand text-white rounded-xl px-5 text-sm font-semibold disabled:opacity-75">
               {saving ? "Saving…" : "Save Changes"}
             </button>
           </div>
@@ -1460,20 +1468,20 @@ function AddEmployeeDrawer({ departments = [], jobRoles = [], payGrades = [], pa
     }
   };
 
-  const inputCls = "w-full h-11 border border-slate-200 rounded-xl px-3.5 mt-1.5 outline-none focus:border-[#4f1a60]";
-  const labelCls = "text-xs font-semibold uppercase tracking-wider text-slate-600";
-  const selectCls = "w-full h-11 border border-slate-200 bg-white rounded-xl px-3.5 mt-1.5 outline-none focus:border-[#4f1a60]";
+  const inputCls = "w-full h-11 border border-line rounded-xl px-3.5 mt-1.5 outline-none focus:border-brand";
+  const labelCls = "text-xs font-semibold uppercase tracking-wider text-ink-muted";
+  const selectCls = "w-full h-11 border border-line bg-card rounded-xl px-3.5 mt-1.5 outline-none focus:border-brand";
 
   return (
     <>
       <div onClick={onClose} className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm" />
-      <div className="fixed inset-0 z-50 flex flex-col bg-white shadow-2xl sm:left-auto sm:right-0 sm:top-0 sm:h-screen sm:w-full sm:max-w-md">
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-slate-100 bg-white/95 px-5 py-4 backdrop-blur">
+      <div className="fixed inset-0 z-50 flex flex-col bg-card shadow-2xl sm:left-auto sm:right-0 sm:top-0 sm:h-screen sm:w-full sm:max-w-md">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-line-soft bg-card/95 px-5 py-4 backdrop-blur">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-[#4f1a60]">Directory</div>
-            <h3 className="truncate text-base font-semibold text-slate-900">New employee</h3>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-brand">Directory</div>
+            <h3 className="truncate text-base font-semibold text-ink">New employee</h3>
           </div>
-          <button type="button" onClick={onClose} className="-mr-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100">
+          <button type="button" onClick={onClose} className="-mr-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-ink-muted hover:bg-sunken">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -1571,9 +1579,9 @@ function AddEmployeeDrawer({ departments = [], jobRoles = [], payGrades = [], pa
             </div>
           </div>
 
-          <div className="sticky bottom-0 z-10 flex items-center justify-end gap-2 border-t border-slate-100 bg-white/95 px-5 py-3 backdrop-blur">
-            <button type="button" onClick={onClose} className="h-11 flex-1 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 sm:flex-none">Cancel</button>
-            <button type="submit" disabled={saving} className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#4f1a60] to-[#8a2da8] px-4 text-sm font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-70 sm:flex-none">
+          <div className="sticky bottom-0 z-10 flex items-center justify-end gap-2 border-t border-line-soft bg-card/95 px-5 py-3 backdrop-blur">
+            <button type="button" onClick={onClose} className="h-11 flex-1 rounded-xl border border-line px-4 text-sm font-semibold text-ink-2 hover:bg-sunken sm:flex-none">Cancel</button>
+            <button type="submit" disabled={saving} className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 text-sm font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-70 sm:flex-none">
               <CheckCircle2 className="h-4 w-4" /> {saving ? "Creating…" : "Create employee"}
             </button>
           </div>

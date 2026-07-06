@@ -12,28 +12,34 @@ const displayName = (user) => getEmployeeName(user, "User");
 const initials = getInitials;
 
 
-const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMobile, items, onSignout }) => (
+const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMobile, items, onSignout, logoUrl, orgName }) => (
   <>
-    <div className="flex h-16 items-center justify-between border-b border-slate-100 px-4">
+    <div className="flex h-16 items-center justify-between border-b border-line-soft px-4">
       <div className="flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#4f1a60] text-white font-bold">
-          D
-        </div>
+        {logoUrl ? (
+          <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg border border-line bg-card">
+            <img src={logoUrl} alt={orgName || "Company logo"} className="h-full w-full object-contain" />
+          </div>
+        ) : (
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-white font-bold">
+            D
+          </div>
+        )}
         {(!collapsed || isMobile) && (
-          <span className="font-bold text-slate-800 text-lg">dash.</span>
+          <span className="truncate font-bold text-ink-2 text-lg">{orgName || "dash."}</span>
         )}
       </div>
       {isMobile ? (
         <button
           onClick={onCloseMobile}
-          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+          className="rounded-lg p-1.5 text-ink-muted hover:bg-sunken"
         >
           <X className="h-4 w-4" />
         </button>
       ) : (
         <button
           onClick={onToggleCollapse}
-          className="hidden lg:block rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          className="hidden lg:block rounded-lg p-1.5 text-ink-faint hover:bg-sunken hover:text-ink-2"
         >
           <ChevronLeft
             className={`h-4 w-4 transition-transform ${collapsed ? "rotate-180" : ""}`}
@@ -53,8 +59,8 @@ const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMo
             className={({ isActive }) =>
               `relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
                 isActive
-                  ? "text-[#4f1a60] font-semibold"
-                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                  ? "text-brand font-semibold"
+                  : "text-ink-muted hover:bg-sunken hover:text-ink"
               }`
             }
           >
@@ -63,7 +69,7 @@ const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMo
                 {isActive && (
                   <motion.div
                     layoutId={isMobile ? "nav-active-m" : "nav-active"}
-                    className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#4f1a60]/10 to-[#8a2da8]/5 ring-1 ring-inset ring-[#4f1a60]/20"
+                    className="absolute inset-0 rounded-xl bg-gradient-to-r from-brand/10 to-brand-2/5 ring-1 ring-inset ring-brand/20"
                     transition={{ type: "spring", stiffness: 400, damping: 32 }}
                   />
                 )}
@@ -76,10 +82,10 @@ const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMo
       })}
     </nav>
 
-    <div className="border-t border-slate-100 p-3">
+    <div className="border-t border-line-soft p-3">
       <button
         onClick={onSignout}
-        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-600 hover:bg-red-50 hover:text-red-700 transition-colors"
+        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink-muted hover:bg-red-50 hover:text-red-700 transition-colors"
       >
         <LogOut className="h-[18px] w-[18px]" />
         {(isMobile || !collapsed) && <span>Sign out</span>}
@@ -121,12 +127,14 @@ const AppLayout = () => {
     onCloseMobile: () => setMobileOpen(false),
     items,
     onSignout: handleSignout,
+    logoUrl: config?.logo_url || null,
+    orgName: config?.organization_name || null,
   };
 
   return (
-    <div className="flex min-h-screen w-full bg-slate-50/60">
+    <div className="flex min-h-screen w-full bg-sunken/60">
       <aside
-        className={`sticky top-0 z-30 hidden lg:flex h-screen flex-col border-r border-slate-200/80 bg-white transition-[width] duration-300 ${
+        className={`sticky top-0 z-30 hidden lg:flex h-screen flex-col border-r border-line/80 bg-card transition-[width] duration-300 ${
           collapsed ? "w-[76px]" : "w-[260px]"
         }`}
       >
@@ -148,7 +156,7 @@ const AppLayout = () => {
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", stiffness: 300, damping: 32 }}
-              className="fixed left-0 top-0 z-50 flex h-screen w-[260px] max-w-[80vw] flex-col border-r border-slate-200/80 bg-white shadow-2xl lg:hidden"
+              className="fixed left-0 top-0 z-50 flex h-screen w-[260px] max-w-[80vw] flex-col border-r border-line/80 bg-card shadow-2xl lg:hidden"
             >
               <SidebarInner isMobile {...sidebarProps} />
             </motion.aside>
@@ -157,44 +165,44 @@ const AppLayout = () => {
       </AnimatePresence>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-2 border-b border-slate-200/80 bg-white/70 px-3 sm:px-6 backdrop-blur-xl">
+        <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-2 border-b border-line/80 bg-card/70 px-3 sm:px-6 backdrop-blur-xl">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button
               onClick={() => setMobileOpen(true)}
-              className="lg:hidden rounded-lg border border-slate-200 bg-white p-2 text-slate-600 shadow-sm shrink-0"
+              className="lg:hidden rounded-lg border border-line bg-card p-2 text-ink-muted shadow-sm shrink-0"
               aria-label="Open menu"
             >
               <Menu className="h-4 w-4" />
             </button>
-            <div className="flex min-w-0 items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm sm:px-3">
+            <div className="flex min-w-0 items-center gap-2 rounded-full border border-line bg-card px-2.5 py-1.5 shadow-sm sm:px-3">
               <div className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-              <span className="truncate text-xs font-semibold text-slate-700">
+              <span className="truncate text-xs font-semibold text-ink-2">
                 {config?.organization_name || "Workspace"}
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <div className="hidden xl:flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-500 shadow-sm w-72">
+            <div className="hidden xl:flex items-center gap-2 rounded-lg border border-line bg-card px-3 py-1.5 text-sm text-ink-muted shadow-sm w-72">
               <Search className="h-4 w-4" />
               <input
                 placeholder="Search directory, leaves, adjustments…"
-                className="w-full bg-transparent outline-none placeholder:text-slate-400"
+                className="w-full bg-transparent outline-none placeholder:text-ink-faint"
               />
             </div>
 
-            <button className="relative rounded-lg border border-slate-200 bg-white p-2 text-slate-600 shadow-sm hover:text-[#4f1a60]">
+            <button className="relative rounded-lg border border-line bg-card p-2 text-ink-muted shadow-sm hover:text-brand">
               <Bell className="h-4 w-4" />
-              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#4f1a60]" />
+              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-brand" />
             </button>
 
-            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-2 shadow-sm sm:pr-3">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#4f1a60] to-[#8a2da8] text-[11px] font-bold text-white">
+            <div className="flex items-center gap-2 rounded-full border border-line bg-card py-1 pl-1 pr-2 shadow-sm sm:pr-3">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-[11px] font-bold text-white">
                 {initials(name)}
               </div>
               <div className="hidden sm:block text-xs leading-tight">
-                <div className="font-semibold text-slate-900">{name}</div>
-                <div className="text-[10px] text-slate-500">
+                <div className="font-semibold text-ink">{name}</div>
+                <div className="text-[10px] text-ink-muted">
                   {isAdmin ? "Administrator" : "Employee"}
                 </div>
               </div>

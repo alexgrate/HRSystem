@@ -18,7 +18,18 @@ const ACTIVE_CLASSES = {
   can_delete: "border-red-500 bg-red-500 text-white",
   can_manage: "border-amber-500 bg-amber-500 text-white",
 };
-const INACTIVE_CLASS = "border-slate-200 bg-white text-slate-400 hover:border-slate-400";
+const INACTIVE_CLASS = "border-line bg-card text-ink-faint hover:border-ink-faint";
+
+const Legend = () => (
+  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-ink-muted">
+    {PERMISSION_ACTIONS.map((a) => (
+      <div key={a.key} className="flex items-center gap-1.5">
+        <span className={`flex h-4 w-4 items-center justify-center rounded text-[9px] font-bold text-white ${ACTIVE_CLASSES[a.key]}`}>{a.short}</span>
+        {a.label}
+      </div>
+    ))}
+  </div>
+);
 
 const VIEWS = [
   { key: "job-title-resources", label: "Job Title Resources", Icon: ShieldCheck },
@@ -31,16 +42,16 @@ export function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60]">Platform Security</div>
-        <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900"> Roles Permissions</h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <div className="text-xs font-semibold uppercase tracking-wider text-brand">Platform Security</div>
+        <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink"> Roles Permissions</h1>
+        <p className="mt-1 text-sm text-ink-muted">
           {view === "job-title-resources"
             ? "Directly assign system resources to each job title with fully customizable permissions."
             : "Assign job titles to users. Users inherit all resource permissions from their assigned job title."}
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm w-fit">
+      <div className="flex flex-wrap gap-1 rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit">
         {VIEWS.map((v) => {
           const Icon = v.Icon;
           return (
@@ -48,13 +59,13 @@ export function SettingsPage() {
               key={v.key}
               onClick={() => setView(v.key)}
               className={`relative inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
-                view === v.key ? "text-white" : "text-slate-600"
+                view === v.key ? "text-white" : "text-ink-muted"
               }`}
             >
               {view === v.key && (
                 <motion.div
                   layoutId="settings-tab"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#4f1a60] to-[#8a2da8]"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2"
                   transition={{ type: "spring", stiffness: 400, damping: 32 }}
                 />
               )}
@@ -195,24 +206,24 @@ function JobTitleResourceMatrix() {
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Loading job title resource matrix...</div>;
+    return <div className="p-12 text-center text-ink-muted bg-card rounded-2xl border border-line-soft">Loading job title resource matrix...</div>;
   }
 
   if (error) {
     return (
       <div className="p-12 text-center border border-dashed border-red-200 rounded-2xl bg-red-50/40">
         <ShieldAlert className="mx-auto h-12 w-12 text-red-300" />
-        <h3 className="mt-4 text-sm font-semibold text-slate-900">{error}</h3>
+        <h3 className="mt-4 text-sm font-semibold text-ink">{error}</h3>
       </div>
     );
   }
 
   if (resources.length === 0 || jobRoles.length === 0) {
     return (
-      <div className="p-12 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
-        <ShieldAlert className="mx-auto h-12 w-12 text-slate-300" />
-        <h3 className="mt-4 text-sm font-semibold text-slate-900">No resources or job titles configured</h3>
-        <p className="mt-1 text-xs text-slate-500">Create job titles first, then configure resource access here.</p>
+      <div className="p-12 text-center border border-dashed border-line rounded-2xl bg-card">
+        <ShieldAlert className="mx-auto h-12 w-12 text-ink-ghost" />
+        <h3 className="mt-4 text-sm font-semibold text-ink">No resources or job titles configured</h3>
+        <p className="mt-1 text-xs text-ink-muted">Create job titles first, then configure resource access here.</p>
       </div>
     );
   }
@@ -225,24 +236,26 @@ function JobTitleResourceMatrix() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm p-4 sm:p-5">
-        <div className="mb-4 text-xs text-slate-500">
+      <Legend />
+
+      <div className="rounded-2xl border border-line/80 bg-card shadow-sm p-4 sm:p-5">
+        <div className="mb-4 text-xs text-ink-muted">
           Choose a job title, then assign resources in a focused editor.
         </div>
         <div className="space-y-2">
           {jobRoles.map((jr) => {
             const count = assignedCount(jr.id);
             return (
-              <div key={jr.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-3">
+              <div key={jr.id} className="flex items-center justify-between gap-3 rounded-xl border border-line px-3 py-3">
                 <div className="min-w-0">
-                  <div className="font-semibold text-slate-900">{jr.title}</div>
-                  <div className="text-xs text-slate-500">
+                  <div className="font-semibold text-ink">{jr.title}</div>
+                  <div className="text-xs text-ink-muted">
                     {count === null ? "Permissions not loaded yet" : `${count} resources assigned`}
                   </div>
                 </div>
                 <button
                   onClick={() => openEditor(jr)}
-                  className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-sunken"
                 >
                   Assign Resources
                 </button>
@@ -252,44 +265,40 @@ function JobTitleResourceMatrix() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
-        {PERMISSION_ACTIONS.map((a) => (
-          <div key={a.key} className="flex items-center gap-2">
-            <span className={`flex h-4 w-4 items-center justify-center rounded text-[9px] font-bold text-white ${ACTIVE_CLASSES[a.key]}`}>{a.short}</span>
-            {a.label}
-          </div>
-        ))}
-      </div>
-
       {activeJobRole && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-xl border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl bg-card shadow-xl border border-line">
+            <div className="flex items-center justify-between border-b border-line-soft px-5 py-4">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Assign Resources: {activeJobRole.title}</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Enable permissions per resource, then save.</p>
+                <h3 className="text-base font-bold text-ink">Assign Resources: {activeJobRole.title}</h3>
+                <p className="text-xs text-ink-muted mt-0.5">Enable permissions per resource, then save.</p>
               </div>
-              <button onClick={() => setActiveJobRole(null)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
+              <button onClick={() => setActiveJobRole(null)} className="rounded-lg p-1.5 text-ink-muted hover:bg-sunken">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="p-4 sm:p-5 overflow-y-auto max-h-[calc(90vh-138px)]">
+            {/* Always-visible legend — the buttons it explains are right below. */}
+            <div className="border-b border-line-soft bg-sunken/50 px-5 py-2.5">
+              <Legend />
+            </div>
+
+            <div className="p-4 sm:p-5 overflow-y-auto max-h-[calc(90vh-180px)]">
               {modalLoading ? (
-                <div className="p-10 text-center text-slate-500">Loading resources...</div>
+                <div className="p-10 text-center text-ink-muted">Loading resources...</div>
               ) : (
                 <div className="space-y-4">
                   {groupedResources.map(([moduleName, mods]) => (
-                    <div key={moduleName} className="rounded-xl border border-slate-200 overflow-hidden">
-                      <div className="bg-slate-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">{moduleName}</div>
-                      <div className="divide-y divide-slate-100">
+                    <div key={moduleName} className="rounded-xl border border-line overflow-hidden">
+                      <div className="bg-sunken px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-ink-muted">{moduleName}</div>
+                      <div className="divide-y divide-line-soft">
                         {mods.map((resource) => {
                           const perms = modalDraft[resource.id] || EMPTY_PERMS;
                           return (
                             <div key={resource.id} className="px-3 py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                               <div>
-                                <div className="text-sm font-semibold text-slate-900">{resource.name}</div>
-                                <div className="text-[11px] text-slate-500 font-mono">{resource.code}</div>
+                                <div className="text-sm font-semibold text-ink">{resource.name}</div>
+                                <div className="text-[11px] text-ink-muted font-mono">{resource.code}</div>
                               </div>
                               <div className="flex items-center gap-1.5">
                                 {PERMISSION_ACTIONS.map((action) => {
@@ -319,17 +328,17 @@ function JobTitleResourceMatrix() {
               )}
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-line-soft px-5 py-3">
               <button
                 onClick={() => setActiveJobRole(null)}
-                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700"
+                className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-2"
               >
                 Cancel
               </button>
               <button
                 onClick={saveDraft}
                 disabled={!canManage || modalLoading || modalSaving}
-                className="rounded-lg bg-[#4f1a60] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
               >
                 {modalSaving ? "Saving..." : "Save Permissions"}
               </button>
@@ -418,14 +427,14 @@ function UserJobTitleAssignment() {
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Loading user assignments...</div>;
+    return <div className="p-12 text-center text-ink-muted bg-card rounded-2xl border border-line-soft">Loading user assignments...</div>;
   }
 
   if (error) {
     return (
       <div className="p-12 text-center border border-dashed border-red-200 rounded-2xl bg-red-50/40">
         <ShieldAlert className="mx-auto h-12 w-12 text-red-300" />
-        <h3 className="mt-4 text-sm font-semibold text-slate-900">{error}</h3>
+        <h3 className="mt-4 text-sm font-semibold text-ink">{error}</h3>
       </div>
     );
   }
@@ -438,22 +447,22 @@ function UserJobTitleAssignment() {
         </div>
       )}
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
-        <div className="border-b border-slate-100 p-4">
-          <div className="flex min-w-[240px] items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
-            <Search className="h-4 w-4 text-slate-400" />
+      <div className="rounded-2xl border border-line/80 bg-card shadow-sm overflow-hidden">
+        <div className="border-b border-line-soft p-4">
+          <div className="flex min-w-[240px] items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm">
+            <Search className="h-4 w-4 text-ink-faint" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search users by name or email..."
-              className="w-full bg-transparent outline-none placeholder:text-slate-400"
+              className="w-full bg-transparent outline-none placeholder:text-ink-faint"
             />
           </div>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50/60 text-xs uppercase tracking-wider text-slate-500">
+            <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">User</th>
                 <th className="px-4 py-3 text-left font-semibold">Current Job Title</th>
@@ -464,7 +473,7 @@ function UserJobTitleAssignment() {
             <tbody>
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="p-8 text-center text-slate-400">No users found.</td>
+                  <td colSpan={4} className="p-8 text-center text-ink-faint">No users found.</td>
                 </tr>
               ) : (
                 filteredUsers.map((user) => {
@@ -473,18 +482,18 @@ function UserJobTitleAssignment() {
                   const busy = savingId === user.id;
 
                   return (
-                    <tr key={user.id} className="border-t border-slate-100">
+                    <tr key={user.id} className="border-t border-line-soft">
                       <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-900">{getEmployeeName(user, "Employee")}</div>
-                        <div className="text-xs text-slate-500">{user.email || "-"}</div>
+                        <div className="font-semibold text-ink">{getEmployeeName(user, "Employee")}</div>
+                        <div className="text-xs text-ink-muted">{user.email || "-"}</div>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{jobRoleName(user.job_role_id)}</td>
+                      <td className="px-4 py-3 text-ink-muted">{jobRoleName(user.job_role_id)}</td>
                       <td className="px-4 py-3">
                         <select
                           value={draftValue}
                           onChange={(e) => setDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
                           disabled={!canManage || busy}
-                          className="h-10 min-w-[240px] rounded-xl border border-slate-200 bg-white px-3 outline-none focus:border-[#4f1a60] disabled:opacity-60"
+                          className="h-10 min-w-[240px] rounded-xl border border-line bg-card px-3 outline-none focus:border-brand disabled:opacity-60"
                         >
                           <option value="">Unassigned</option>
                           {jobRoles.map((role) => (
@@ -496,7 +505,7 @@ function UserJobTitleAssignment() {
                         <button
                           onClick={() => save(user.id)}
                           disabled={!canManage || !changed || busy}
-                          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-40"
+                          className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 disabled:opacity-40"
                         >
                           {busy ? "Saving..." : "Apply"}
                         </button>
@@ -510,7 +519,7 @@ function UserJobTitleAssignment() {
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-ink-muted">
         Job titles determine each user's resource access profile. Assigning a new job title updates inherited permissions.
       </p>
     </div>

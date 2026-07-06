@@ -99,39 +99,39 @@ const OnboardingPage = () => {
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60]">Getting Started</div>
-        <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Set up your workspace</h1>
-        <p className="mt-1 text-sm text-slate-500">Configure your organization’s foundations, then onboard your people.</p>
+        <div className="text-xs font-semibold uppercase tracking-wider text-brand">Getting Started</div>
+        <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink">Set up your workspace</h1>
+        <p className="mt-1 text-sm text-ink-muted">Configure your organization’s foundations, then onboard your people.</p>
       </div>
 
       {loading ? (
-        <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-100">Checking your setup…</div>
+        <div className="p-12 text-center text-ink-muted bg-card rounded-2xl border border-line-soft">Checking your setup…</div>
       ) : (
         <>
           {/* Progress */}
-          <div className="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-[#4f1a60]/5 to-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-line/80 bg-gradient-to-br from-brand/5 to-card p-6 shadow-sm">
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <div>
-                <div className="text-sm font-semibold text-slate-900">{done} of {steps.length} areas configured</div>
-                <div className="text-xs text-slate-500">Complete these to unlock the full HRIS.</div>
+                <div className="text-sm font-semibold text-ink">{done} of {steps.length} areas configured</div>
+                <div className="text-xs text-ink-muted">Complete these to unlock the full HRIS.</div>
               </div>
-              <div className="text-2xl font-bold text-[#4f1a60]">{pct}%</div>
+              <div className="text-2xl font-bold text-brand">{pct}%</div>
             </div>
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-              <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.6, ease: "easeOut" }} className="h-full rounded-full bg-gradient-to-r from-[#4f1a60] to-[#8a2da8]" />
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-sunken">
+              <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.6, ease: "easeOut" }} className="h-full rounded-full bg-gradient-to-r from-brand to-brand-2" />
             </div>
           </div>
 
           {/* Quick start (only when the org is essentially empty) */}
           {isEmpty && canBootstrap && (
-            <div className="rounded-2xl border border-[#4f1a60]/20 bg-white p-6 shadow-sm">
+            <div className="rounded-2xl border border-brand/20 bg-card p-6 shadow-sm">
               <div className="flex items-start gap-4 flex-wrap">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#4f1a60]/10 text-[#4f1a60]">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
                   <Rocket className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="font-semibold text-slate-900">Start with a template</h3>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <h3 className="font-semibold text-ink">Start with a template</h3>
+                  <p className="mt-1 text-sm text-ink-muted">
                     New here? Load a sample structure (departments, job titles, pay grades, leave types) so you can explore
                     right away, then tweak the values. You can also build everything manually below.
                   </p>
@@ -139,7 +139,7 @@ const OnboardingPage = () => {
                 <button
                   onClick={runBootstrap}
                   disabled={bootstrapping}
-                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#4f1a60] to-[#8a2da8] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-70"
+                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-70"
                 >
                   <Sparkles className="h-4 w-4" /> {bootstrapping ? "Loading…" : "Load starter template"}
                 </button>
@@ -156,40 +156,40 @@ const OnboardingPage = () => {
                 <button
                   key={s.key}
                   onClick={() => navigate(s.to)}
-                  className="group flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-sm transition-all hover:border-[#4f1a60]/30 hover:shadow-md"
+                  className="group flex items-center gap-4 rounded-2xl border border-line/80 bg-card p-4 text-left shadow-sm transition-all hover:border-brand/30 hover:shadow-md"
                 >
-                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${complete ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-500"}`}>
+                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${complete ? "bg-emerald-50 text-emerald-600" : "bg-sunken text-ink-muted"}`}>
                     {complete ? <CheckCircle2 className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-900">{s.label}</span>
-                      {complete && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{s.count}</span>}
+                      <span className="font-semibold text-ink">{s.label}</span>
+                      {complete && <span className="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-bold text-ink-muted">{s.count}</span>}
                     </div>
-                    <div className="text-xs text-slate-500">{s.desc}</div>
+                    <div className="text-xs text-ink-muted">{s.desc}</div>
                   </div>
-                  <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-[#4f1a60]" />
+                  <ArrowRight className="h-4 w-4 shrink-0 text-ink-ghost transition-transform group-hover:translate-x-0.5 group-hover:text-brand" />
                 </button>
               );
             })}
           </div>
 
           {/* Access control card */}
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
             <div className="flex items-start gap-4 flex-wrap">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#4f1a60]/10 text-[#4f1a60]">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
                 <ShieldCheck className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <h3 className="font-semibold text-slate-900">Access control</h3>
-                <p className="mt-1 text-sm text-slate-500">
+                <h3 className="font-semibold text-ink">Access control</h3>
+                <p className="mt-1 text-sm text-ink-muted">
                   Set what each role can do, then map roles to job titles so employees inherit the right permissions.
                   {counts?.systemRoles ? ` ${counts.systemRoles} roles available.` : ""}
                 </p>
               </div>
               <button
                 onClick={() => navigate("/app/settings")}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                className="inline-flex items-center gap-2 rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-ink-2 hover:bg-sunken"
               >
                 Configure access <ArrowRight className="h-4 w-4" />
               </button>

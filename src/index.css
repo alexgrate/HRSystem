@@ -1,1 +1,158 @@
 @import "tailwindcss";
+
+/* ── Brand theming ────────────────────────────────────────────────────────
+   Every brand color in the app flows through these variables. Company
+   Settings overwrites them at runtime (see ConfigContext), so the saved
+   primary/secondary/accent actually restyle the workspace. */
+:root {
+  --brand-primary: #4f1a60;
+  --brand-secondary: #8a2da8;
+  --brand-accent: #e9a8ff;
+  --brand-primary-dark: #3d1248;   /* hover/darker shade, derived from primary */
+  --brand-darkest: #2a0d35;        /* deep gradient anchor, derived from primary */
+
+  /* Surfaces & inks — the light theme. The .dark class swaps these, driven
+     by the organization's theme_mode setting (see ConfigContext). */
+  --surface-page: #f8fafc;
+  --surface-card: #ffffff;
+  --surface-sunken: #f1f5f9;
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --ink-muted: #64748b;
+  --ink-faint: #94a3b8;
+  --ink-ghost: #cbd5e1;
+  --line: #e2e8f0;
+  --line-soft: #f1f5f9;
+  color-scheme: light;
+}
+
+.dark {
+  --surface-page: #0e0f13;
+  --surface-card: #16171d;
+  --surface-sunken: #1d1f27;
+  --ink: #f1f5f9;
+  --ink-2: #cbd5e1;
+  --ink-muted: #94a3b8;
+  --ink-faint: #64748b;
+  --ink-ghost: #3b4354;
+  --line: #262a34;
+  --line-soft: #1e222b;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-brand: var(--brand-primary);
+  --color-brand-2: var(--brand-secondary);
+  --color-accent: var(--brand-accent);
+  --color-brand-dark: var(--brand-primary-dark);
+  --color-brand-darkest: var(--brand-darkest);
+
+  --color-page: var(--surface-page);
+  --color-card: var(--surface-card);
+  --color-sunken: var(--surface-sunken);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-ink-ghost: var(--ink-ghost);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+}
+
+body {
+  background-color: var(--surface-page);
+  color: var(--ink);
+}
+
+/* Number inputs: hide the stepper arrows — they invite accidental mis-clicks
+   and pair with the wheel-scroll guard in App.jsx. Typing and arrow keys
+   still work as normal. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Semantic status tints (emerald/amber/red/sky/violet -50 chips with -700
+   text) are designed for light surfaces — soften them on dark ones. */
+.dark .bg-emerald-50 { background-color: rgb(16 185 129 / 0.12); }
+.dark .bg-amber-50, .dark .bg-amber-50\/60 { background-color: rgb(245 158 11 / 0.12); }
+.dark .bg-red-50, .dark .bg-red-50\/40 { background-color: rgb(239 68 68 / 0.12); }
+.dark .bg-sky-50 { background-color: rgb(14 165 233 / 0.12); }
+.dark .bg-violet-50 { background-color: rgb(139 92 246 / 0.14); }
+.dark .text-emerald-700, .dark .text-emerald-600 { color: #6ee7b7; }
+.dark .text-amber-700, .dark .text-amber-600 { color: #fcd34d; }
+.dark .text-red-800, .dark .text-red-700, .dark .text-red-600 { color: #fca5a5; }
+.dark .text-sky-700 { color: #7dd3fc; }
+.dark .text-violet-700 { color: #c4b5fd; }
+.dark .border-emerald-200 { border-color: rgb(16 185 129 / 0.3); }
+.dark .border-amber-200 { border-color: rgb(245 158 11 / 0.3); }
+.dark .border-red-200 { border-color: rgb(239 68 68 / 0.3); }
+.dark .bg-red-100 { background-color: rgb(239 68 68 / 0.2); }
+.dark .bg-emerald-100 { background-color: rgb(16 185 129 / 0.2); }
+.dark .bg-slate-200 { background-color: var(--surface-sunken); }
+.dark .bg-slate-300 { background-color: #3b4354; }
+.dark .text-slate-200 { color: var(--ink-2); }
+
+/* ── Entrance motion standard ─────────────────────────────────────────────
+   One shared vocabulary for on-load animation:
+   .anim + .anim-reveal  → blur-rise (display text, hero moments)
+   .anim + .anim-fade    → plain fade-up (paragraphs, cards)
+   .anim-zoom            → slow settle-zoom (brand panels / imagery)
+   Stagger with inline animation-delay. Respects prefers-reduced-motion. */
+
+@keyframes rise-reveal {
+  0%   { opacity: 0; transform: translateY(28px); filter: blur(12px); }
+  100% { opacity: 1; transform: translateY(0);    filter: blur(0); }
+}
+@keyframes fade-up {
+  0%   { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes slow-zoom {
+  0%   { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+.anim {
+  opacity: 0;
+  animation-fill-mode: forwards;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+.anim-reveal { animation-name: rise-reveal; animation-duration: 1.1s; }
+.anim-fade   { animation-name: fade-up;     animation-duration: 1s; }
+.anim-zoom   { animation: slow-zoom 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* Legacy one-off classes used by the auth screens */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+.animate-shake { animation: shake 0.35s ease-in-out; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.animate-fade-in { animation: fade-in 0.6s ease-out both; }
+
+.grain {
+  background-image: radial-gradient(circle at 1px 1px, rgb(0 0 0 / 0.25) 1px, transparent 0);
+  background-size: 26px 26px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim,
+  .anim-zoom,
+  .animate-shake,
+  .animate-fade-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}

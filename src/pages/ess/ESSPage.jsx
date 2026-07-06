@@ -47,9 +47,9 @@ const ESSPage = () => {
         <div className="space-y-6">
             <div className="flex items-end justify-between flex-wrap gap-4">
                 <div>
-                    <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60]">Self-service</div>
-                    <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900"> {firstName ? `Hi, ${firstName} 👋` : "Hi, Employee 👋"}</h1>
-                    <p className="mt-1 text-sm text-slate-500">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-brand">Self-service</div>
+                    <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink"> {firstName ? `Hi, ${firstName} 👋` : "Hi, Employee 👋"}</h1>
+                    <p className="mt-1 text-sm text-ink-muted">
                         {jobTitle && <span>{jobTitle}</span>}
                         {jobTitle && departmentName && <span> · </span>}
                         {departmentName && <span>{departmentName}</span>}
@@ -57,17 +57,17 @@ const ESSPage = () => {
                 </div>
             </div>
 
-            <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-sm w-fit max-w-full overflow-x-auto">
+            <div className="flex flex-wrap gap-1 rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit max-w-full overflow-x-auto">
                 {["profile", "leave", "payslips", "docs", "team"].map((t) => (
                 <button key={t} onClick={() => setTab(t)} className="relative rounded-lg px-4 py-1.5 text-xs font-semibold capitalize">
                     {tab === t && (
                         <motion.div
                             layoutId="ess-tab"
-                            className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#4f1a60] to-[#8a2da8]"
+                            className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2"
                             transition={{ type: "spring", stiffness: 400, damping: 32 }}
                         />
                     )}
-                    <span className={`relative ${tab === t ? "text-white" : "text-slate-600"}`}>
+                    <span className={`relative ${tab === t ? "text-white" : "text-ink-muted"}`}>
                         {t === "docs" ? "Documents" : t === "team" ? "My Team" : t}
                     </span>
                 </button>
@@ -168,52 +168,52 @@ function ProfileChange() {
     };
 
     return (
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+        <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
                 <div>
-                    <h3 className="font-semibold text-slate-900">Profile change requests</h3>
-                    <p className="text-xs text-slate-500">Edits require HR validation before being applied to your immutable record.</p>
+                    <h3 className="font-semibold text-ink">Profile change requests</h3>
+                    <p className="text-xs text-ink-muted">Edits require HR validation before being applied to your immutable record.</p>
                 </div>
                 <button 
                     onClick={handleSubmit} 
                     disabled={loading}
-                    className="rounded-xl bg-[#4f1a60] text-white px-4 py-2 text-xs font-semibold shadow-sm disabled:opacity-75"
+                    className="rounded-xl bg-brand text-white px-4 py-2 text-xs font-semibold shadow-sm disabled:opacity-75"
                 >
                     {loading ? "Submitting..." : "Submit Requests"}
                 </button>
             </div>
         
             <div className="grid gap-3 md:grid-cols-2">
-                <div className="relative rounded-xl border border-slate-200 p-3 focus-within:border-[#4f1a60] transition-colors">
-                    <label className="text-xs font-semibold text-slate-600 block">Phone Number</label>
+                <div className="relative rounded-xl border border-line p-3 focus-within:border-brand transition-colors">
+                    <label className="text-xs font-semibold text-ink-muted block">Phone Number</label>
                     <input 
                         value={form.phone} 
                         onChange={(e) => handleChange("phone", e.target.value)} 
-                        className="mt-1 w-full bg-transparent text-sm text-slate-800 outline-none" 
+                        className="mt-1 w-full bg-transparent text-sm text-ink-2 outline-none" 
                     />
                 </div>
-                <div className="relative rounded-xl border border-slate-200 p-3 focus-within:border-[#4f1a60] transition-colors">
-                    <label className="text-xs font-semibold text-slate-600 block">Home Address</label>
+                <div className="relative rounded-xl border border-line p-3 focus-within:border-brand transition-colors">
+                    <label className="text-xs font-semibold text-ink-muted block">Home Address</label>
                     <input 
                         value={form.address} 
                         onChange={(e) => handleChange("address", e.target.value)} 
-                        className="mt-1 w-full bg-transparent text-sm text-slate-800 outline-none" 
+                        className="mt-1 w-full bg-transparent text-sm text-ink-2 outline-none" 
                     />
                 </div>
-                <div className="relative rounded-xl border border-slate-200 p-3 focus-within:border-[#4f1a60] transition-colors">
-                    <label className="text-xs font-semibold text-slate-600 block">Bank Name</label>
+                <div className="relative rounded-xl border border-line p-3 focus-within:border-brand transition-colors">
+                    <label className="text-xs font-semibold text-ink-muted block">Bank Name</label>
                     <input 
                         value={form.bankName} 
                         onChange={(e) => handleChange("bankName", e.target.value)} 
-                        className="mt-1 w-full bg-transparent text-sm text-slate-800 outline-none" 
+                        className="mt-1 w-full bg-transparent text-sm text-ink-2 outline-none" 
                     />
                 </div>
-                <div className="relative rounded-xl border border-slate-200 p-3 focus-within:border-[#4f1a60] transition-colors">
-                    <label className="text-xs font-semibold text-slate-600 block">Account Number</label>
+                <div className="relative rounded-xl border border-line p-3 focus-within:border-brand transition-colors">
+                    <label className="text-xs font-semibold text-ink-muted block">Account Number</label>
                     <input 
                         value={form.accountNumber} 
                         onChange={(e) => handleChange("accountNumber", e.target.value)} 
-                        className="mt-1 w-full bg-transparent text-sm text-slate-800 outline-none" 
+                        className="mt-1 w-full bg-transparent text-sm text-ink-2 outline-none" 
                     />
                 </div>
             </div>
@@ -252,27 +252,27 @@ function MyProfileRequests() {
     };
 
     return (
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
-            <h3 className="font-semibold text-slate-900">My change requests</h3>
-            <p className="text-xs text-slate-500">Track the status of updates you’ve submitted.</p>
+        <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
+            <h3 className="font-semibold text-ink">My change requests</h3>
+            <p className="text-xs text-ink-muted">Track the status of updates you’ve submitted.</p>
             {state.items.length === 0 ? (
-                <div className="mt-4 p-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                <div className="mt-4 p-6 text-center text-xs text-ink-faint border border-dashed border-line rounded-xl">
                     No change requests submitted yet.
                 </div>
             ) : (
-                <ul className="mt-4 divide-y divide-slate-100">
+                <ul className="mt-4 divide-y divide-line-soft">
                     {state.items.map((r, i) => {
                         const changes = r.changes || r.payload?.changes || {};
                         return (
                             <li key={r.id || i} className="flex items-start justify-between gap-4 py-3">
-                                <div className="min-w-0 text-xs text-slate-600">
+                                <div className="min-w-0 text-xs text-ink-muted">
                                     {Object.entries(changes).map(([k, v]) => (
                                         <div key={k}>
                                             <span className="font-semibold capitalize">{k.replace(/_/g, " ")}:</span> {String(v)}
                                         </div>
                                     ))}
                                     {r.created_at && (
-                                        <div className="mt-1 text-[10px] text-slate-400">{String(r.created_at).slice(0, 10)}</div>
+                                        <div className="mt-1 text-[10px] text-ink-faint">{String(r.created_at).slice(0, 10)}</div>
                                     )}
                                 </div>
                                 <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${badge(r.status)}`}>
@@ -318,25 +318,25 @@ function TeamDirectory({ departmentId, departmentName, jobRoles = [] }) {
     const roleTitle = (id) => jobRoles.find((r) => r.id === id)?.title || "";
 
     if (loading) {
-        return <div className="p-8 text-center text-slate-500 bg-white border rounded-2xl">Loading your team...</div>;
+        return <div className="p-8 text-center text-ink-muted bg-card border rounded-2xl">Loading your team...</div>;
     }
     if (!departmentId) {
         return (
-            <div className="p-8 text-center text-slate-400 bg-white border border-dashed rounded-2xl">
+            <div className="p-8 text-center text-ink-faint bg-card border border-dashed rounded-2xl">
                 You haven’t been assigned to a department yet. Ask HR to complete your profile.
             </div>
         );
     }
     if (blocked) {
         return (
-            <div className="p-8 text-center text-slate-400 bg-white border border-dashed rounded-2xl">
+            <div className="p-8 text-center text-ink-faint bg-card border border-dashed rounded-2xl">
                 The employee directory isn’t available for your role.
             </div>
         );
     }
     if (members.length === 0) {
         return (
-            <div className="p-8 text-center text-slate-400 bg-white border border-dashed rounded-2xl">
+            <div className="p-8 text-center text-ink-faint bg-card border border-dashed rounded-2xl">
                 No other colleagues in {departmentName || "your department"} yet.
             </div>
         );
@@ -348,13 +348,13 @@ function TeamDirectory({ departmentId, departmentName, jobRoles = [] }) {
                 const name = getEmployeeName(m, "Colleague");
                 const initials = getInitials(name);
                 return (
-                    <div key={m.id} className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#4f1a60] to-[#8a2da8] text-xs font-bold text-white">
+                    <div key={m.id} className="flex items-center gap-3 rounded-2xl border border-line/80 bg-card p-4 shadow-sm">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-xs font-bold text-white">
                             {initials}
                         </div>
                         <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-slate-900">{name}</div>
-                            <div className="truncate text-xs text-slate-500">{roleTitle(m.job_role_id) || m.email}</div>
+                            <div className="truncate text-sm font-semibold text-ink">{name}</div>
+                            <div className="truncate text-xs text-ink-muted">{roleTitle(m.job_role_id) || m.email}</div>
                         </div>
                     </div>
                 );
@@ -385,9 +385,9 @@ function LeaveTracker({ onRequestLeave }) {
     return (
         <div className="space-y-6">
             {loading ? (
-                <div className="p-8 text-center text-slate-500 bg-white border rounded-2xl">Retrieving leave balances...</div>
+                <div className="p-8 text-center text-ink-muted bg-card border rounded-2xl">Retrieving leave balances...</div>
             ) : leaveTypes.length === 0 ? (
-                <div className="p-8 text-center text-slate-400 bg-white border border-dashed rounded-2xl">
+                <div className="p-8 text-center text-ink-faint bg-card border border-dashed rounded-2xl">
                     No leave packages configured in your organization yet.
                 </div>
             ) : (
@@ -398,11 +398,11 @@ function LeaveTracker({ onRequestLeave }) {
                         const pct = daysAllowed > 0 ? (daysUsed / daysAllowed) : 0;
                         const C = 2 * Math.PI * 42;
                         return (
-                            <motion.div key={g.id || g.code} whileHover={{ y: -4 }} className="rounded-2xl border border-slate-200/80 bg-white p-6 text-center shadow-sm">
+                            <motion.div key={g.id || g.code} whileHover={{ y: -4 }} className="rounded-2xl border border-line/80 bg-card p-6 text-center shadow-sm">
                                 <div className="relative mx-auto h-32 w-32">
                                     <svg viewBox="0 0 100 100" className="-rotate-90">
                                         <circle cx="50" cy="50" r="42" stroke="#f1f5f9" strokeWidth="10" fill="none" />
-                                        <motion.circle cx="50" cy="50" r="42" stroke="#4f1a60" strokeWidth="10" fill="none" strokeLinecap="round"
+                                        <motion.circle cx="50" cy="50" r="42" stroke="var(--brand-primary)" strokeWidth="10" fill="none" strokeLinecap="round"
                                         strokeDasharray={C}
                                         initial={{ strokeDashoffset: C }}
                                         animate={{ strokeDashoffset: C * (1 - pct) }}
@@ -410,13 +410,13 @@ function LeaveTracker({ onRequestLeave }) {
                                         />
                                     </svg>
                                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                        <div className="text-2xl font-bold text-slate-900">{daysAllowed - daysUsed}</div>
-                                        <div className="text-[10px] uppercase text-slate-500">days left</div>
+                                        <div className="text-2xl font-bold text-ink">{daysAllowed - daysUsed}</div>
+                                        <div className="text-[10px] uppercase text-ink-muted">days left</div>
                                     </div>
                                 </div>
-                                <div className="mt-4 font-semibold text-slate-900 capitalize">{g.name}</div>
-                                <div className="text-xs text-slate-500">{daysUsed} of {daysAllowed} used</div>
-                                <button onClick={() => onRequestLeave(g)} className="mt-4 w-full rounded-lg bg-[#4f1a60] px-3 py-2 text-xs font-semibold text-white active:scale-95 transition-transform">
+                                <div className="mt-4 font-semibold text-ink capitalize">{g.name}</div>
+                                <div className="text-xs text-ink-muted">{daysUsed} of {daysAllowed} used</div>
+                                <button onClick={() => onRequestLeave(g)} className="mt-4 w-full rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white active:scale-95 transition-transform">
                                     Request leave
                                 </button>
                             </motion.div>
@@ -425,9 +425,9 @@ function LeaveTracker({ onRequestLeave }) {
                 </div>
             )}
 
-            <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
-                <h4 className="font-semibold text-slate-900">Upcoming team leaves</h4>
-                <div className="p-8 text-center text-slate-400 text-sm">
+            <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
+                <h4 className="font-semibold text-ink">Upcoming team leaves</h4>
+                <div className="p-8 text-center text-ink-faint text-sm">
                     No upcoming employee leaves logged in your department.
                 </div>
             </div>
@@ -470,10 +470,10 @@ function LeaveRequestModal({ leaveType, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
-          <h3 className="text-lg font-bold text-slate-900 capitalize">Request {leaveType.name}</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+          <h3 className="text-lg font-bold text-ink capitalize">Request {leaveType.name}</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -481,21 +481,21 @@ function LeaveRequestModal({ leaveType, onClose }) {
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Start Date</label>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full h-11 border border-slate-200 rounded-xl px-3 outline-none mt-1" required />
+              <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Start Date</label>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full h-11 border border-line rounded-xl px-3 outline-none mt-1" required />
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">End Date</label>
-              <input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(e.target.value)} className="w-full h-11 border border-slate-200 rounded-xl px-3 outline-none mt-1" required />
+              <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">End Date</label>
+              <input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(e.target.value)} className="w-full h-11 border border-line rounded-xl px-3 outline-none mt-1" required />
             </div>
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Purpose / Reason</label>
-            <textarea value={reason} onChange={e => setReason(e.target.value)} className="w-full h-24 border border-slate-200 rounded-xl p-3 outline-none mt-1 resize-none" placeholder="Provide a brief reason for cover..." required />
+            <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Purpose / Reason</label>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} className="w-full h-24 border border-line rounded-xl p-3 outline-none mt-1 resize-none" placeholder="Provide a brief reason for cover..." required />
           </div>
           <div className="flex gap-2 justify-end pt-2">
-            <button type="button" onClick={onClose} className="h-11 border border-slate-200 rounded-xl px-4 text-sm font-semibold text-slate-600">Cancel</button>
-            <button type="submit" disabled={loading} className="h-11 bg-[#4f1a60] text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-75">
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+            <button type="submit" disabled={loading} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-75">
               {loading ? "Submitting..." : "Submit Leave Request"}
             </button>
           </div>
@@ -526,28 +526,28 @@ function Payslips({ onOpen }) {
     }, []);
 
     return (
-        <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm">
-            <div className="border-b border-slate-100 p-5">
-                <h3 className="font-semibold text-slate-900">Payroll history</h3>
-                <p className="text-xs text-slate-500">Dynamic system payslips registered to your account.</p>
+        <div className="rounded-2xl border border-line/80 bg-card shadow-sm">
+            <div className="border-b border-line-soft p-5">
+                <h3 className="font-semibold text-ink">Payroll history</h3>
+                <p className="text-xs text-ink-muted">Dynamic system payslips registered to your account.</p>
             </div>
             {loading ? (
-                <div className="p-8 text-center text-slate-500">Retrieving payslips...</div>
+                <div className="p-8 text-center text-ink-muted">Retrieving payslips...</div>
             ) : payruns.length === 0 ? (
-                <div className="p-8 text-center text-slate-400 text-sm">No locked payslips logged for your account yet.</div>
+                <div className="p-8 text-center text-ink-faint text-sm">No locked payslips logged for your account yet.</div>
             ) : (
-                <ul className="divide-y divide-slate-100">
+                <ul className="divide-y divide-line-soft">
                     {payruns.map((m, i) => (
                         <motion.li key={m.id || i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
-                            <button onClick={() => onOpen(m.month)} className="flex w-full items-center justify-between p-4 hover:bg-slate-50">
+                            <button onClick={() => onOpen(m.month)} className="flex w-full items-center justify-between p-4 hover:bg-sunken">
                                 <div className="flex items-center gap-3">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#4f1a60]/10 text-[#4f1a60]"><FileText className="h-4 w-4" /></div>
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10 text-brand"><FileText className="h-4 w-4" /></div>
                                     <div className="text-left">
-                                        <div className="text-sm font-semibold text-slate-900">Month {m.month} · Payslip</div>
-                                        <div className="text-xs text-slate-500">Net pay ₦{(Number(m.total_net) || 0).toLocaleString()}</div>
+                                        <div className="text-sm font-semibold text-ink">Month {m.month} · Payslip</div>
+                                        <div className="text-xs text-ink-muted">Net pay ₦{(Number(m.total_net) || 0).toLocaleString()}</div>
                                     </div>
                                 </div>
-                                <span className="text-xs font-semibold text-[#4f1a60]">View →</span>
+                                <span className="text-xs font-semibold text-brand">View →</span>
                             </button>
                         </motion.li>
                     ))}
@@ -568,20 +568,20 @@ function PayslipDrawer({ month, jobTitle = "", onClose }) {
             <motion.div
                 initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-2xl flex-col bg-white shadow-2xl"
+                className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-2xl flex-col bg-card shadow-2xl"
             >
-                <div className="flex items-center justify-between border-b border-slate-100 p-4">
-                    <h3 className="font-semibold text-slate-900">Payslip · Month {month}</h3>
+                <div className="flex items-center justify-between border-b border-line-soft p-4">
+                    <h3 className="font-semibold text-ink">Payslip · Month {month}</h3>
                     <div className="flex items-center gap-2">
-                        <button onClick={onClose} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+                        <button onClick={onClose} className="rounded-lg p-1.5 text-ink-muted hover:bg-sunken"><X className="h-4 w-4" /></button>
                     </div>
                 </div>
-                <div className="flex-1 overflow-y-auto bg-slate-50 p-6">
-                    <div className="mx-auto max-w-xl rounded-2xl bg-white shadow-lg ring-1 ring-slate-200 p-6 space-y-4">
+                <div className="flex-1 overflow-y-auto bg-sunken p-6">
+                    <div className="mx-auto max-w-xl rounded-2xl bg-card shadow-lg ring-1 ring-line p-6 space-y-4">
                         <div className="flex items-center justify-between border-b pb-4">
                             <div>
-                                <h4 className="font-bold text-slate-900 text-lg">Workplace Payslip</h4>
-                                <p className="text-xs text-slate-500">Pay Date: Month {month}</p>
+                                <h4 className="font-bold text-ink text-lg">Workplace Payslip</h4>
+                                <p className="text-xs text-ink-muted">Pay Date: Month {month}</p>
                             </div>
                             <div className="text-right">
                                 <span className="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-700 font-semibold">PAID</span>
@@ -590,28 +590,28 @@ function PayslipDrawer({ month, jobTitle = "", onClose }) {
 
                         <div className="grid grid-cols-2 gap-4 text-xs">
                             <div>
-                                <span className="text-slate-400 block">Employee</span>
-                                <span className="font-semibold text-slate-900">{fullName}</span>
-                                <span className="text-slate-500 block">{jobTitle}</span>
+                                <span className="text-ink-faint block">Employee</span>
+                                <span className="font-semibold text-ink">{fullName}</span>
+                                <span className="text-ink-muted block">{jobTitle}</span>
                             </div>
                         </div>
 
                         {salary > 0 ? (
                             <div className="space-y-2 border-t pt-4">
-                                <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60]">Earnings</div>
+                                <div className="text-xs font-semibold uppercase tracking-wider text-brand">Earnings</div>
                                 <Line label="Basic Salary" value={salary.toLocaleString()} />
                                 
-                                <div className="text-xs font-semibold uppercase tracking-wider text-[#4f1a60] pt-2">Deductions</div>
+                                <div className="text-xs font-semibold uppercase tracking-wider text-brand pt-2">Deductions</div>
                                 <Line label="Pension (8%)" value={(salary * 0.08).toLocaleString()} />
                                 <Line label="NHF (2.5%)" value={(salary * 0.025).toLocaleString()} />
                                 
-                                <div className="mt-5 flex items-center justify-between rounded-xl bg-gradient-to-r from-[#4f1a60]/10 to-[#8a2da8]/5 p-4">
-                                    <div className="text-sm font-semibold text-slate-700">Estimated Net Pay</div>
-                                    <div className="text-2xl font-bold text-[#4f1a60]">₦{(salary - (salary * 0.105)).toLocaleString()}</div>
+                                <div className="mt-5 flex items-center justify-between rounded-xl bg-gradient-to-r from-brand/10 to-brand-2/5 p-4">
+                                    <div className="text-sm font-semibold text-ink-2">Estimated Net Pay</div>
+                                    <div className="text-2xl font-bold text-brand">₦{(salary - (salary * 0.105)).toLocaleString()}</div>
                                 </div>
                             </div>
                         ) : (
-                            <div className="p-8 text-center text-slate-400 text-xs border-t border-dashed">
+                            <div className="p-8 text-center text-ink-faint text-xs border-t border-dashed">
                                 No active base salary logged on your profile database.
                             </div>
                         )}
@@ -624,7 +624,7 @@ function PayslipDrawer({ month, jobTitle = "", onClose }) {
 
 function Line({ label, value, bold }) {
     return (
-        <div className={`flex justify-between border-b border-dashed border-slate-100 py-2 text-sm ${bold ? "font-semibold text-slate-900" : "text-slate-700"}`}>
+        <div className={`flex justify-between border-b border-dashed border-line-soft py-2 text-sm ${bold ? "font-semibold text-ink" : "text-ink-2"}`}>
         <span>{label}</span><span>₦{value}</span>
         </div>
     );
@@ -675,22 +675,22 @@ function DocsUpload() {
   return (
     <div className="grid gap-4 md:grid-cols-2">
         {loading ? (
-            <div className="p-8 text-center text-slate-500 bg-white border rounded-2xl md:col-span-2">Retrieving document templates...</div>
+            <div className="p-8 text-center text-ink-muted bg-card border rounded-2xl md:col-span-2">Retrieving document templates...</div>
         ) : requiredDocs.length === 0 ? (
-            <div className="p-8 text-center text-slate-400 bg-white border border-dashed rounded-2xl md:col-span-2">
+            <div className="p-8 text-center text-ink-faint bg-card border border-dashed rounded-2xl md:col-span-2">
                 No required documents assigned to your profile yet.
             </div>
         ) : (
             requiredDocs.map((d) => (
-                <div key={d.id} className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+                <div key={d.id} className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm">
                     <div className="flex items-start justify-between">
                         <div>
-                            <div className="font-semibold text-slate-900">{d.name || ""}</div>
-                            <div className="text-xs text-slate-500 mt-0.5">PDF, PNG or JPG up to 8MB</div>
+                            <div className="font-semibold text-ink">{d.name || ""}</div>
+                            <div className="text-xs text-ink-muted mt-0.5">PDF, PNG or JPG up to 8MB</div>
                         </div>
                     </div>
-                    <div className="mt-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/60 px-4 py-6 text-center">
-                        <Upload className="h-5 w-5 text-slate-400" />
+                    <div className="mt-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-line bg-sunken/60 px-4 py-6 text-center">
+                        <Upload className="h-5 w-5 text-ink-faint" />
                         <input
                             type="file"
                             id={`file-${d.id}`}
@@ -700,8 +700,8 @@ function DocsUpload() {
                                 e.target.value = ""; // allow re-picking the same file
                             }}
                         />
-                        <label htmlFor={`file-${d.id}`} className="mt-2 text-xs text-slate-600 cursor-pointer">
-                            Drop file or <span className="font-semibold text-[#4f1a60]">browse</span>
+                        <label htmlFor={`file-${d.id}`} className="mt-2 text-xs text-ink-muted cursor-pointer">
+                            Drop file or <span className="font-semibold text-brand">browse</span>
                         </label>
                     </div>
                 </div>

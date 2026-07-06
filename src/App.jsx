@@ -1,4 +1,5 @@
 import React from 'react'
+import { MotionConfig } from 'framer-motion'
 import AppRoutes from './routes/AppRoutes'
 import { NotificationProvider } from './components/ui/Notifications'
 import "./index.css"
@@ -19,16 +20,16 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.error) {
       return (
-        <div className="flex h-screen w-screen items-center justify-center bg-slate-50 p-6">
-          <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-            <h1 className="text-lg font-bold text-slate-900">Something went wrong</h1>
-            <p className="mt-2 text-sm text-slate-500">
+        <div className="flex h-screen w-screen items-center justify-center bg-sunken p-6">
+          <div className="max-w-md rounded-2xl border border-line bg-card p-8 text-center shadow-sm">
+            <h1 className="text-lg font-bold text-ink">Something went wrong</h1>
+            <p className="mt-2 text-sm text-ink-muted">
               The page hit an unexpected error. Reloading usually fixes it — if it keeps
               happening, let your administrator know what you clicked.
             </p>
             <button
               onClick={() => window.location.reload()}
-              className="mt-5 rounded-xl bg-[#4f1a60] px-5 py-2.5 text-sm font-semibold text-white"
+              className="mt-5 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white"
             >
               Reload page
             </button>
@@ -41,11 +42,26 @@ class ErrorBoundary extends React.Component {
 }
 
 const App = () => {
+  // Scrolling (incl. two-finger touchpad swipes) over a focused number input
+  // silently increments its value — dangerous for salary/amount fields. Blur
+  // the field when a wheel event hits it, so scrolling never edits data.
+  React.useEffect(() => {
+    const guard = (e) => {
+      const el = document.activeElement;
+      if (el?.tagName === "INPUT" && el.type === "number" && el === e.target) el.blur();
+    };
+    document.addEventListener("wheel", guard, { passive: true });
+    return () => document.removeEventListener("wheel", guard);
+  }, []);
+
   return (
     <ErrorBoundary>
-      <NotificationProvider>
-        <AppRoutes />
-      </NotificationProvider>
+      {/* Framer animations follow the OS reduced-motion preference. */}
+      <MotionConfig reducedMotion="user">
+        <NotificationProvider>
+          <AppRoutes />
+        </NotificationProvider>
+      </MotionConfig>
     </ErrorBoundary>
   )
 }
