@@ -19,6 +19,7 @@ import { SettingsPage } from "../pages/admin/SettingsPage";
 import OnboardingPage from "../pages/admin/OnboardingPage";
 import OrganizationSettingsPage from "../pages/admin/OrganizationSettingsPage";
 import ApprovalsInboxPage from "../pages/admin/ApprovalsInboxPage";
+import PayrollPage from "../pages/admin/PayrollPage";
 
 import { RESOURCE_CODES } from "./resourceCodes";
 export { RESOURCE_CODES };
@@ -153,7 +154,7 @@ export const RESOURCES = [
     resource: RESOURCE_CODES.PAYROLL,
     action: "read",
     checks: checksFromRoutes(["/payroll"]),
-    component: () => <ComingSoon label="payroll" />,
+    component: PayrollPage,
   },
   {
     key: "leave",

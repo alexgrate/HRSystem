@@ -514,9 +514,8 @@ function Payslips({ onOpen }) {
         setLoading(true);
         try {
             const res = await api.get("/api/payroll/runs");
-            // Guard the shape: a wrapped/paginated object here would crash .map.
             const list = Array.isArray(res) ? res : res?.runs || res?.items || res?.data || [];
-            setPayruns(Array.isArray(list) ? list : []);
+            setPayruns((Array.isArray(list) ? list : []).filter((r) => ["locked_in", "distributed"].includes(r.status)));
         } catch (err) {
             console.error("[Payslips] Error loading payroll history:", err);
         } finally {

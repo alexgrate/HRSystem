@@ -28,6 +28,14 @@ const resolvePayGradeId = (value, grades) => {
   return match ? match.id : "";
 };
 
+// Despite the spec typing it as a string, the backend column is a uuid —
+// sending the name 500s ("invalid input syntax for type uuid").
+const resolvePayGroupId = (value, groups) => {
+  if (!value) return "";
+  const match = groups.find((g) => g.id === value || g.name === value || g.code === value);
+  return match ? match.id : "";
+};
+
 const genThrowawayPassword = () => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   const bytes = new Uint8Array(24);
@@ -50,6 +58,7 @@ const DirectoryPage = () => {
 
   const [allDepartments, setAllDepartments] = useState([]);
   const [allPayGrades, setAllPayGrades] = useState([]);
+  const [allPayGroups, setAllPayGroups] = useState([]);
   const [allBenefitLevels, setAllBenefitLevels] = useState([]);
   const [allJobRoles, setAllJobRoles] = useState([]);
   const [allStaff, setAllStaff] = useState([]); // manager picker + name lookups
@@ -280,17 +289,19 @@ const DirectoryPage = () => {
   useEffect(() => {
     const fetchGlobalSetups = async () => {
       try {
-        const [depts, grades, benefits, roles, staff] = await Promise.all([
+        const [depts, grades, benefits, roles, groups, staff] = await Promise.all([
           setupService.getDepartments(),
           setupService.getPayGrades(),
           setupService.getBenefitLevels(),
           setupService.getJobRoles(),
+          setupService.getPayGroups(),
           api.get("/api/users/?limit=100"),
         ]);
         setAllDepartments(depts || []);
         setAllPayGrades(grades || []);
         setAllBenefitLevels(benefits || []);
         setAllJobRoles(roles || []);
+        setAllPayGroups(groups || []);
         setAllStaff(Array.isArray(staff) ? staff : staff?.users || []);
       } catch (err) {
         console.error("Error fetching onboarding setups:", err);
@@ -616,6 +627,7 @@ const DirectoryPage = () => {
             departments={allDepartments}
             jobRoles={allJobRoles}
             payGrades={allPayGrades}
+            payGroups={allPayGroups}
             staff={allStaff}
             onSaved={() => setRefreshTick((t) => t + 1)}
             onClose={() => setSelectedEmployee(null)}
@@ -636,6 +648,7 @@ const DirectoryPage = () => {
             departments={allDepartments}
             jobRoles={allJobRoles}
             payGrades={allPayGrades}
+            payGroups={allPayGroups}
             staff={allStaff}
             onClose={() => setShowAddEmployee(false)}
             onSubmit={async (data) => {
@@ -666,6 +679,7 @@ const DirectoryPage = () => {
                       job_role_id: data.job_role_id,
                       manager_id: data.manager_id,
                       pay_grade: data.pay_grade,
+                      pay_group: data.pay_group,
                       base_salary: data.baseSalary ? Number(data.baseSalary) : "",
                       employment_status: data.employment_status || "probation",
                     });
@@ -877,7 +891,7 @@ function SetupModal({ config, record, onClose, onSaved }) {
   );
 }
 
-function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrades = [], staff = [], onSaved, onClose }) {
+function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrades = [], payGroups = [], staff = [], onSaved, onClose }) {
   const toast = useToast();
   const bio = employee?.employee_biodata || employee?.biodata || {};
   const [form, setForm] = useState({
@@ -888,6 +902,7 @@ function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrade
     job_role_id: employee?.job_role_id || "",
     manager_id: employee?.manager_id || "",
     pay_grade: resolvePayGradeId(employee?.pay_grade, payGrades),
+    pay_group: resolvePayGroupId(employee?.pay_group, payGroups),
     base_salary: employee?.base_salary ?? "",
     employment_status: employee?.employment_status || "probation",
     contract_type: employee?.contract_type || "permanent",
@@ -907,6 +922,7 @@ function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrade
         job_role_id: nullable(form.job_role_id),
         manager_id: nullable(form.manager_id),
         pay_grade: nullable(form.pay_grade),
+        pay_group: nullable(form.pay_group),
         base_salary: form.base_salary !== "" ? Number(form.base_salary) : null,
         employment_status: form.employment_status,
         contract_type: form.contract_type,
@@ -995,6 +1011,15 @@ function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrade
               </select>
             </div>
             <div>
+              <label className={labelCls}>Pay group</label>
+              <select value={form.pay_group} onChange={(e) => set("pay_group", e.target.value)} className={inputCls}>
+                <option value="">— None —</option>
+                {payGroups.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className={labelCls}>Contract type</label>
               <select value={form.contract_type} onChange={(e) => set("contract_type", e.target.value)} className={inputCls}>
                 {["permanent", "part_time", "fixed_term", "temporary", "intern", "contractor"].map((c) => (
@@ -1024,7 +1049,7 @@ function EmployeeEditModal({ employee, departments = [], jobRoles = [], payGrade
   );
 }
 
-function AddEmployeeDrawer({ departments = [], jobRoles = [], payGrades = [], staff = [], onClose, onSubmit }) {
+function AddEmployeeDrawer({ departments = [], jobRoles = [], payGrades = [], payGroups = [], staff = [], onClose, onSubmit }) {
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",
@@ -1034,6 +1059,7 @@ function AddEmployeeDrawer({ departments = [], jobRoles = [], payGrades = [], st
     job_role_id: "",
     manager_id: "",
     pay_grade: "",
+    pay_group: "",
     contract_type: "permanent",
     employment_status: "probation",
     baseSalary: "",
@@ -1154,6 +1180,13 @@ function AddEmployeeDrawer({ departments = [], jobRoles = [], payGrades = [], st
                 <select value={form.pay_grade} onChange={(e) => set("pay_grade", e.target.value)} className={selectCls}>
                   <option value="">— Select —</option>
                   {payGrades.map((g) => <option key={g.id} value={g.id}>{g.name}{g.code ? ` (${g.code})` : ""}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className={labelCls}>Pay group</span>
+                <select value={form.pay_group} onChange={(e) => set("pay_group", e.target.value)} className={selectCls}>
+                  <option value="">— Select —</option>
+                  {payGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
               </label>
               <label className="block">
