@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, X, Plus, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Pencil, Trash2, UserX, UserCheck, Mail } from "lucide-react";
+import { Search, X, Plus, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Pencil, Trash2, UserX, UserCheck, Mail, Download, Upload } from "lucide-react";
+import { useAuth } from "../../context/AuthContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { setupService } from "../../services/setupService";
 import { authService } from "../../services/authService";
 import { getEmployeeName } from "../../utils/employee";
+import { getValueByAliases, parseBulkFile, parseDocList, toBoolean, toCsv, toNumber } from "../../utils/bulkUpload";
 import api from "../../services/api";
 
 const TABS = ["Employees", "Offices", "Departments", "Job Titles", "Grades", "Pay Grades", "Pay Groups", "Benefit Levels", "Allowances", "Leave Types"];
@@ -28,14 +30,6 @@ const resolvePayGradeId = (value, grades) => {
   return match ? match.id : "";
 };
 
-// Despite the spec typing it as a string, the backend column is a uuid —
-// sending the name 500s ("invalid input syntax for type uuid").
-const resolvePayGroupId = (value, groups) => {
-  if (!value) return "";
-  const match = groups.find((g) => g.id === value || g.name === value || g.code === value);
-  return match ? match.id : "";
-};
-
 const genThrowawayPassword = () => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   const bytes = new Uint8Array(24);
@@ -45,6 +39,62 @@ const genThrowawayPassword = () => {
 
 const activationLinkFor = (email) =>
   `${window.location.origin}/forgot-password?mode=activate&email=${encodeURIComponent(email)}`;
+
+const BULK_SETUP_ALIASES = {
+  Offices: { headquarter: ["headquarter", "is_headquarter", "hq"] },
+  Departments: { is_active: ["is_active", "active"] },
+  "Job Titles": {
+    department_id: ["department_id", "department", "department_name", "department_code"],
+    required_documents: ["required_documents", "documents", "required_docs"],
+    is_active: ["is_active", "active"],
+  },
+  Grades: { is_active: ["is_active", "active"] },
+  "Pay Grades": {
+    benefit_level_id: ["benefit_level_id", "benefit_level", "benefit_level_name", "benefit_level_code"],
+    is_active: ["is_active", "active"],
+  },
+  "Pay Groups": { is_active: ["is_active", "active"] },
+  "Benefit Levels": { is_active: ["is_active", "active"] },
+  Allowances: {
+    benefit_level_id: ["benefit_level_id", "benefit_level", "benefit_level_name", "benefit_level_code"],
+    is_active: ["is_active", "active"],
+  },
+  "Leave Types": {
+    benefit_level_id: ["benefit_level_id", "benefit_level", "benefit_level_name", "benefit_level_code"],
+    is_paid: ["is_paid", "paid"],
+    requires_approval: ["requires_approval", "approval_required"],
+    is_active: ["is_active", "active"],
+  },
+};
+
+const EMPLOYEE_BULK_TEMPLATE = {
+  headers: [
+    "first_name",
+    "last_name",
+    "email",
+    "phone",
+    "department",
+    "job_title",
+    "manager_email",
+    "pay_grade",
+    "base_salary",
+    "employment_status",
+    "contract_type",
+  ],
+  sample: {
+    first_name: "Jane",
+    last_name: "Doe",
+    email: "jane.doe@company.com",
+    phone: "+2348012345678",
+    department: "Human Resources",
+    job_title: "HR Lead",
+    manager_email: "hr.head@company.com",
+    pay_grade: "PG_G1",
+    base_salary: "450000",
+    employment_status: "probation",
+    contract_type: "permanent",
+  },
+};
 
 const DirectoryPage = () => {
   const { can } = usePermissions();
@@ -76,7 +126,8 @@ const DirectoryPage = () => {
 
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showAddEmployee, setShowAddEmployee] = useState(false);
-  const [setupModal, setSetupModal] = useState(null); 
+  const [setupModal, setSetupModal] = useState(null); // { mode: 'create'|'edit', record }
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
 
   const canUpdateEmployee = can(RESOURCE_CODES.EMPLOYEES, "update");
 
@@ -286,6 +337,215 @@ const DirectoryPage = () => {
 
   const activeSetup = tab === "Employees" ? null : SETUPS[tab];
 
+  const setupBulkTemplate = useMemo(() => {
+    if (!activeSetup) return null;
+    const headers = activeSetup.fields.map((f) => f.key);
+    const sample = {};
+    headers.forEach((header) => {
+      sample[header] = "";
+    });
+
+    if (tab === "Offices") {
+      sample.address = "12 Marina, Lagos Island";
+      sample.state = "Lagos";
+      sample.country = "Nigeria";
+      sample.headquarter = "true";
+    } else if (tab === "Departments") {
+      sample.name = "People Operations";
+      sample.code = "POPS";
+      sample.description = "People operations and culture";
+      sample.is_active = "true";
+    } else if (tab === "Job Titles") {
+      sample.title = "HR Business Partner";
+      sample.code = "HRBP";
+      sample.department_id = "Human Resources";
+      sample.required_documents = "National ID;Utility Bill";
+      sample.is_active = "true";
+    } else if (tab === "Grades") {
+      sample.name = "Senior Associate";
+      sample.code = "G4";
+      sample.level = "4";
+      sample.min_salary = "500000";
+      sample.max_salary = "780000";
+      sample.currency = "NGN";
+      sample.is_active = "true";
+    } else if (tab === "Pay Grades") {
+      sample.name = "G4 Grade Scaler";
+      sample.code = "PG_G4";
+      sample.benefit_level_id = "Basic Tier";
+      sample.min_salary = "500000";
+      sample.max_salary = "780000";
+      sample.currency = "NGN";
+      sample.is_active = "true";
+    } else if (tab === "Pay Groups") {
+      sample.name = "Monthly Staff";
+      sample.code = "PG_MONTHLY";
+      sample.description = "Monthly payroll group";
+      sample.is_active = "true";
+    } else if (tab === "Benefit Levels") {
+      sample.name = "Management Tier";
+      sample.code = "BL3";
+      sample.description = "Management level package";
+      sample.is_active = "true";
+    } else if (tab === "Allowances") {
+      sample.name = "Transport Allowance";
+      sample.benefit_level_id = "Basic Tier";
+      sample.amount = "40000";
+      sample.description = "Monthly transport support";
+      sample.is_active = "true";
+    } else if (tab === "Leave Types") {
+      sample.name = "Compassionate Leave";
+      sample.code = "LV_COMP";
+      sample.benefit_level_id = "Basic Tier";
+      sample.days_allowed = "5";
+      sample.is_paid = "true";
+      sample.requires_approval = "true";
+      sample.is_active = "true";
+    }
+
+    return { headers, sample };
+  }, [activeSetup, tab]);
+
+  const downloadBulkTemplate = () => {
+    const template = tab === "Employees" ? EMPLOYEE_BULK_TEMPLATE : setupBulkTemplate;
+    if (!template) return;
+    const csv = toCsv(template.headers, [template.sample]);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${tab.toLowerCase().replace(/\s+/g, "-")}-bulk-template.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const resolveByNameCodeOrId = (collection, value, labelFields) => {
+    if (!value) return "";
+    const needle = String(value).trim().toLowerCase();
+    const entry = collection.find((item) =>
+      labelFields.some((field) => String(item?.[field] || "").trim().toLowerCase() === needle)
+    );
+    return entry?.id || "";
+  };
+
+  const registerAndPopulateEmployee = async (record) => {
+    const firstName = (getValueByAliases(record, ["first_name", "firstname", "firstName"]) || "").trim();
+    const lastName = (getValueByAliases(record, ["last_name", "lastname", "lastName"]) || "").trim();
+    const email = (getValueByAliases(record, ["email", "work_email"]) || "").trim();
+    if (!firstName || !lastName || !email) {
+      throw new Error("first_name, last_name and email are required.");
+    }
+
+    const contractType = (getValueByAliases(record, ["contract_type", "contract"]) || "permanent").trim() || "permanent";
+    await api.post("/api/auth/register", {
+      firstName,
+      lastName,
+      email,
+      password: genThrowawayPassword(),
+      contract: contractType,
+    });
+
+    let userId = getValueByAliases(record, ["id", "user_id"]);
+    if (!userId) {
+      const res = await api.get("/api/users/?page=1&limit=100");
+      const users = Array.isArray(res) ? res : res?.users || [];
+      userId = users.find((u) => (u.email || "").toLowerCase() === email.toLowerCase())?.id;
+    }
+
+    if (userId) {
+      const dept = getValueByAliases(record, ["department_id", "department", "department_name", "department_code"]);
+      const role = getValueByAliases(record, ["job_role_id", "job_title", "job_role", "title"]);
+      const manager = getValueByAliases(record, ["manager_id", "manager", "manager_email"]);
+      const payGrade = getValueByAliases(record, ["pay_grade", "pay_grade_id", "pay_grade_code", "pay_grade_name"]);
+      const baseSalaryRaw = getValueByAliases(record, ["base_salary", "salary"]);
+
+      const details = pruneEmpty({
+        phone: (getValueByAliases(record, ["phone", "phone_number"]) || "").trim(),
+        department_id: resolveByNameCodeOrId(allDepartments, dept, ["id", "name", "code"]),
+        job_role_id: resolveByNameCodeOrId(allJobRoles, role, ["id", "title", "code"]),
+        manager_id: resolveByNameCodeOrId(allStaff, manager, ["id", "email", "firstname", "lastname"]),
+        pay_grade: resolvePayGradeId(payGrade, allPayGrades),
+        base_salary: toNumber(baseSalaryRaw),
+        employment_status: (getValueByAliases(record, ["employment_status", "status"]) || "probation").trim(),
+        contract_type: contractType,
+      });
+
+      if (Object.keys(details).length) {
+        await api.put(`/api/users/${userId}`, details);
+      }
+    }
+
+    try {
+      await authService.requestPasswordReset(email);
+    } catch (inviteErr) {
+      console.error("[BulkUpload] Invite email failed:", inviteErr);
+    }
+  };
+
+  const buildSetupPayloadFromRecord = (record) => {
+    if (!activeSetup) return {};
+    const aliases = BULK_SETUP_ALIASES[tab] || {};
+    const payload = {};
+
+    for (const field of activeSetup.fields) {
+      const aliasList = [field.key, ...(aliases[field.key] || [])];
+      const raw = getValueByAliases(record, aliasList);
+
+      if (field.type === "checkbox") {
+        payload[field.key] = toBoolean(raw, field.default ?? false);
+      } else if (field.type === "number") {
+        payload[field.key] = toNumber(raw);
+      } else if (field.type === "doclist") {
+        payload[field.key] = parseDocList(raw);
+      } else {
+        payload[field.key] = typeof raw === "string" ? raw.trim() : raw;
+      }
+    }
+
+    if (tab === "Job Titles") {
+      payload.department_id = resolveByNameCodeOrId(allDepartments, payload.department_id, ["id", "name", "code"]);
+    }
+    if (tab === "Pay Grades" || tab === "Allowances" || tab === "Leave Types") {
+      payload.benefit_level_id = resolveByNameCodeOrId(allBenefitLevels, payload.benefit_level_id, ["id", "name", "code"]);
+    }
+
+    return pruneEmpty(payload);
+  };
+
+  const processBulkUpload = async (file) => {
+    const records = await parseBulkFile(file);
+    if (!records.length) {
+      throw new Error("No rows found in the file.");
+    }
+
+    const failures = [];
+    let successCount = 0;
+
+    for (let index = 0; index < records.length; index += 1) {
+      const row = records[index];
+      try {
+        if (tab === "Employees") {
+          await registerAndPopulateEmployee(row);
+        } else {
+          const payload = buildSetupPayloadFromRecord(row);
+          await activeSetup.create(payload);
+        }
+        successCount += 1;
+      } catch (err) {
+        failures.push({ row: index + 2, message: err?.message || "Unknown error" });
+      }
+    }
+
+    refreshAll();
+    if (failures.length === 0) {
+      toast.success(`Bulk upload complete: ${successCount} ${tab.toLowerCase()} record(s) created.`);
+      return;
+    }
+
+    const preview = failures.slice(0, 3).map((f) => `row ${f.row}: ${f.message}`).join(" | ");
+    toast.error(`Imported ${successCount}/${records.length}. Failed rows: ${failures.length}${preview ? ` (${preview})` : ""}`);
+  };
+
   useEffect(() => {
     const fetchGlobalSetups = async () => {
       try {
@@ -453,6 +713,21 @@ const DirectoryPage = () => {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            onClick={downloadBulkTemplate}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            <Download className="h-4 w-4" /> Template
+          </button>
+          {((tab === "Employees" && can(RESOURCE_CODES.EMPLOYEES, "create")) ||
+            (tab !== "Employees" && can(activeSetup.resource, "create"))) && (
+            <button
+              onClick={() => setBulkModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              <Upload className="h-4 w-4" /> Bulk upload
+            </button>
+          )}
           {tab === "Employees"
             ? can(RESOURCE_CODES.EMPLOYEES, "create") && (
                 <button onClick={() => setShowAddEmployee(true)} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#4f1a60] to-[#8a2da8] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95">
@@ -621,6 +896,17 @@ const DirectoryPage = () => {
       </div>
 
       <AnimatePresence>
+        {bulkModalOpen && (
+          <BulkUploadModal
+            tab={tab}
+            onClose={() => setBulkModalOpen(false)}
+            onSubmit={async (file) => {
+              await processBulkUpload(file);
+              setBulkModalOpen(false);
+            }}
+          />
+        )}
+
         {selectedEmployee && (
           <EmployeeEditModal
             employee={selectedEmployee}
@@ -713,6 +999,81 @@ const DirectoryPage = () => {
   );
 };
 
+
+function BulkUploadModal({ tab, onClose, onSubmit }) {
+  const [file, setFile] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!file) {
+      setError("Select a CSV or JSON file.");
+      return;
+    }
+    setError("");
+    setSaving(true);
+    try {
+      await onSubmit(file);
+    } catch (err) {
+      setError(err?.message || "Bulk upload failed.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b px-6 py-4">
+          <h3 className="text-lg font-bold text-slate-900">Bulk Upload · {tab}</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
+          {error && (
+            <div className="flex items-center gap-2.5 rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-600">
+            <p className="font-semibold text-slate-800">Supported formats</p>
+            <p className="mt-1">Upload either a CSV or JSON array file. CSV headers should match the template column names.</p>
+          </div>
+
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">Data file</span>
+            <input
+              type="file"
+              accept=".csv,.json"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-slate-700"
+            />
+          </label>
+
+          {file && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+              Ready to import: <span className="font-semibold">{file.name}</span>
+            </div>
+          )}
+
+          <div className="flex gap-2 justify-end pt-1">
+            <button type="button" onClick={onClose} className="h-11 border border-slate-200 rounded-xl px-4 text-sm font-semibold text-slate-600">Cancel</button>
+            <button type="submit" disabled={saving} className="h-11 bg-[#4f1a60] text-white rounded-xl px-5 text-sm font-semibold disabled:opacity-75">
+              {saving ? "Uploading…" : "Upload and Create"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Generic create/edit modal driven by a setup config's `fields`.
 function SetupModal({ config, record, onClose, onSaved }) {
   const toast = useToast();
   const isEdit = !!record;

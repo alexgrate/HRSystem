@@ -133,7 +133,9 @@ export function PermissionProvider({ children }) {
       let rows = null;
       try {
         const res = await api.get("/api/role-permissions/me/resources");
-        rows = Array.isArray(res) ? res : res?.resources || res?.permissions || res?.items || null;
+        rows = Array.isArray(res)
+          ? res
+          : res?.resources || res?.data?.resources || res?.permissions || res?.items || null;
 
         if (Array.isArray(rows) && rows.length && rows.some((r) => !(r.resource_code || r.code || r.resource?.code))) {
           try {
@@ -162,9 +164,17 @@ export function PermissionProvider({ children }) {
 
   const isAdmin = mock ? !!mock.isAdmin : !!(user?.is_admin || user?.isAdmin);
 
+  const effectiveRows = useMemo(() => {
+    if (mock) return mock.permissions || [];
+    if (Array.isArray(loaded.rows) && loaded.rows.length) return loaded.rows;
+    if (Array.isArray(user?.roleResources) && user.roleResources.length) return user.roleResources;
+    if (Array.isArray(user?.permissions) && user.permissions.length) return user.permissions;
+    return [];
+  }, [mock, loaded.rows, user]);
+
   const permissionMap = useMemo(
-    () => buildPermissionMap(mock ? mock.permissions : loaded.rows),
-    [mock, loaded]
+    () => buildPermissionMap(effectiveRows),
+    [effectiveRows]
   );
 
   const ready = !user || !!mock || isAdmin || loaded.key === reqKey;
