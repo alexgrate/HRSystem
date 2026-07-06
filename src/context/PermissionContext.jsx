@@ -69,6 +69,17 @@ function normalizeAction(action) {
   return ACTIONS[String(action).toLowerCase()] || "read";
 }
 
+function toBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "n", "off", ""].includes(normalized)) return false;
+  }
+  return false;
+}
+
 function normalizePermissionFlags(p) {
   const read = !!(p.can_read ?? p.canRead);
   const create = !!(p.can_create ?? p.canCreate);
@@ -162,7 +173,10 @@ export function PermissionProvider({ children }) {
     return () => { stale = true; };
   }, [reqKey]);
 
-  const isAdmin = mock ? !!mock.isAdmin : !!(user?.is_admin || user?.isAdmin);
+  const isAdmin = useMemo(() => {
+    if (mock) return toBoolean(mock.isAdmin);
+    return toBoolean(user?.is_admin) || toBoolean(user?.isAdmin) || String(user?.role || "").toLowerCase() === "admin";
+  }, [mock, user]);
 
   const effectiveRows = useMemo(() => {
     if (mock) return mock.permissions || [];
