@@ -51,14 +51,14 @@ export function SettingsPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit">
+      <div className="flex gap-1 overflow-x-auto rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit max-w-full">
         {VIEWS.map((v) => {
           const Icon = v.Icon;
           return (
             <button
               key={v.key}
               onClick={() => setView(v.key)}
-              className={`relative inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
+              className={`relative shrink-0 whitespace-nowrap inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
                 view === v.key ? "text-white" : "text-ink-muted"
               }`}
             >
@@ -461,7 +461,7 @@ function UserJobTitleAssignment() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">User</th>

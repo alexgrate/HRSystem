@@ -5,7 +5,9 @@ import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../components/ui/Notifications";
 import { setupService } from "../../services/setupService";
 import { approvalService } from "../../services/approvalService";
+import { leaveService } from "../../services/leaveService";
 import { getEmployeeName, getInitials } from "../../utils/employee";
+import { inclusiveDays } from "../../utils/leave";
 import api from "../../services/api";
 
 function useOrgNames(user) {
@@ -57,9 +59,9 @@ const ESSPage = () => {
                 </div>
             </div>
 
-            <div className="flex flex-wrap gap-1 rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit max-w-full overflow-x-auto">
+            <div className="flex gap-1 overflow-x-auto rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit max-w-full">
                 {["profile", "leave", "payslips", "docs", "team"].map((t) => (
-                <button key={t} onClick={() => setTab(t)} className="relative rounded-lg px-4 py-1.5 text-xs font-semibold capitalize">
+                <button key={t} onClick={() => setTab(t)} className="relative shrink-0 whitespace-nowrap rounded-lg px-4 py-1.5 text-xs font-semibold capitalize">
                     {tab === t && (
                         <motion.div
                             layoutId="ess-tab"
@@ -363,16 +365,27 @@ function TeamDirectory({ departmentId, departmentName, jobRoles = [] }) {
     );
 }
 
+const leaveStatusCls = (s) => {
+    if (s.startsWith("approv")) return "bg-emerald-50 text-emerald-700";
+    if (s.startsWith("reject") || s.startsWith("cancel")) return "bg-red-50 text-red-700";
+    return "bg-amber-50 text-amber-700";
+};
+
 function LeaveTracker({ onRequestLeave }) {
     const [loading, setLoading] = useState(false);
     const [leaveTypes, setLeaveTypes] = useState([]);
+    const [myRequests, setMyRequests] = useState([]);
 
     useEffect(() => {
         const fetchLeaves = async () => {
         setLoading(true);
         try {
-            const res = await setupService.getLeaveTypes();
-            setLeaveTypes(Array.isArray(res) ? res : []);
+            const [types, mine] = await Promise.all([
+                setupService.getLeaveTypes(),
+                leaveService.list().catch(() => []),
+            ]);
+            setLeaveTypes(Array.isArray(types) ? types : []);
+            setMyRequests(Array.isArray(mine) ? mine : []);
         } catch (err) {
             console.error("[LeaveTracker] Error loading leaves:", err);
         } finally {
@@ -381,6 +394,19 @@ function LeaveTracker({ onRequestLeave }) {
         };
         fetchLeaves();
     }, []);
+
+    // Days consumed per leave type = the sum of this employee's APPROVED
+    // requests (pending ones don't count until an approver says yes).
+    const usedDays = (typeId) =>
+        myRequests
+            .filter((r) => (r.leave_type_id || r.leave_type?.id) === typeId)
+            .filter((r) => String(r.status || "").toLowerCase().startsWith("approv"))
+            .reduce((sum, r) => sum + inclusiveDays(r.start_date, r.end_date), 0);
+
+    const typeNameOf = (r) =>
+        r.leave_type?.name ||
+        leaveTypes.find((t) => t.id === (r.leave_type_id || r.leave_type))?.name ||
+        "Leave";
 
     return (
         <div className="space-y-6">
@@ -394,7 +420,7 @@ function LeaveTracker({ onRequestLeave }) {
                 <div className="grid gap-6 lg:grid-cols-3">
                     {leaveTypes.map((g) => {
                         const daysAllowed = Number(g.days_allowed) || 0;
-                        const daysUsed = 0; 
+                        const daysUsed = Math.min(usedDays(g.id), daysAllowed);
                         const pct = daysAllowed > 0 ? (daysUsed / daysAllowed) : 0;
                         const C = 2 * Math.PI * 42;
                         return (
@@ -426,10 +452,35 @@ function LeaveTracker({ onRequestLeave }) {
             )}
 
             <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
-                <h4 className="font-semibold text-ink">Upcoming team leaves</h4>
-                <div className="p-8 text-center text-ink-faint text-sm">
-                    No upcoming employee leaves logged in your department.
-                </div>
+                <h4 className="font-semibold text-ink">My leave requests</h4>
+                <p className="text-xs text-ink-muted">Everything you’ve requested, with its current status.</p>
+                {myRequests.length === 0 ? (
+                    <div className="p-8 text-center text-ink-faint text-sm">
+                        You haven’t requested any leave yet.
+                    </div>
+                ) : (
+                    <ul className="mt-4 divide-y divide-line-soft">
+                        {myRequests.map((r, i) => {
+                            const s = String(r.status || "pending").toLowerCase();
+                            return (
+                                <li key={r.id || i} className="flex items-center justify-between gap-3 py-3">
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-semibold text-ink">
+                                            {typeNameOf(r)}
+                                            <span className="ml-2 text-xs font-normal text-ink-muted">
+                                                {String(r.start_date).slice(0, 10)} → {String(r.end_date).slice(0, 10)} · {inclusiveDays(r.start_date, r.end_date)} day{inclusiveDays(r.start_date, r.end_date) === 1 ? "" : "s"}
+                                            </span>
+                                        </div>
+                                        {r.reason && <div className="truncate text-xs text-ink-faint">“{r.reason}”</div>}
+                                    </div>
+                                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${leaveStatusCls(s)}`}>
+                                        {s.replace(/_/g, " ")}
+                                    </span>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
             </div>
         </div>
     );
@@ -470,7 +521,7 @@ function LeaveRequestModal({ leaveType, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
           <h3 className="text-lg font-bold text-ink capitalize">Request {leaveType.name}</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken">

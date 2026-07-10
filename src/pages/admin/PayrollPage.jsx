@@ -5,6 +5,8 @@ import { payrollService, findApprovalRequestId } from "../../services/payrollSer
 import { setupService } from "../../services/setupService";
 import { usePermissions } from "../../context/PermissionContext";
 import { useConfig } from "../../context/ConfigContext";
+import { useAuth } from "../../context/AuthContext";
+import { isDesignatedApprover } from "../../utils/approvers";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getEmployeeName } from "../../utils/employee";
@@ -35,9 +37,14 @@ const MILESTONES = [
 
 const statusMeta = (status) => STATUS_META[status] || { label: status || "Unknown", cls: "bg-sunken text-ink-muted", step: 0 };
 
+const CURRENCIES = ["NGN", "USD", "GBP", "EUR", "GHS", "KES", "ZAR"];
+
 const fmtMoney = (v, currency = "NGN") => {
   const n = Number(v) || 0;
-  return `${currency === "NGN" ? "₦" : `${currency} `}${n.toLocaleString()}`;
+  // Guard against invalid stored currency values (e.g. a number typed into
+  // the old free-text field) — fall back to naira rather than printing junk.
+  const cur = /^[A-Za-z]{2,4}$/.test(String(currency || "")) ? String(currency).toUpperCase() : "NGN";
+  return `${cur === "NGN" ? "₦" : `${cur} `}${n.toLocaleString()}`;
 };
 
 
@@ -47,22 +54,32 @@ const actionsForStatus = (status) => {
     case "preview_generated":
       return [{ key: "submit", label: "Submit for approval", perm: "update", confirmMsg: "Submit this payroll run for approval?", exec: (id) => payrollService.submitRun(id) }];
     case "submitted_pending_approval":
-      return [{ key: "approve", label: "Approve payroll", perm: "manage", approve: true, exec: (id, aid, c) => payrollService.approveRun(id, aid, c) }];
+      return [
+        { key: "approve", label: "Approve payroll", perm: "manage", approve: true, exec: (id, aid, c) => payrollService.approveRun(id, aid, c) },
+        { key: "reject", label: "Reject payroll", perm: "manage", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectRun(id, aid, c) },
+      ];
     case "approved":
       return [{ key: "lock", label: "Request lock-in", perm: "update", confirmMsg: "Request lock-in? A locked run can no longer be adjusted.", exec: (id) => payrollService.requestLockIn(id) }];
     case "lock_in_pending_approval":
-      return [{ key: "approve-lock", label: "Approve lock-in", perm: "manage", approve: true, exec: (id, aid, c) => payrollService.approveLockIn(id, aid, c) }];
+      return [
+        { key: "approve-lock", label: "Approve lock-in", perm: "manage", approve: true, exec: (id, aid, c) => payrollService.approveLockIn(id, aid, c) },
+        { key: "reject-lock", label: "Reject lock-in", perm: "manage", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectLockIn(id, aid, c) },
+      ];
     case "locked_in":
       return [{ key: "distribute", label: "Request distribution", perm: "update", confirmMsg: "Request distribution? Employees will be notified of their payslips once approved.", exec: (id) => payrollService.requestDistribution(id) }];
     case "distribution_pending_approval":
-      return [{ key: "approve-dist", label: "Approve distribution", perm: "manage", approve: true, exec: (id, aid, c) => payrollService.approveDistribution(id, aid, c) }];
+      return [
+        { key: "approve-dist", label: "Approve distribution", perm: "manage", approve: true, exec: (id, aid, c) => payrollService.approveDistribution(id, aid, c) },
+        { key: "reject-dist", label: "Reject distribution", perm: "manage", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectDistribution(id, aid, c) },
+      ];
     default:
       return [];
   }
 };
 
 const PayrollPage = () => {
-  const { can } = usePermissions();
+  const { can, isAdmin } = usePermissions();
+  const { user } = useAuth();
   const { config } = useConfig();
   const toast = useToast();
   const confirm = useConfirm();
@@ -75,6 +92,7 @@ const PayrollPage = () => {
   const [adjustments, setAdjustments] = useState([]);
   const [staff, setStaff] = useState([]);
   const [payGroups, setPayGroups] = useState([]);
+  const [workflows, setWorkflows] = useState(null); // null = unknown (fail open)
 
   const [showNewRun, setShowNewRun] = useState(false);
   const [approveModal, setApproveModal] = useState(null);
@@ -120,6 +138,9 @@ const PayrollPage = () => {
     loadRuns();
     loadAdjustments();
     (async () => {
+      // The users list is admin-gated — non-admin payroll approvers get names
+      // from the run items' snapshots instead, so don't even ask.
+      if (!can(RESOURCE_CODES.EMPLOYEES, "read")) return;
       try {
         const res = await api.get("/api/users/?page=1&limit=100");
         if (!stale) setStaff(Array.isArray(res) ? res : res?.users || []);
@@ -133,6 +154,14 @@ const PayrollPage = () => {
         if (!stale) setPayGroups(Array.isArray(groups) ? groups : []);
       } catch (err) {
         console.error("[Payroll] Pay groups unavailable:", err);
+      }
+    })();
+    (async () => {
+      try {
+        const flows = await setupService.getWorkflows();
+        if (!stale) setWorkflows(Array.isArray(flows) ? flows : null);
+      } catch {
+        /* can't read workflows — approve buttons fall back to permission gate */
       }
     })();
     return () => { stale = true; };
@@ -206,23 +235,41 @@ const PayrollPage = () => {
     [adjustments, selectedRun]
   );
 
+  // Payslip lines: GET /runs/{id} returns { run, items } where each item
+  // carries base_salary / allowances_total / deductions_total / gross_salary /
+  // net_salary and a snapshot with the employee's name at run time.
+  const runLines = useMemo(() => {
+    const d = detail || {};
+    const candidates = [d.items, d.payslips, d.lines, d.entries, d.run?.items, d.run?.payslips];
+    return candidates.find((c) => Array.isArray(c) && c.length) || [];
+  }, [detail]);
+
   const staffName = (employeeId) => {
     const s = staff.find((u) => u.id === employeeId);
-    return s ? getEmployeeName(s) : (employeeId ? `${String(employeeId).slice(0, 8)}…` : "—");
+    if (s) return getEmployeeName(s);
+    const line = runLines.find((l) => l.employee_id === employeeId);
+    if (line?.snapshot?.employee_name) return line.snapshot.employee_name;
+    return employeeId ? `${String(employeeId).slice(0, 8)}…` : "—";
   };
 
   // Runs may carry the pay group as a uuid — show the human name.
   const payGroupName = (v) => payGroups.find((g) => g.id === v || g.name === v)?.name || v;
 
-  // Payslip lines, if the run detail includes them (shape is backend-defined).
-  const runLines = useMemo(() => {
-    const d = detail || {};
-    const candidates = [d.payslips, d.lines, d.items, d.entries, d.run?.payslips, d.run?.lines];
-    return candidates.find((c) => Array.isArray(c) && c.length) || [];
-  }, [detail]);
-
   const meta = selectedRun ? statusMeta(selectedRun.status) : null;
-  const actions = selectedRun ? actionsForStatus(selectedRun.status).filter((a) => can(RESOURCE_CODES.PAYROLL, a.perm)) : [];
+  // Approve/reject only shows for the workflow's designated approver job
+  // role (plus admins) — permission alone isn't the right to sign off.
+  const STAGE_WORKFLOW_TYPE = {
+    submitted_pending_approval: "PAYROLL_SUBMISSION",
+    lock_in_pending_approval: "PAYROLL_LOCK_IN",
+    distribution_pending_approval: "PAYROLL_DISTRIBUTION",
+  };
+  const actions = selectedRun
+    ? actionsForStatus(selectedRun.status).filter(
+        (a) =>
+          can(RESOURCE_CODES.PAYROLL, a.perm) &&
+          (!a.approve || isDesignatedApprover(workflows, STAGE_WORKFLOW_TYPE[selectedRun.status], user, isAdmin))
+      )
+    : [];
   const adjustable = meta ? meta.step < 5 : false; // no more adjustments once locked in
 
   return (
@@ -308,7 +355,11 @@ const PayrollPage = () => {
                             ? setApproveModal({ action: { ...a, exec: a.exec }, target: "run", id: selectedRun.id })
                             : runPlainAction(a)
                         }
-                        className="rounded-xl bg-brand px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-60"
+                        className={
+                          a.danger
+                            ? "rounded-xl border border-red-200 bg-red-50 px-3.5 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                            : "rounded-xl bg-brand px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-60"
+                        }
                       >
                         {a.label}
                       </button>
@@ -363,11 +414,12 @@ const PayrollPage = () => {
                   <div className="p-6 text-center text-xs text-ink-faint">Loading run details…</div>
                 ) : runLines.length > 0 ? (
                   <div className="overflow-x-auto rounded-xl border border-line">
-                    <table className="w-full text-sm">
+                    <table className="w-full min-w-[560px] text-sm">
                       <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
                         <tr>
                           <th className="px-3 py-2 text-left font-semibold">Employee</th>
-                          <th className="px-3 py-2 text-right font-semibold">Gross</th>
+                          <th className="px-3 py-2 text-right font-semibold">Base</th>
+                          <th className="px-3 py-2 text-right font-semibold">Allowances</th>
                           <th className="px-3 py-2 text-right font-semibold">Deductions</th>
                           <th className="px-3 py-2 text-right font-semibold">Net</th>
                         </tr>
@@ -376,11 +428,12 @@ const PayrollPage = () => {
                         {runLines.map((l, i) => (
                           <tr key={l.id || i} className="border-t border-line-soft">
                             <td className="px-3 py-2 font-medium text-ink-2">
-                              {l.employee_name || getEmployeeName(l.employee, null) || staffName(l.employee_id)}
+                              {l.snapshot?.employee_name || l.employee_name || getEmployeeName(l.employee, null) || staffName(l.employee_id)}
                             </td>
-                            <td className="px-3 py-2 text-right">{fmtMoney(l.gross_pay ?? l.gross ?? l.total_gross, selectedRun.currency)}</td>
-                            <td className="px-3 py-2 text-right text-red-600">{fmtMoney(l.total_deductions ?? l.deductions, selectedRun.currency)}</td>
-                            <td className="px-3 py-2 text-right font-semibold">{fmtMoney(l.net_pay ?? l.net ?? l.total_net, selectedRun.currency)}</td>
+                            <td className="px-3 py-2 text-right">{fmtMoney(l.base_salary ?? l.base, selectedRun.currency)}</td>
+                            <td className="px-3 py-2 text-right text-emerald-600">{fmtMoney(l.allowances_total ?? l.allowances, selectedRun.currency)}</td>
+                            <td className="px-3 py-2 text-right text-red-600">{fmtMoney(l.deductions_total ?? l.total_deductions ?? l.deductions, selectedRun.currency)}</td>
+                            <td className="px-3 py-2 text-right font-semibold">{fmtMoney(l.net_salary ?? l.net_pay ?? l.net ?? l.total_net, selectedRun.currency)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -500,6 +553,7 @@ const PayrollPage = () => {
         {approveModal && (
           <ApproveModal
             title={approveModal.action.label}
+            danger={approveModal.action.danger}
             busy={busy}
             onClose={() => setApproveModal(null)}
             onSubmit={runApproveAction}
@@ -509,7 +563,11 @@ const PayrollPage = () => {
         {showAdjustment && selectedRun && (
           <AdjustmentModal
             run={selectedRun}
-            staff={staff}
+            employees={
+              runLines.length
+                ? runLines.map((l) => ({ id: l.employee_id, name: l.snapshot?.employee_name || staffName(l.employee_id) }))
+                : staff.map((s) => ({ id: s.id, name: getEmployeeName(s, s.email) }))
+            }
             busy={busy}
             onClose={() => setShowAdjustment(false)}
             onSubmit={async (payload) => {
@@ -568,7 +626,7 @@ function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
           <h3 className="text-lg font-bold text-ink">Run payroll</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
@@ -604,7 +662,11 @@ function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
           </div>
           <div>
             <label className={labelCls}>Currency</label>
-            <input value={currency} onChange={(e) => setCurrency(e.target.value)} className={inputCls} placeholder="NGN" />
+            <select value={currency} onChange={(e) => setCurrency(e.target.value)} className={inputCls}>
+              {[...new Set([defaultCurrency, ...CURRENCIES])].filter(Boolean).map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
           </div>
           <div className="flex gap-2 justify-end pt-2">
             <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
@@ -618,28 +680,33 @@ function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
   );
 }
 
-function ApproveModal({ title, busy, onClose, onSubmit }) {
+function ApproveModal({ title, danger = false, busy, onClose, onSubmit }) {
   const [comment, setComment] = useState("");
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
           <h3 className="text-lg font-bold text-ink">{title}</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
         </div>
         <div className="mt-4 space-y-4">
           <div>
-            <label className={labelCls}>Comment (optional)</label>
-            <textarea value={comment} onChange={(e) => setComment(e.target.value)} className={`${inputCls} h-20 py-2 resize-none`} placeholder="Visible in the approval trail…" />
+            <label className={labelCls}>{danger ? "Reason (recommended)" : "Comment (optional)"}</label>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              className={`${inputCls} h-20 py-2 resize-none`}
+              placeholder={danger ? "Why is this being rejected? The submitter will see this…" : "Visible in the approval trail…"}
+            />
           </div>
           <div className="flex gap-2 justify-end">
             <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
             <button
               onClick={() => onSubmit(comment.trim() || null)}
               disabled={busy}
-              className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70"
+              className={`h-11 rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-70 ${danger ? "bg-red-600 hover:bg-red-700" : "bg-brand"}`}
             >
-              {busy ? "Working…" : "Confirm"}
+              {busy ? "Working…" : danger ? "Reject" : "Confirm"}
             </button>
           </div>
         </div>
@@ -648,7 +715,7 @@ function ApproveModal({ title, busy, onClose, onSubmit }) {
   );
 }
 
-function AdjustmentModal({ run, staff, busy, onClose, onSubmit }) {
+function AdjustmentModal({ run, employees = [], busy, onClose, onSubmit }) {
   const [employeeId, setEmployeeId] = useState("");
   const [type, setType] = useState("earning");
   const [amount, setAmount] = useState("");
@@ -672,7 +739,7 @@ function AdjustmentModal({ run, staff, busy, onClose, onSubmit }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl bg-card p-6 shadow-xl">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
           <h3 className="text-lg font-bold text-ink">Add adjustment</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
@@ -687,7 +754,7 @@ function AdjustmentModal({ run, staff, busy, onClose, onSubmit }) {
             <label className={labelCls}>Employee</label>
             <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={inputCls}>
               <option value="">— Select —</option>
-              {staff.map((s) => <option key={s.id} value={s.id}>{getEmployeeName(s, s.email)}</option>)}
+              {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">

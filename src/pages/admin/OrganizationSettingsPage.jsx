@@ -203,7 +203,7 @@ function Toggle({ label, description, value, onChange, disabled }) {
 }
 
 const OrganizationSettingsPage = () => {
-  const { config, setConfig, refresh } = useConfig();
+  const { config, setConfig, refresh, previewTheme, previewBrand } = useConfig();
   const { can } = usePermissions();
   const toast = useToast();
   const canEdit = can(RESOURCE_CODES.SYSTEM_CONFIG, "update") || can(RESOURCE_CODES.SYSTEM_CONFIG, "manage");
@@ -237,6 +237,26 @@ const OrganizationSettingsPage = () => {
   }, []);
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  // Colors preview live as you pick them — saving makes them permanent.
+  const changeColor = (key, v) => {
+    const next = { ...form, [key]: v };
+    setForm(next);
+    previewBrand({
+      primary_color: next.primary_color,
+      secondary_color: next.secondary_color,
+      accent_color: next.accent_color,
+    });
+  };
+
+  // Leaving without saving restores the saved theme and colors.
+  useEffect(() => {
+    return () => {
+      previewTheme(config?.theme_mode || "light");
+      previewBrand(config || {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -323,10 +343,10 @@ const OrganizationSettingsPage = () => {
       </Section>
 
       <Section icon={Palette} title="Branding" subtitle="Applied live across the whole workspace after saving.">
-        <Color label="Primary color" value={form.primary_color} onChange={(v) => set("primary_color", v)} disabled={!canEdit} />
-        <Color label="Secondary color" value={form.secondary_color} onChange={(v) => set("secondary_color", v)} disabled={!canEdit} />
-        <Color label="Accent color" value={form.accent_color} onChange={(v) => set("accent_color", v)} disabled={!canEdit} />
-        <Select label="Theme mode" value={form.theme_mode} onChange={(v) => set("theme_mode", v)} disabled={!canEdit} options={THEME_MODES} />
+        <Color label="Primary color" value={form.primary_color} onChange={(v) => changeColor("primary_color", v)} disabled={!canEdit} />
+        <Color label="Secondary color" value={form.secondary_color} onChange={(v) => changeColor("secondary_color", v)} disabled={!canEdit} />
+        <Color label="Accent color" value={form.accent_color} onChange={(v) => changeColor("accent_color", v)} disabled={!canEdit} />
+        <Select label="Theme mode" value={form.theme_mode} onChange={(v) => { set("theme_mode", v); previewTheme(v); }} disabled={!canEdit} options={THEME_MODES} />
       </Section>
 
       <Section icon={Globe} title="Localization">

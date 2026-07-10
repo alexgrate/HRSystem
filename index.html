@@ -5,6 +5,27 @@
     <link rel="icon" type="image/jpeg" href="/src/assets/dashIcon.jpg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HR - Application</title>
+    <script>
+      // Apply the cached theme + brand colors BEFORE first paint, so a
+      // dark-mode organization never flashes light on reload.
+      (function () {
+        try {
+          var t = localStorage.getItem("dash_theme");
+          if (t === "dark" || (t === "auto" && matchMedia("(prefers-color-scheme: dark)").matches)) {
+            document.documentElement.classList.add("dark");
+          }
+          var b = JSON.parse(localStorage.getItem("dash_brand") || "null");
+          if (b) {
+            var s = document.documentElement.style;
+            if (b.primary) s.setProperty("--brand-primary", b.primary);
+            if (b.secondary) s.setProperty("--brand-secondary", b.secondary);
+            if (b.accent) s.setProperty("--brand-accent", b.accent);
+            if (b.dark) s.setProperty("--brand-primary-dark", b.dark);
+            if (b.darkest) s.setProperty("--brand-darkest", b.darkest);
+          }
+        } catch (e) { /* first visit or blocked storage — defaults apply */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

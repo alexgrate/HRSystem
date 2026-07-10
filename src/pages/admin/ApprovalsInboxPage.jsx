@@ -3,14 +3,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import { CalendarDays, FileText, UserCog, Check, X, Inbox } from "lucide-react";
 import { approvalService } from "../../services/approvalService";
 import { usePermissions } from "../../context/PermissionContext";
+import { useAuth } from "../../context/AuthContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getEmployeeName } from "../../utils/employee";
+import { isDesignatedApprover } from "../../utils/approvers";
+import { setupService } from "../../services/setupService";
+import api from "../../services/api";
 
-const personName = (r) => {
-  const e = r.employee || r.user || r.requester || r;
-  return getEmployeeName(e, r.employee_email || r.employee_id || "Employee");
-};
 const fmtDate = (d) => {
   if (!d) return "—";
   const s = String(d).slice(0, 10);
@@ -20,21 +20,21 @@ const fmtDate = (d) => {
 const TABS = [
   {
     key: "leave", label: "Leave Requests", Icon: CalendarDays,
-    resource: RESOURCE_CODES.LEAVE_REQUESTS, noun: "leave request",
+    resource: RESOURCE_CODES.LEAVE_REQUESTS, noun: "leave request", workflowType: "LEAVE_REQUEST",
     list: () => approvalService.getPendingLeave(),
     approve: (id) => approvalService.approveLeave(id),
     reject: (id) => approvalService.rejectLeave(id),
   },
   {
     key: "documents", label: "Documents", Icon: FileText,
-    resource: RESOURCE_CODES.DOCUMENTS, noun: "document",
+    resource: RESOURCE_CODES.DOCUMENTS, noun: "document", workflowType: "DOCUMENT_UPLOAD",
     list: () => approvalService.getPendingDocuments(),
     approve: (id) => approvalService.approveDocument(id),
     reject: (id) => approvalService.rejectDocument(id),
   },
   {
     key: "profile", label: "Profile Updates", Icon: UserCog,
-    resource: RESOURCE_CODES.PROFILE_UPDATE, noun: "profile update",
+    resource: RESOURCE_CODES.PROFILE_UPDATE, noun: "profile update", workflowType: "EMPLOYEE_UPDATE",
     list: () => approvalService.getPendingProfileUpdates(),
     approve: (id) => approvalService.approveProfileUpdate(id),
     reject: (id) => approvalService.rejectProfileUpdate(id),
@@ -51,7 +51,8 @@ const changeEntries = (item) => {
 };
 
 const ApprovalsInboxPage = () => {
-  const { can } = usePermissions();
+  const { can, isAdmin } = usePermissions();
+  const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -59,10 +60,54 @@ const ApprovalsInboxPage = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [workflows, setWorkflows] = useState(null);
+  const [staff, setStaff] = useState([]);
+
+  // Request rows often carry only employee_id — resolve names via the staff
+  // list when this user may read it. (Backend ask: embed the requester name
+  // on the row, payroll-snapshot style, so every approver sees names.)
+  useEffect(() => {
+    if (!can(RESOURCE_CODES.EMPLOYEES, "read")) return;
+    let stale = false;
+    (async () => {
+      try {
+        const res = await api.get("/api/users/?page=1&limit=100");
+        if (!stale) setStaff(Array.isArray(res) ? res : res?.users || []);
+      } catch {
+        /* names fall back to shortened ids */
+      }
+    })();
+    return () => { stale = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const personName = (r) => {
+    const embedded = r.employee || r.user || r.requester;
+    if (embedded && typeof embedded === "object") {
+      const n = getEmployeeName(embedded, "");
+      if (n) return n;
+    }
+    if (r.employee_name || r.snapshot?.employee_name) return r.employee_name || r.snapshot.employee_name;
+    const id = r.employee_id || r.user_id || r.uploaded_by_employee_id;
+    const s = staff.find((u) => u.id === id);
+    if (s) return getEmployeeName(s);
+    return r.employee_email || (id ? `${String(id).slice(0, 8)}…` : "Employee");
+  };
+
+  useEffect(() => {
+    let stale = false;
+    setupService.getWorkflows()
+      .then((flows) => { if (!stale) setWorkflows(Array.isArray(flows) ? flows : null); })
+      .catch(() => { /* fall back to permission-only gating */ });
+    return () => { stale = true; };
+  }, []);
 
   const visibleTabs = TABS.filter((t) => can(t.resource, "read"));
   const activeTab = visibleTabs.find((t) => t.key === tab) || visibleTabs[0] || null;
-  const canManage = activeTab ? can(activeTab.resource, "manage") : false;
+  // Manage permission AND designated approver on the matching workflow.
+  const canManage = activeTab
+    ? can(activeTab.resource, "manage") && isDesignatedApprover(workflows, activeTab.workflowType, user, isAdmin)
+    : false;
 
   useEffect(() => {
     if (!activeTab) return;
@@ -121,7 +166,7 @@ const ApprovalsInboxPage = () => {
         <p className="mt-1 text-sm text-ink-muted">Review and action requests waiting on you.</p>
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit">
+      <div className="flex gap-1 overflow-x-auto rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit max-w-full">
         {visibleTabs.map((t) => {
           const Icon = t.Icon;
           const isActive = activeTab.key === t.key;
@@ -129,7 +174,7 @@ const ApprovalsInboxPage = () => {
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`relative inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${isActive ? "text-white" : "text-ink-muted"}`}
+              className={`relative shrink-0 whitespace-nowrap inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${isActive ? "text-white" : "text-ink-muted"}`}
             >
               {isActive && <motion.div layoutId="approvals-tab" className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2" transition={{ type: "spring", stiffness: 400, damping: 32 }} />}
               <Icon className="relative h-3.5 w-3.5" />

@@ -299,7 +299,8 @@ const DirectoryPage = () => {
       singular: "Allowance",
       list: () => setupService.getBenefitLevelAllowances(),
       create: (d) => setupService.createBenefitLevelAllowance(d),
-      // list + create only — backend has no PUT/DELETE for allowances yet
+      update: (id, d) => setupService.updateBenefitLevelAllowance(id, d),
+      remove: (id) => setupService.deleteBenefitLevelAllowance(id),
       columns: [
         { header: "Name", render: (r) => <span className="font-medium text-ink">{r.name || "—"}</span> },
         { header: "Benefit Level", render: (r) => allBenefitLevels.find((b) => b.id === r.benefit_level_id)?.name || "—" },
@@ -321,7 +322,8 @@ const DirectoryPage = () => {
       singular: "Leave Type",
       list: () => setupService.getLeaveTypes(),
       create: (d) => setupService.createLeaveType(d),
-      // no update/remove — backend exposes list + create only for leave types
+      update: (id, d) => setupService.updateLeaveType(id, d),
+      remove: (id) => setupService.deleteLeaveType(id),
       columns: [
         { header: "Code", render: (r) => <span className="font-mono text-brand font-semibold">{r.code || "—"}</span> },
         { header: "Name", render: (r) => <span className="font-medium text-ink">{r.name}</span> },
@@ -750,9 +752,9 @@ const DirectoryPage = () => {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-xl border border-line/80 bg-card p-1 shadow-sm">
+      <div className="flex gap-1 overflow-x-auto rounded-xl border border-line/80 bg-card p-1 shadow-sm">
         {TABS.map((t) => (
-          <button key={t} onClick={() => switchTab(t)} className="relative rounded-lg px-3 py-1.5 text-xs font-semibold text-ink-muted">
+          <button key={t} onClick={() => switchTab(t)} className="relative shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold text-ink-muted">
             {tab === t && (
               <motion.div layoutId="dir-tab" className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2" transition={{ type: "spring", stiffness: 400, damping: 32 }} />
             )}
@@ -773,7 +775,7 @@ const DirectoryPage = () => {
           {loading ? (
             <div className="p-8 text-center text-ink-muted">Retrieving records from database...</div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
                 <tr>
                   {tab === "Employees" ? (

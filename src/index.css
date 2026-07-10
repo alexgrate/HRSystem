@@ -64,6 +64,27 @@ body {
   color: var(--ink);
 }
 
+/* Added for ~450ms around a theme/brand switch so colors ease instead of
+   snapping. Never left on permanently — it would slow every hover state. */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color 0.35s ease,
+    border-color 0.35s ease,
+    color 0.25s ease,
+    fill 0.35s ease,
+    stroke 0.35s ease,
+    box-shadow 0.35s ease !important;
+}
+
+/* Horizontal scrollers (tables, tab bars): keep the swipe inside the element
+   so a trackpad side-swipe never triggers browser back-navigation. */
+.overflow-x-auto {
+  overscroll-behavior-x: contain;
+}
+
 /* Number inputs: hide the stepper arrows — they invite accidental mis-clicks
    and pair with the wheel-scroll guard in App.jsx. Typing and arrow keys
    still work as normal. */

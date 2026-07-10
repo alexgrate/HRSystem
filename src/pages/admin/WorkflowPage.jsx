@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, Plus, Trash2, HelpCircle } from "lucide-react";
+import { ArrowRight, Plus, Trash2, HelpCircle, Pencil } from "lucide-react";
 import { setupService } from "../../services/setupService";
 import { usePermissions } from "../../context/PermissionContext";
-import { useToast } from "../../components/ui/Notifications";
+import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 
 const getTypeColor = (type) => {
@@ -17,11 +17,16 @@ const getTypeColor = (type) => {
 
 const WorkflowPage = () => {
   const { can } = usePermissions();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [workflows, setWorkflows] = useState([]);
   const [jobRoles, setJobRoles] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
+  const [modal, setModal] = useState(null); // { flow: null } = create, { flow } = edit
+
+  const canUpdate = can(RESOURCE_CODES.APPROVAL_WORKFLOWS, "update");
+  const canDelete = can(RESOURCE_CODES.APPROVAL_WORKFLOWS, "delete");
 
   const loadWorkflowData = async () => {
     setLoading(true);
@@ -51,6 +56,23 @@ const WorkflowPage = () => {
     return matched ? matched.title : "Approver";
   };
 
+  const handleDelete = async (p) => {
+    const ok = await confirm({
+      title: `Delete “${p.workflow?.name || "this workflow"}”?`,
+      message: "Requests already in flight keep their history, but new requests of this type won't be gated by it anymore.",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await setupService.deleteWorkflow(p.workflow?.id);
+      toast.success("Workflow deleted.");
+      loadWorkflowData();
+    } catch (err) {
+      toast.error(err?.message || "Couldn't delete the workflow.");
+    }
+  };
+
 
   return (
     <div className="space-y-6">
@@ -62,7 +84,7 @@ const WorkflowPage = () => {
         </div>
         {can(RESOURCE_CODES.APPROVAL_WORKFLOWS, "create") && (
           <button
-            onClick={() => setShowAdd(true)}
+            onClick={() => setModal({ flow: null })}
             className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-brand/20 active:scale-95 transition-transform"
           >
             <Plus className="h-4 w-4" /> New workflow
@@ -84,25 +106,44 @@ const WorkflowPage = () => {
         <>
           <div className="grid gap-3 md:grid-cols-3">
             {workflows.map((p, i) => (
-              <button
+              <div
                 key={p.workflow?.id || i}
+                role="button"
+                tabIndex={0}
                 onClick={() => setActiveId(p.workflow?.id)}
-                className={`rounded-2xl border-y border-r border-l-4 p-4 text-left transition-all ${
+                onKeyDown={(e) => { if (e.key === "Enter") setActiveId(p.workflow?.id); }}
+                className={`cursor-pointer rounded-2xl border-y border-r border-l-4 p-4 text-left transition-all ${
                   p === activeFlow
                     ? "border-brand bg-gradient-to-br from-brand/5 to-card shadow-md"
                     : "border-line/80 bg-card hover:border-line"
                 } ${getTypeColor(p.workflow?.workflow_type)}`}
               >
-                <div className="text-sm font-semibold text-ink capitalize">
-                  {p.workflow?.name || "Unnamed Workflow"}
-                </div>
-                <div className="text-xs text-ink-muted mt-1 uppercase tracking-wider">
-                  {(p.workflow?.workflow_type || "SYSTEM").replace('_', ' ')} process
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-ink capitalize">
+                      {p.workflow?.name || "Unnamed Workflow"}
+                    </div>
+                    <div className="text-xs text-ink-muted mt-1 uppercase tracking-wider">
+                      {(p.workflow?.workflow_type || "SYSTEM").replace('_', ' ')} process
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1" onClick={(e) => e.stopPropagation()}>
+                    {canUpdate && (
+                      <button onClick={() => setModal({ flow: p })} title="Edit workflow" className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken hover:text-brand">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button onClick={() => handleDelete(p)} title="Delete workflow" className="rounded-lg p-1.5 text-ink-faint hover:bg-red-50 hover:text-red-600">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-brand">
                   {(p.steps || []).length}-stage approval
                 </div>
-              </button>
+              </div>
             ))}
           </div>
 
@@ -160,9 +201,10 @@ const WorkflowPage = () => {
       </div>
 
       <AnimatePresence>
-        {showAdd && (
+        {modal && (
           <WorkflowFormModal
-            onClose={() => setShowAdd(false)}
+            flow={modal.flow}
+            onClose={() => setModal(null)}
             onSaved={loadWorkflowData}
             jobRoles={jobRoles}
           />
@@ -173,13 +215,18 @@ const WorkflowPage = () => {
 }
 
 
-function WorkflowFormModal({ onClose, onSaved, jobRoles }) {
+function WorkflowFormModal({ flow = null, onClose, onSaved, jobRoles }) {
   const toast = useToast();
-  const [name, setName] = useState("");
-  const [workflowType, setWorkflowType] = useState("LEAVE_REQUEST");
-  const [steps, setSteps] = useState([
-    { id: 1, approver_job_role_id: "" }
-  ]);
+  const isEdit = !!flow?.workflow?.id;
+  const [name, setName] = useState(flow?.workflow?.name || "");
+  const [workflowType, setWorkflowType] = useState(flow?.workflow?.workflow_type || "LEAVE_REQUEST");
+  const [steps, setSteps] = useState(() => {
+    const existing = (flow?.steps || [])
+      .slice()
+      .sort((a, b) => a.step_order - b.step_order)
+      .map((s, i) => ({ id: s.id || i + 1, approver_job_role_id: s.approver_job_role_id || "" }));
+    return existing.length ? existing : [{ id: 1, approver_job_role_id: "" }];
+  });
 
   const addStep = () => {
     setSteps((prev) => [...prev, { id: Date.now(), approver_job_role_id: "" }]);
@@ -210,20 +257,25 @@ function WorkflowFormModal({ onClose, onSaved, jobRoles }) {
         }))
       };
 
-      await setupService.createWorkflow(payload);
-      toast.success("Workflow created.");
+      if (isEdit) {
+        await setupService.updateWorkflow(flow.workflow.id, payload);
+        toast.success("Workflow updated.");
+      } else {
+        await setupService.createWorkflow(payload);
+        toast.success("Workflow created.");
+      }
       onSaved?.();
       onClose();
     } catch (err) {
-      console.error("Workflow creation failed:", err);
-      toast.error(err?.error?.message || err?.message || "Error creating workflow chain.");
+      console.error("Workflow save failed:", err);
+      toast.error(err?.error?.message || err?.message || "Error saving workflow chain.");
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="w-full max-w-lg rounded-2xl bg-card p-6 shadow-xl my-8">
-        <h3 className="text-lg font-bold text-ink">Configure Approval Workflow</h3>
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl my-8">
+        <h3 className="text-lg font-bold text-ink">{isEdit ? `Edit: ${flow.workflow?.name || "Workflow"}` : "Configure Approval Workflow"}</h3>
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <div>
             <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Workflow Name</label>
@@ -245,6 +297,8 @@ function WorkflowFormModal({ onClose, onSaved, jobRoles }) {
             >
               <option value="LEAVE_REQUEST">Leave Request</option>
               <option value="PAYROLL_SUBMISSION">Payroll Submission</option>
+              <option value="PAYROLL_LOCK_IN">Payroll Lock-in</option>
+              <option value="PAYROLL_DISTRIBUTION">Payroll Distribution</option>
               <option value="EMPLOYEE_UPDATE">Profile Update</option>
               <option value="DOCUMENT_UPLOAD">Document Upload</option>
             </select>

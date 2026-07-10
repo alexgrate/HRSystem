@@ -12,6 +12,12 @@ export const payrollService = {
   submitRun: (runId) => api.post(`/api/payroll/runs/${runId}/submit`, {}),
   approveRun: (runId, approvalRequestId, comment) =>
     api.post(`/api/payroll/runs/${runId}/approve`, { approval_request_id: approvalRequestId, comment: comment || null }),
+  rejectRun: (runId, approvalRequestId, comment) =>
+    api.post(`/api/payroll/runs/${runId}/reject`, { approval_request_id: approvalRequestId, comment: comment || null }),
+  rejectLockIn: (runId, approvalRequestId, comment) =>
+    api.post(`/api/payroll/runs/${runId}/reject-lock-in`, { approval_request_id: approvalRequestId, comment: comment || null }),
+  rejectDistribution: (runId, approvalRequestId, comment) =>
+    api.post(`/api/payroll/runs/${runId}/reject-distribution`, { approval_request_id: approvalRequestId, comment: comment || null }),
   requestLockIn: (runId) => api.post(`/api/payroll/runs/${runId}/request-lock-in`, {}),
   approveLockIn: (runId, approvalRequestId, comment) =>
     api.post(`/api/payroll/runs/${runId}/approve-lock-in`, { approval_request_id: approvalRequestId, comment: comment || null }),

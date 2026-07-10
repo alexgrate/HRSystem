@@ -38,12 +38,18 @@ export const setupService = {
 
   getBenefitLevelAllowances: () => api.get('/api/setups/benefit-level-allowances'),
   createBenefitLevelAllowance: (data) => api.post('/api/setups/benefit-level-allowances', data),
+  updateBenefitLevelAllowance: (id, data) => api.put(`/api/setups/benefit-level-allowances/${id}`, data),
+  deleteBenefitLevelAllowance: (id) => api.delete(`/api/setups/benefit-level-allowances/${id}`),
 
   getWorkflows: () => api.get('/api/setups/approval-workflows'),
   createWorkflow: (data) => api.post('/api/setups/approval-workflows', data),
+  updateWorkflow: (id, data) => api.put(`/api/setups/approval-workflows/${id}`, data),
+  deleteWorkflow: (id) => api.delete(`/api/setups/approval-workflows/${id}`),
 
   getLeaveTypes: () => api.get('/api/setups/leave-types'),
   createLeaveType: (data) => api.post('/api/setups/leave-types', data),
+  updateLeaveType: (id, data) => api.put(`/api/setups/leave-types/${id}`, data),
+  deleteLeaveType: (id) => api.delete(`/api/setups/leave-types/${id}`),
 
   bootstrapOrganization: (data) => api.post('/api/setups/bootstrap', data),
   getSetupOverview: () => api.get('/api/setups/overview'),

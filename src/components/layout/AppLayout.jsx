@@ -6,13 +6,17 @@ import { useAuth } from "../../context/AuthContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { useConfig } from "../../context/ConfigContext";
 import { RESOURCES, pathFor } from "../../config/resources";
+import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getEmployeeName, getInitials } from "../../utils/employee";
+import { isDesignatedApprover } from "../../utils/approvers";
+import { approvalService } from "../../services/approvalService";
+import { setupService } from "../../services/setupService";
 
 const displayName = (user) => getEmployeeName(user, "User");
 const initials = getInitials;
 
 
-const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMobile, items, onSignout, logoUrl, orgName }) => (
+const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMobile, items, onSignout, logoUrl, orgName, badges = {} }) => (
   <>
     <div className="flex h-16 items-center justify-between border-b border-line-soft px-4">
       <div className="flex items-center gap-2">
@@ -52,6 +56,7 @@ const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMo
       {items.map((item) => {
         const Icon = item.Icon;
         const showLabel = isMobile || !collapsed;
+        const badge = badges[item.key] || 0;
         return (
           <NavLink
             key={item.key}
@@ -75,6 +80,14 @@ const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMo
                 )}
                 <Icon className="relative h-[18px] w-[18px] shrink-0" />
                 {showLabel && <span className="relative">{item.label}</span>}
+                {badge > 0 && showLabel && (
+                  <span className="relative ml-auto min-w-[20px] rounded-full bg-amber-500 px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white">
+                    {badge > 99 ? "99+" : badge}
+                  </span>
+                )}
+                {badge > 0 && !showLabel && (
+                  <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500" />
+                )}
               </>
             )}
           </NavLink>
@@ -103,10 +116,47 @@ const AppLayout = () => {
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [approverFlows, setApproverFlows] = useState(null);
 
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
+
+  // Workflows are fetched once — the badge only counts queues this user is a
+  // designated approver for (same rule that shows the approve buttons).
+  useEffect(() => {
+    let stale = false;
+    setupService.getWorkflows()
+      .then((flows) => { if (!stale) setApproverFlows(Array.isArray(flows) ? flows : null); })
+      .catch(() => { /* fall back to permission-only counting */ });
+    return () => { stale = true; };
+  }, []);
+
+  // Pending-approvals badge: refreshed on navigation and every 90s, so the
+  // number stays honest while working on other pages.
+  useEffect(() => {
+    let stale = false;
+    const load = async () => {
+      const jobs = [];
+      if (can(RESOURCE_CODES.LEAVE_REQUESTS, "manage") && isDesignatedApprover(approverFlows, "LEAVE_REQUEST", user, isAdmin))
+        jobs.push(approvalService.getPendingLeave().catch(() => []));
+      if (can(RESOURCE_CODES.DOCUMENTS, "manage") && isDesignatedApprover(approverFlows, "DOCUMENT_UPLOAD", user, isAdmin))
+        jobs.push(approvalService.getPendingDocuments().catch(() => []));
+      if (can(RESOURCE_CODES.PROFILE_UPDATE, "manage") && isDesignatedApprover(approverFlows, "EMPLOYEE_UPDATE", user, isAdmin))
+        jobs.push(approvalService.getPendingProfileUpdates().catch(() => []));
+      if (!jobs.length) {
+        if (!stale) setPendingCount(0);
+        return;
+      }
+      const lists = await Promise.all(jobs);
+      if (!stale) setPendingCount(lists.flat().length);
+    };
+    load();
+    const timer = setInterval(load, 90000);
+    return () => { stale = true; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [can, isAdmin, approverFlows, location.pathname]);
 
   const items = RESOURCES.filter((r) =>
     Array.isArray(r.checks) && r.checks.length
@@ -129,6 +179,7 @@ const AppLayout = () => {
     onSignout: handleSignout,
     logoUrl: config?.logo_url || null,
     orgName: config?.organization_name || null,
+    badges: { approvals: pendingCount },
   };
 
   return (

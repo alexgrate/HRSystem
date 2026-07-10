@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Building2,
   Inbox,
+  ScrollText,
 } from "lucide-react";
 import frontendResourceCatalog from "./frontend-resource-catalog.json";
 
@@ -21,6 +22,8 @@ import OrganizationSettingsPage from "../pages/admin/OrganizationSettingsPage";
 import ApprovalsInboxPage from "../pages/admin/ApprovalsInboxPage";
 import PayrollPage from "../pages/admin/PayrollPage";
 import DashboardPage from "../pages/DashboardPage";
+import AuditTrailPage from "../pages/admin/AuditTrailPage";
+import LeaveAdminPage from "../pages/admin/LeaveAdminPage";
 
 import { RESOURCE_CODES } from "./resourceCodes";
 export { RESOURCE_CODES };
@@ -165,7 +168,7 @@ export const RESOURCES = [
     resource: RESOURCE_CODES.LEAVE_REQUESTS,
     action: "read",
     checks: checksFromRoutes(["/leave-requests"]),
-    component: () => <ComingSoon label="leave" />,
+    component: LeaveAdminPage,
   },
   {
     key: "settings",
@@ -176,6 +179,16 @@ export const RESOURCES = [
     action: "read",
     checks: checksFromRoutes(["/access/roles", "/access/resources", "/access/assignments"]),
     component: SettingsPage,
+  },
+  {
+    key: "audit",
+    label: "Audit Trail",
+    segment: "audit",
+    Icon: ScrollText,
+    // Confirm the seeded catalog uses this code — until granted, admins only.
+    resource: RESOURCE_CODES.AUDIT_LOGS,
+    action: "read",
+    component: AuditTrailPage,
   },
   {
     key: "organization",
