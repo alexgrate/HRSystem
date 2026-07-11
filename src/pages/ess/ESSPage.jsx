@@ -6,8 +6,10 @@ import { useToast } from "../../components/ui/Notifications";
 import { setupService } from "../../services/setupService";
 import { approvalService } from "../../services/approvalService";
 import { leaveService } from "../../services/leaveService";
+import { payrollService } from "../../services/payrollService";
 import { getEmployeeName, getInitials } from "../../utils/employee";
 import { inclusiveDays } from "../../utils/leave";
+import { MONTHS, fmtMoney, extractRunLines, findEmployeeLine, lineAmounts } from "../../utils/payroll";
 import api from "../../services/api";
 
 function useOrgNames(user) {
@@ -83,7 +85,7 @@ const ESSPage = () => {
                 </>
             )}
             {tab === "leave" && <LeaveTracker onRequestLeave={setActiveLeaveRequest} />}
-            {tab === "payslips" && <Payslips onOpen={(m) => setDrawer({ month: m })} />}
+            {tab === "payslips" && <Payslips onOpen={(run) => setDrawer(run)} />}
             {tab === "docs" && <DocsUpload />}
             {tab === "team" && (
                 <TeamDirectory
@@ -94,7 +96,7 @@ const ESSPage = () => {
             )}
 
             <AnimatePresence>
-                {drawer && <PayslipDrawer month={drawer.month} jobTitle={jobTitle} onClose={() => setDrawer(null)} />}
+                {drawer && <PayslipDrawer run={drawer} jobTitle={jobTitle} onClose={() => setDrawer(null)} />}
                 {activeLeaveRequest && (
                     <LeaveRequestModal 
                         leaveType={activeLeaveRequest}
@@ -564,8 +566,7 @@ function Payslips({ onOpen }) {
         const fetchPayslips = async () => {
         setLoading(true);
         try {
-            const res = await api.get("/api/payroll/runs");
-            const list = Array.isArray(res) ? res : res?.runs || res?.items || res?.data || [];
+            const list = await payrollService.listRuns();
             setPayruns((Array.isArray(list) ? list : []).filter((r) => ["locked_in", "distributed"].includes(r.status)));
         } catch (err) {
             console.error("[Payslips] Error loading payroll history:", err);
@@ -590,12 +591,12 @@ function Payslips({ onOpen }) {
                 <ul className="divide-y divide-line-soft">
                     {payruns.map((m, i) => (
                         <motion.li key={m.id || i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
-                            <button onClick={() => onOpen(m.month)} className="flex w-full items-center justify-between p-4 hover:bg-sunken">
+                            <button onClick={() => onOpen(m)} className="flex w-full items-center justify-between p-4 hover:bg-sunken">
                                 <div className="flex items-center gap-3">
                                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10 text-brand"><FileText className="h-4 w-4" /></div>
                                     <div className="text-left">
-                                        <div className="text-sm font-semibold text-ink">Month {m.month} · Payslip</div>
-                                        <div className="text-xs text-ink-muted">Net pay ₦{(Number(m.total_net) || 0).toLocaleString()}</div>
+                                        <div className="text-sm font-semibold text-ink">{MONTHS[(m.month || 1) - 1]} {m.year} · Payslip</div>
+                                        <div className="text-xs text-ink-muted">{m.status === "distributed" ? "Paid" : "Locked in — payment pending"}</div>
                                     </div>
                                 </div>
                                 <span className="text-xs font-semibold text-brand">View →</span>
@@ -608,10 +609,30 @@ function Payslips({ onOpen }) {
     );
 }
 
-function PayslipDrawer({ month, jobTitle = "", onClose }) {
+function PayslipDrawer({ run, jobTitle = "", onClose }) {
     const { user } = useAuth();
-    const fullName = getEmployeeName(user, "");
-    const salary = Number(user?.base_salary) || 0;
+    const period = `${MONTHS[(run.month || 1) - 1]} ${run.year}`;
+    const paid = run.status === "distributed";
+
+    const [state, setState] = useState({ loading: true, line: null, error: false });
+
+    useEffect(() => {
+        let stale = false;
+        (async () => {
+            try {
+                const detail = await payrollService.getRun(run.id);
+                const line = findEmployeeLine(extractRunLines(detail), user);
+                if (!stale) setState({ loading: false, line, error: false });
+            } catch (err) {
+                console.error("[Payslip] Error loading run detail:", err);
+                if (!stale) setState({ loading: false, line: null, error: true });
+            }
+        })();
+        return () => { stale = true; };
+    }, [run.id, user]);
+
+    const amounts = state.line ? lineAmounts(state.line) : null;
+    const fullName = state.line?.snapshot?.employee_name || getEmployeeName(user, "");
 
     return (
         <>
@@ -622,7 +643,7 @@ function PayslipDrawer({ month, jobTitle = "", onClose }) {
                 className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-2xl flex-col bg-card shadow-2xl"
             >
                 <div className="flex items-center justify-between border-b border-line-soft p-4">
-                    <h3 className="font-semibold text-ink">Payslip · Month {month}</h3>
+                    <h3 className="font-semibold text-ink">Payslip · {period}</h3>
                     <div className="flex items-center gap-2">
                         <button onClick={onClose} className="rounded-lg p-1.5 text-ink-muted hover:bg-sunken"><X className="h-4 w-4" /></button>
                     </div>
@@ -632,10 +653,14 @@ function PayslipDrawer({ month, jobTitle = "", onClose }) {
                         <div className="flex items-center justify-between border-b pb-4">
                             <div>
                                 <h4 className="font-bold text-ink text-lg">Workplace Payslip</h4>
-                                <p className="text-xs text-ink-muted">Pay Date: Month {month}</p>
+                                <p className="text-xs text-ink-muted">Pay Period: {period}</p>
                             </div>
                             <div className="text-right">
-                                <span className="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-700 font-semibold">PAID</span>
+                                {paid ? (
+                                    <span className="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-700 font-semibold">PAID</span>
+                                ) : (
+                                    <span className="rounded bg-violet-50 px-2 py-1 text-xs text-violet-700 font-semibold">LOCKED IN</span>
+                                )}
                             </div>
                         </div>
 
@@ -647,23 +672,30 @@ function PayslipDrawer({ month, jobTitle = "", onClose }) {
                             </div>
                         </div>
 
-                        {salary > 0 ? (
+                        {state.loading ? (
+                            <div className="p-8 text-center text-ink-faint text-xs border-t border-dashed">
+                                Retrieving your payslip…
+                            </div>
+                        ) : amounts ? (
                             <div className="space-y-2 border-t pt-4">
                                 <div className="text-xs font-semibold uppercase tracking-wider text-brand">Earnings</div>
-                                <Line label="Basic Salary" value={salary.toLocaleString()} />
-                                
+                                <Line label="Basic Salary" value={fmtMoney(amounts.base, run.currency)} />
+                                <Line label="Allowances" value={fmtMoney(amounts.allowances, run.currency)} />
+                                {amounts.gross != null && <Line label="Gross Pay" value={fmtMoney(amounts.gross, run.currency)} bold />}
+
                                 <div className="text-xs font-semibold uppercase tracking-wider text-brand pt-2">Deductions</div>
-                                <Line label="Pension (8%)" value={(salary * 0.08).toLocaleString()} />
-                                <Line label="NHF (2.5%)" value={(salary * 0.025).toLocaleString()} />
-                                
+                                <Line label="Total Deductions" value={fmtMoney(amounts.deductions, run.currency)} />
+
                                 <div className="mt-5 flex items-center justify-between rounded-xl bg-gradient-to-r from-brand/10 to-brand-2/5 p-4">
-                                    <div className="text-sm font-semibold text-ink-2">Estimated Net Pay</div>
-                                    <div className="text-2xl font-bold text-brand">₦{(salary - (salary * 0.105)).toLocaleString()}</div>
+                                    <div className="text-sm font-semibold text-ink-2">Net Pay</div>
+                                    <div className="text-2xl font-bold text-brand">{fmtMoney(amounts.net, run.currency)}</div>
                                 </div>
                             </div>
                         ) : (
                             <div className="p-8 text-center text-ink-faint text-xs border-t border-dashed">
-                                No active base salary logged on your profile database.
+                                {state.error
+                                    ? "Your payslip details couldn't be retrieved right now. Please try again later or contact HR."
+                                    : "You aren't included in this payroll run. If you believe this is an error, contact HR."}
                             </div>
                         )}
                     </div>
@@ -676,7 +708,7 @@ function PayslipDrawer({ month, jobTitle = "", onClose }) {
 function Line({ label, value, bold }) {
     return (
         <div className={`flex justify-between border-b border-dashed border-line-soft py-2 text-sm ${bold ? "font-semibold text-ink" : "text-ink-2"}`}>
-        <span>{label}</span><span>₦{value}</span>
+        <span>{label}</span><span>{value}</span>
         </div>
     );
 }

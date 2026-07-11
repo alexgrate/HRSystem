@@ -166,8 +166,11 @@ export const RESOURCES = [
     segment: "leave",
     Icon: CalendarDays,
     resource: RESOURCE_CODES.LEAVE_REQUESTS,
-    action: "read",
-    checks: checksFromRoutes(["/leave-requests"]),
+    action: "review",
+    // The org-wide admin console — gate on the review-level approvals page,
+    // not "/leave-requests" (the ESS "My Leave Requests" page), which every
+    // employee can read and would make this appear for the whole company.
+    checks: checksFromRoutes(["/approvals/leave-requests"]),
     component: LeaveAdminPage,
   },
   {
@@ -176,8 +179,12 @@ export const RESOURCES = [
     segment: "settings",
     Icon: ShieldCheck,
     resource: RESOURCE_CODES.ROLE_PERMISSIONS,
-    action: "read",
-    checks: checksFromRoutes(["/access/roles", "/access/resources", "/access/assignments"]),
+    action: "manage",
+    // Gate on the roles/resources pages (real create/update/delete grants).
+    // "/access/assignments" is excluded: its resource:assign key can't gate
+    // anything — the backend reports canAssign as a resource capability, so
+    // it's true for every employee.
+    checks: checksFromRoutes(["/access/roles", "/access/resources"]),
     component: SettingsPage,
   },
   {

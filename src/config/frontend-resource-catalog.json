@@ -169,7 +169,7 @@
           "name": "Employees",
           "frontend_route": "/users",
           "guard": "admin",
-          "permissions": ["page:view", "resource:list"]
+          "permissions": ["page:view", "resource:list", "resource:create", "resource:update"]
         },
         {
           "id": "user-detail",

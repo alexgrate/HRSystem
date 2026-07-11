@@ -5,12 +5,27 @@ const unwrapList = (res) =>
 
 export const approvalService = {
 
+  // Approvals inbox needs the organization's requests, not the caller's own.
+  // /all is admin-gated — fall back to the current-user list on 403 so a
+  // non-admin approver still sees something rather than an error.
   getPendingLeave: () =>
-    api.get('/api/leave-requests/').then((res) =>
-      unwrapList(res).filter((r) => String(r.status || 'pending').toLowerCase().startsWith('pend'))
-    ),
-  approveLeave: (id, comment) => api.post(`/api/leave-requests/${id}/approve`, comment ? { comment } : {}),
-  rejectLeave: (id, comment) => api.post(`/api/leave-requests/${id}/reject`, comment ? { comment } : {}),
+    api.get('/api/leave-requests/all')
+      .catch(() => api.get('/api/leave-requests/'))
+      .then((res) =>
+        unwrapList(res).filter((r) => String(r.status || 'pending').toLowerCase().startsWith('pend'))
+      ),
+  // The backend requires the pending approval_request_id in the body —
+  // leave records carry it as `approval_request_id`.
+  approveLeave: (id, approvalRequestId, comment) =>
+    api.post(`/api/leave-requests/${id}/approve`, {
+      approval_request_id: approvalRequestId,
+      ...(comment ? { comment } : {}),
+    }),
+  rejectLeave: (id, approvalRequestId, comment) =>
+    api.post(`/api/leave-requests/${id}/reject`, {
+      approval_request_id: approvalRequestId,
+      ...(comment ? { comment } : {}),
+    }),
 
   getPendingDocuments: () =>
     api.get('/api/documentations/?status=pending_approval').then(unwrapList),

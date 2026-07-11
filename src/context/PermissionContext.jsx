@@ -230,7 +230,11 @@ export function PermissionProvider({ children }) {
       const checks = keys
         .map((k) => PERMISSION_KEY_TO_ACTION[String(k).toLowerCase()])
         .filter(Boolean)
-        .filter((a) => a !== "read");
+        // Drop every read-equivalent action (list/view/download…), not just
+        // the literal "read" — otherwise a catalog page listing
+        // "resource:list" is satisfied by plain read access and the
+        // "requires a non-read capability" gate never engages.
+        .filter((a) => normalizeAction(a) !== "read");
 
       if (!checks.length) return can(resourceCode, "read");
 

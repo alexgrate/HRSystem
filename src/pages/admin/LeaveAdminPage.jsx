@@ -58,7 +58,9 @@ const LeaveAdminPage = () => {
     (async () => {
       try {
         const [reqs, types, users, flows] = await Promise.all([
-          leaveService.list(),
+          // Org-wide list; a non-admin approver may 403 on /all, in which
+          // case fall back to their own requests rather than an empty page.
+          leaveService.listAll().catch(() => leaveService.list()),
           setupService.getLeaveTypes().catch(() => []),
           api.get("/api/users/?page=1&limit=100").catch(() => []),
           setupService.getWorkflows().catch(() => null),
@@ -127,9 +129,28 @@ const LeaveAdminPage = () => {
     if (!ok) return;
     setBusyId(r.id);
     try {
-      await (isApprove ? approvalService.approveLeave(r.id) : approvalService.rejectLeave(r.id));
-      patchLocal(r.id, { status: isApprove ? "approved" : "rejected" });
-      toast.success(isApprove ? "Leave approved." : "Leave rejected.");
+      const approvalRequestId = r.approval_request_id || r.approvalRequestId || null;
+      await (isApprove
+        ? approvalService.approveLeave(r.id, approvalRequestId)
+        : approvalService.rejectLeave(r.id, approvalRequestId));
+      // One sign-off may not finalize the request (multi-stage workflows keep
+      // it pending until every stage clears) — show the record's real status,
+      // not the action we just took.
+      let updated = null;
+      try {
+        updated = await leaveService.get(r.id);
+      } catch {
+        /* keep the optimistic fallback below */
+      }
+      const status = updated?.status || (isApprove ? "approved" : "rejected");
+      patchLocal(r.id, updated || { status });
+      if (String(status).toLowerCase().startsWith("pend")) {
+        toast.success(
+          `${isApprove ? "Approval" : "Rejection"} recorded — awaiting the remaining approval stages.`
+        );
+      } else {
+        toast.success(isApprove ? "Leave approved." : "Leave rejected.");
+      }
     } catch (err) {
       toast.error(err?.message || "Action failed.");
     } finally {

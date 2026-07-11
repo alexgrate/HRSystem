@@ -10,12 +10,8 @@ import { isDesignatedApprover } from "../../utils/approvers";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getEmployeeName } from "../../utils/employee";
+import { MONTHS, fmtMoney, extractRunLines } from "../../utils/payroll";
 import api from "../../services/api";
-
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
 
 const STATUS_META = {
   draft: { label: "Draft", cls: "bg-sunken text-ink-muted", step: 0 },
@@ -38,15 +34,6 @@ const MILESTONES = [
 const statusMeta = (status) => STATUS_META[status] || { label: status || "Unknown", cls: "bg-sunken text-ink-muted", step: 0 };
 
 const CURRENCIES = ["NGN", "USD", "GBP", "EUR", "GHS", "KES", "ZAR"];
-
-const fmtMoney = (v, currency = "NGN") => {
-  const n = Number(v) || 0;
-  // Guard against invalid stored currency values (e.g. a number typed into
-  // the old free-text field) — fall back to naira rather than printing junk.
-  const cur = /^[A-Za-z]{2,4}$/.test(String(currency || "")) ? String(currency).toUpperCase() : "NGN";
-  return `${cur === "NGN" ? "₦" : `${cur} `}${n.toLocaleString()}`;
-};
-
 
 const actionsForStatus = (status) => {
   switch (status) {
@@ -92,7 +79,7 @@ const PayrollPage = () => {
   const [adjustments, setAdjustments] = useState([]);
   const [staff, setStaff] = useState([]);
   const [payGroups, setPayGroups] = useState([]);
-  const [workflows, setWorkflows] = useState(null); // null = unknown (fail open)
+  const [workflows, setWorkflows] = useState(null); // null = unknown (approve buttons stay hidden for non-admins)
 
   const [showNewRun, setShowNewRun] = useState(false);
   const [approveModal, setApproveModal] = useState(null);
@@ -235,14 +222,7 @@ const PayrollPage = () => {
     [adjustments, selectedRun]
   );
 
-  // Payslip lines: GET /runs/{id} returns { run, items } where each item
-  // carries base_salary / allowances_total / deductions_total / gross_salary /
-  // net_salary and a snapshot with the employee's name at run time.
-  const runLines = useMemo(() => {
-    const d = detail || {};
-    const candidates = [d.items, d.payslips, d.lines, d.entries, d.run?.items, d.run?.payslips];
-    return candidates.find((c) => Array.isArray(c) && c.length) || [];
-  }, [detail]);
+  const runLines = useMemo(() => extractRunLines(detail), [detail]);
 
   const staffName = (employeeId) => {
     const s = staff.find((u) => u.id === employeeId);

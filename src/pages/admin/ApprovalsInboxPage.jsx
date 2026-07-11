@@ -22,22 +22,22 @@ const TABS = [
     key: "leave", label: "Leave Requests", Icon: CalendarDays,
     resource: RESOURCE_CODES.LEAVE_REQUESTS, noun: "leave request", workflowType: "LEAVE_REQUEST",
     list: () => approvalService.getPendingLeave(),
-    approve: (id) => approvalService.approveLeave(id),
-    reject: (id) => approvalService.rejectLeave(id),
+    approve: (item) => approvalService.approveLeave(item.id, item.approval_request_id || null),
+    reject: (item) => approvalService.rejectLeave(item.id, item.approval_request_id || null),
   },
   {
     key: "documents", label: "Documents", Icon: FileText,
     resource: RESOURCE_CODES.DOCUMENTS, noun: "document", workflowType: "DOCUMENT_UPLOAD",
     list: () => approvalService.getPendingDocuments(),
-    approve: (id) => approvalService.approveDocument(id),
-    reject: (id) => approvalService.rejectDocument(id),
+    approve: (item) => approvalService.approveDocument(item.id),
+    reject: (item) => approvalService.rejectDocument(item.id),
   },
   {
     key: "profile", label: "Profile Updates", Icon: UserCog,
     resource: RESOURCE_CODES.PROFILE_UPDATE, noun: "profile update", workflowType: "EMPLOYEE_UPDATE",
     list: () => approvalService.getPendingProfileUpdates(),
-    approve: (id) => approvalService.approveProfileUpdate(id),
-    reject: (id) => approvalService.rejectProfileUpdate(id),
+    approve: (item) => approvalService.approveProfileUpdate(item.id),
+    reject: (item) => approvalService.rejectProfileUpdate(item.id),
   },
 ];
 
@@ -109,6 +109,11 @@ const ApprovalsInboxPage = () => {
     ? can(activeTab.resource, "manage") && isDesignatedApprover(workflows, activeTab.workflowType, user, isAdmin)
     : false;
 
+  const fetchItems = async (tabDef) => {
+    const res = await tabDef.list();
+    return Array.isArray(res) ? res : res?.data || res?.requests || res?.items || [];
+  };
+
   useEffect(() => {
     if (!activeTab) return;
 
@@ -116,8 +121,8 @@ const ApprovalsInboxPage = () => {
     setLoading(true);
     (async () => {
       try {
-        const res = await activeTab.list();
-        if (!stale) setItems(Array.isArray(res) ? res : res?.data || res?.requests || res?.items || []);
+        const res = await fetchItems(activeTab);
+        if (!stale) setItems(res);
       } catch (err) {
         console.error("[Approvals] load failed:", err);
         if (!stale) setItems([]);
@@ -126,7 +131,7 @@ const ApprovalsInboxPage = () => {
       }
     })();
     return () => { stale = true; };
-  }, [activeTab?.key]); 
+  }, [activeTab?.key]);
 
   const act = async (item, action) => {
     const isApprove = action === "approve";
@@ -139,9 +144,24 @@ const ApprovalsInboxPage = () => {
     if (!ok) return;
     setBusyId(item.id);
     try {
-      await (isApprove ? activeTab.approve(item.id) : activeTab.reject(item.id));
-      toast.success(`${isApprove ? "Approved" : "Rejected"}.`);
-      setItems((list) => list.filter((x) => x.id !== item.id));
+      await (isApprove ? activeTab.approve(item) : activeTab.reject(item));
+      // Multi-stage workflows can keep an item pending after one sign-off —
+      // reload the queue and report what actually happened instead of
+      // assuming the item is resolved.
+      try {
+        const next = await fetchItems(activeTab);
+        setItems(next);
+        const stillPending = next.some((x) => x.id === item.id);
+        toast.success(
+          stillPending
+            ? `${isApprove ? "Approval" : "Rejection"} recorded — awaiting the remaining approval stages.`
+            : `${isApprove ? "Approved" : "Rejected"}.`
+        );
+      } catch {
+        // Reload failed; fall back to removing the item locally.
+        setItems((list) => list.filter((x) => x.id !== item.id));
+        toast.success(`${isApprove ? "Approved" : "Rejected"}.`);
+      }
     } catch (err) {
       console.error("[Approvals] action failed:", err);
       toast.error(err?.message || "Action failed.");
