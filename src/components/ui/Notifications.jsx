@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, useRef } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, AlertCircle, Info, X, AlertTriangle } from "lucide-react";
@@ -18,15 +18,29 @@ export function NotificationProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
   const resolver = useRef(null);
+  const timers = useRef(new Map());
 
-  const dismiss = useCallback((id) => setToasts((t) => t.filter((x) => x.id !== id)), []);
+  const dismiss = useCallback((id) => {
+    const timer = timers.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
+    setToasts((t) => t.filter((x) => x.id !== id));
+  }, []);
+
+  // Clear every pending auto-dismiss timer if the provider unmounts.
+  useEffect(() => {
+    const map = timers.current;
+    return () => map.forEach(clearTimeout);
+  }, []);
 
   const push = useCallback(
     (type, message, opts = {}) => {
       const id = ++idSeq;
       setToasts((t) => [...t, { id, type, message: String(message ?? "") }]);
       const ttl = opts.duration ?? (type === "error" ? 6000 : 4000);
-      if (ttl) setTimeout(() => dismiss(id), ttl);
+      if (ttl) timers.current.set(id, setTimeout(() => dismiss(id), ttl));
       return id;
     },
     [dismiss]
@@ -44,6 +58,9 @@ export function NotificationProvider({ children }) {
   const confirm = useCallback(
     (opts = {}) =>
       new Promise((resolve) => {
+        // A second confirm() while one is open would orphan the first
+        // caller's promise forever — resolve it as "cancelled" instead.
+        if (resolver.current) resolver.current(false);
         resolver.current = resolve;
         setConfirmState({
           title: opts.title || "Are you sure?",

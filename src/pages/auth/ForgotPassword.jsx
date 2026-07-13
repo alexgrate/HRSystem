@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Mail, Lock, KeyRound, ArrowRight, ArrowLeft, AlertCircle,
@@ -61,11 +61,16 @@ const ForgotPassword = () => {
     setBusy(true);
     try {
       await authService.requestPasswordReset(email.trim());
-      setInfo(`We sent a code to ${email.trim()}.`);
-      setPhase("reset");
     } catch (err) {
-      setError(err?.message || "Couldn’t send a code to that email.");
+      // Don't surface the backend's message here — a distinct "no such
+      // account" would let anyone enumerate registered emails. Always advance
+      // to the code-entry step with the same neutral wording. (A genuinely
+      // unknown email simply never receives a code.)
+      console.warn("[ForgotPassword] reset request failed:", err);
     } finally {
+      // Always show the same outcome regardless of whether the email exists.
+      setInfo(`If an account exists for ${email.trim()}, we've sent it a code.`);
+      setPhase("reset");
       setBusy(false);
     }
   };
@@ -76,10 +81,12 @@ const ForgotPassword = () => {
     setBusy(true);
     try {
       await authService.resendOtp(email.trim());
-      setInfo("A new code is on its way.");
     } catch (err) {
-      setError(err?.message || "Couldn’t resend the code.");
+      // Same enumeration guard as the initial send — neutral wording, no
+      // backend "no such account" leakage.
+      console.warn("[ForgotPassword] resend failed:", err);
     } finally {
+      setInfo("If an account exists for that email, a new code is on its way.");
       setBusy(false);
     }
   };
@@ -88,8 +95,10 @@ const ForgotPassword = () => {
     e.preventDefault();
     setError("");
     if (!otp.trim()) return setError("Enter the code from your email.");
-    if (password.length < 6)
-      return setError("Password must be at least 6 characters.");
+    // Stricter than the backend's minimum of 6 — don't normalize weak
+    // passwords for an HR system (backend ask: raise it server-side too).
+    if (password.length < 8)
+      return setError("Password must be at least 8 characters.");
     if (password !== confirm) return setError("Passwords don’t match.");
     setBusy(true);
     try {

@@ -11,19 +11,22 @@ import {
   Inbox,
   ScrollText,
 } from "lucide-react";
+import { lazy } from "react";
 import frontendResourceCatalog from "./frontend-resource-catalog.json";
 
-import DirectoryPage from "../pages/admin/DirectoryPage";
-import ESSPage from "../pages/ess/ESSPage";
-import WorkflowPage from "../pages/admin/WorkflowPage";
-import { SettingsPage } from "../pages/admin/SettingsPage";
-import OnboardingPage from "../pages/admin/OnboardingPage";
-import OrganizationSettingsPage from "../pages/admin/OrganizationSettingsPage";
-import ApprovalsInboxPage from "../pages/admin/ApprovalsInboxPage";
-import PayrollPage from "../pages/admin/PayrollPage";
-import DashboardPage from "../pages/DashboardPage";
-import AuditTrailPage from "../pages/admin/AuditTrailPage";
-import LeaveAdminPage from "../pages/admin/LeaveAdminPage";
+// Every page is lazy-loaded so each route becomes its own chunk — eager
+// imports here previously bundled the whole app into one 660 kB file.
+const DirectoryPage = lazy(() => import("../pages/admin/DirectoryPage"));
+const ESSPage = lazy(() => import("../pages/ess/ESSPage"));
+const WorkflowPage = lazy(() => import("../pages/admin/WorkflowPage"));
+const SettingsPage = lazy(() => import("../pages/admin/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const OnboardingPage = lazy(() => import("../pages/admin/OnboardingPage"));
+const OrganizationSettingsPage = lazy(() => import("../pages/admin/OrganizationSettingsPage"));
+const ApprovalsInboxPage = lazy(() => import("../pages/admin/ApprovalsInboxPage"));
+const PayrollPage = lazy(() => import("../pages/admin/PayrollPage"));
+const DashboardPage = lazy(() => import("../pages/DashboardPage"));
+const AuditTrailPage = lazy(() => import("../pages/admin/AuditTrailPage"));
+const LeaveAdminPage = lazy(() => import("../pages/admin/LeaveAdminPage"));
 
 import { RESOURCE_CODES } from "./resourceCodes";
 export { RESOURCE_CODES };
@@ -67,16 +70,6 @@ function checkFromCatalogRoute(route) {
 
 function checksFromRoutes(routes = []) {
   return routes.map((route) => checkFromCatalogRoute(route)).filter(Boolean);
-}
-
-function ComingSoon({ label }) {
-  return (
-    <div className="p-8 text-center text-ink-muted border border-dashed border-line rounded-2xl bg-card">
-      Module{" "}
-      <span className="font-semibold text-brand capitalize">{label}</span>{" "}
-      is scheduled for a future milestone.
-    </div>
-  );
 }
 
 export const RESOURCES = [

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -23,21 +23,32 @@ const OnboardingPage = () => {
 
   const [counts, setCounts] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
 
   const load = async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
-      const [offices, depts, jobs, payGrades, benefits, workflows, users, sysRoles] = await Promise.all([
-        setupService.getOffices().catch(() => []),
-        setupService.getDepartments().catch(() => []),
-        setupService.getJobRoles().catch(() => []),
-        setupService.getPayGrades().catch(() => []),
-        setupService.getBenefitLevels().catch(() => []),
-        setupService.getWorkflows().catch(() => []),
-        api.get("/api/users/?limit=1").catch(() => ({ pagination: { total: 0 } })),
-        rolePermissionService.getSystemRoles().catch(() => []),
+      // null = that fetch failed (vs [] = genuinely empty), so a backend
+      // outage can be told apart from a brand-new organization.
+      const results = await Promise.all([
+        setupService.getOffices().catch(() => null),
+        setupService.getDepartments().catch(() => null),
+        setupService.getJobRoles().catch(() => null),
+        setupService.getPayGrades().catch(() => null),
+        setupService.getBenefitLevels().catch(() => null),
+        setupService.getWorkflows().catch(() => null),
+        api.get("/api/users/?limit=1").catch(() => null),
+        rolePermissionService.getSystemRoles().catch(() => null),
       ]);
+      if (results.every((r) => r === null)) {
+        // Everything failed — show an error, not a lying "0% configured".
+        setCounts(null);
+        setLoadFailed(true);
+        return;
+      }
+      const [offices, depts, jobs, payGrades, benefits, workflows, users, sysRoles] = results;
       const employees = users?.pagination?.total ?? (Array.isArray(users) ? users.length : len(users?.users));
       setCounts({
         offices: len(offices),
@@ -51,7 +62,8 @@ const OnboardingPage = () => {
       });
     } catch (err) {
       console.error("[Onboarding] Failed to load setup status:", err);
-      setCounts({});
+      setCounts(null);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -86,7 +98,7 @@ const OnboardingPage = () => {
         { key: "offices", label: "Office Locations", desc: "Where your people are based", Icon: Building, count: counts.offices, to: "/app/directory" },
         { key: "departments", label: "Departments", desc: "Your organizational units", Icon: Layers, count: counts.departments, to: "/app/directory" },
         { key: "jobTitles", label: "Job Titles", desc: "Roles people are hired into", Icon: Briefcase, count: counts.jobTitles, to: "/app/directory" },
-        { key: "payGrades", label: "Pay Grades & Benefits", desc: "Salary bands and benefit levels", Icon: Wallet, count: counts.payGrades + counts.benefitLevels, to: "/app/directory" },
+        { key: "payGrades", label: "Pay Grades & Benefits", desc: "Salary bands and benefit levels", Icon: Wallet, count: (counts.payGrades || 0) + (counts.benefitLevels || 0), to: "/app/directory" },
         { key: "workflows", label: "Approval Workflows", desc: "Multi-stage approval chains", Icon: GitBranch, count: counts.workflows, to: "/app/workflows" },
         { key: "employees", label: "Employees", desc: "Onboard your team", Icon: Users, count: counts.employees, to: "/app/directory" },
       ]
@@ -106,6 +118,19 @@ const OnboardingPage = () => {
 
       {loading ? (
         <div className="p-12 text-center text-ink-muted bg-card rounded-2xl border border-line-soft">Checking your setup…</div>
+      ) : loadFailed ? (
+        <div className="p-12 text-center bg-card rounded-2xl border border-line-soft">
+          <h3 className="text-sm font-semibold text-ink">Couldn’t check your setup</h3>
+          <p className="mt-1 text-xs text-ink-muted">
+            Your organization’s status couldn’t be loaded — this is a connection problem, not missing setup.
+          </p>
+          <button
+            onClick={load}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-ink-2 hover:bg-sunken"
+          >
+            Try again
+          </button>
+        </div>
       ) : (
         <>
           {/* Progress */}

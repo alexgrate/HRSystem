@@ -1,13 +1,12 @@
-import api from './api';
+import api, { unwrapList } from './api';
 
-const unwrapList = (res) =>
-  Array.isArray(res) ? res : res?.requests || res?.items || res?.data || [];
+const unwrap = (res) => unwrapList(res, ['requests']);
 
 export const leaveService = {
   // Current user's own requests (ESS "my leave" view).
-  list: () => api.get('/api/leave-requests/').then(unwrapList),
+  list: () => api.get('/api/leave-requests/').then(unwrap),
   // Organization-wide list — admin-gated on the backend (403 for others).
-  listAll: () => api.get('/api/leave-requests/all').then(unwrapList),
+  listAll: () => api.get('/api/leave-requests/all').then(unwrap),
   get: (id) => api.get(`/api/leave-requests/${id}`),
   update: (id, data) => api.put(`/api/leave-requests/${id}`, data),
   // The backend 500s on a bodyless DELETE when Content-Type is json (our

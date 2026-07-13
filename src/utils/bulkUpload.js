@@ -28,7 +28,15 @@ export function toBoolean(value, fallback = false) {
 
 export function toNumber(value) {
   if (value === undefined || value === null || value === "") return "";
-  const n = Number(value);
+  let cleaned = value;
+  if (typeof value === "string") {
+    // Tolerate spreadsheet formatting: thousands separators, spaces, and a
+    // leading currency symbol (₦450,000 / $1,200.50 / "1 200"). Genuinely
+    // non-numeric input still returns "" so the caller can flag it.
+    cleaned = value.replace(/[,\s]/g, "").replace(/^[^\d.-]+/, "");
+    if (cleaned === "") return "";
+  }
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : "";
 }
 
@@ -133,7 +141,11 @@ export function parseBulkFile(file) {
 
 export function toCsv(headers, rows) {
   const escapeCsv = (value) => {
-    const str = value === undefined || value === null ? "" : String(value);
+    let str = value === undefined || value === null ? "" : String(value);
+    // Neutralize spreadsheet formula injection: a cell starting with = + - @
+    // (or tab/CR) is evaluated as a formula by Excel/Sheets. Prefix a single
+    // quote so it's read as text.
+    if (/^[=+\-@\t\r]/.test(str)) str = `'${str}`;
     if (!/[",\n\r]/.test(str)) return str;
     return `"${str.replace(/"/g, '""')}"`;
   };

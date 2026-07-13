@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { TabPills } from "../../components/ui/TabPills";
 import { Check, ShieldAlert, ShieldCheck, Users, Search, X } from "lucide-react";
 import {
   rolePermissionService,
   EMPTY_PERMS,
   PERMISSION_ACTIONS,
 } from "../../services/rolePermissionService";
+import { orgService } from "../../services/orgService";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
@@ -38,6 +39,14 @@ const VIEWS = [
 
 export function SettingsPage() {
   const [view, setView] = useState("job-title-resources");
+  // Views mount lazily on first visit, then stay mounted (hidden) so
+  // switching back doesn't refetch and unsaved drafts survive — but a view
+  // never fetches anything unless it's actually been opened.
+  const [visited, setVisited] = useState({ "job-title-resources": true });
+  const switchView = (key) => {
+    setVisited((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
+    setView(key);
+  };
 
   return (
     <div className="space-y-6">
@@ -51,33 +60,14 @@ export function SettingsPage() {
         </p>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit max-w-full">
-        {VIEWS.map((v) => {
-          const Icon = v.Icon;
-          return (
-            <button
-              key={v.key}
-              onClick={() => setView(v.key)}
-              className={`relative shrink-0 whitespace-nowrap inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
-                view === v.key ? "text-white" : "text-ink-muted"
-              }`}
-            >
-              {view === v.key && (
-                <motion.div
-                  layoutId="settings-tab"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2"
-                  transition={{ type: "spring", stiffness: 400, damping: 32 }}
-                />
-              )}
-              <Icon className="relative h-3.5 w-3.5" />
-              <span className="relative">{v.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <TabPills layoutId="settings-tab" active={view} onChange={switchView} tabs={VIEWS} />
 
-      <div className={view === "job-title-resources" ? "" : "hidden"}><JobTitleResourceMatrix /></div>
-      <div className={view === "user-job-titles" ? "" : "hidden"}><UserJobTitleAssignment /></div>
+      {visited["job-title-resources"] && (
+        <div className={view === "job-title-resources" ? "" : "hidden"}><JobTitleResourceMatrix /></div>
+      )}
+      {visited["user-job-titles"] && (
+        <div className={view === "user-job-titles" ? "" : "hidden"}><UserJobTitleAssignment /></div>
+      )}
     </div>
   );
 }
@@ -96,6 +86,10 @@ function JobTitleResourceMatrix() {
   const [modalLoading, setModalLoading] = useState(false);
   const [modalSaving, setModalSaving] = useState(false);
   const [modalDraft, setModalDraft] = useState({});
+  // Monotonic token for the editor's load: close/reopen bumps it, so a slow
+  // fetch for a previously-opened role can't overwrite the current draft
+  // (saving would then clobber this role's permissions with the other's).
+  const editorReq = useRef(0);
 
   useEffect(() => {
     const load = async () => {
@@ -154,17 +148,26 @@ function JobTitleResourceMatrix() {
   };
 
   const openEditor = async (jobRole) => {
+    const reqId = ++editorReq.current;
     setActiveJobRole(jobRole);
+    setModalDraft({});
     setModalLoading(true);
     try {
       const loaded = await ensureJobRoleLoaded(jobRole.id);
+      if (editorReq.current !== reqId) return; // superseded by a close/reopen
       setModalDraft(loaded);
     } catch (err) {
+      if (editorReq.current !== reqId) return;
       toast.error(err?.message || "Failed to load resources for this job title.");
       setActiveJobRole(null);
     } finally {
-      setModalLoading(false);
+      if (editorReq.current === reqId) setModalLoading(false);
     }
+  };
+
+  const closeEditor = () => {
+    editorReq.current += 1;
+    setActiveJobRole(null);
   };
 
   const toggleDraft = (resourceId, actionKey) => {
@@ -189,7 +192,7 @@ function JobTitleResourceMatrix() {
       setMatrixByJobRole((prev) => ({ ...prev, [activeJobRole.id]: modalDraft }));
       refreshPermissions?.();
       toast.success("Resource permissions updated.");
-      setActiveJobRole(null);
+      closeEditor();
     } catch (err) {
       toast.error(err?.message || "Failed to save resource permissions.");
     } finally {
@@ -273,7 +276,7 @@ function JobTitleResourceMatrix() {
                 <h3 className="text-base font-bold text-ink">Assign Resources: {activeJobRole.title}</h3>
                 <p className="text-xs text-ink-muted mt-0.5">Enable permissions per resource, then save.</p>
               </div>
-              <button onClick={() => setActiveJobRole(null)} className="rounded-lg p-1.5 text-ink-muted hover:bg-sunken">
+              <button onClick={closeEditor} className="rounded-lg p-1.5 text-ink-muted hover:bg-sunken">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -330,7 +333,7 @@ function JobTitleResourceMatrix() {
 
             <div className="flex items-center justify-end gap-2 border-t border-line-soft px-5 py-3">
               <button
-                onClick={() => setActiveJobRole(null)}
+                onClick={closeEditor}
                 className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-2"
               >
                 Cancel
@@ -369,13 +372,12 @@ function UserJobTitleAssignment() {
       setLoading(true);
       setError(null);
       try {
-        const [rolesRes, usersRes] = await Promise.all([
+        const [rolesRes, userRows] = await Promise.all([
           rolePermissionService.getJobRoles(),
-          rolePermissionService.listUsers({ page: 1, limit: 100 }),
+          orgService.listAllUsers(),
         ]);
 
         const allRoles = rolesRes || [];
-        const userRows = Array.isArray(usersRes) ? usersRes : usersRes?.users || [];
 
         setJobRoles(allRoles);
         setUsers(userRows);

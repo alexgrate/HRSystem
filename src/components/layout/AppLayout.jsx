@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, LogOut, Search, Bell, Menu, X } from "lucide-react";
+import { ChevronLeft, LogOut, Menu, X } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { useConfig } from "../../context/ConfigContext";
@@ -13,7 +13,6 @@ import { approvalService } from "../../services/approvalService";
 import { setupService } from "../../services/setupService";
 
 const displayName = (user) => getEmployeeName(user, "User");
-const initials = getInitials;
 
 
 const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMobile, items, onSignout, logoUrl, orgName, badges = {} }) => (
@@ -155,8 +154,7 @@ const AppLayout = () => {
     load();
     const timer = setInterval(load, 90000);
     return () => { stale = true; clearInterval(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [can, isAdmin, approverFlows, location.pathname]);
+  }, [can, isAdmin, approverFlows, user, location.pathname]);
 
   const items = RESOURCES.filter((r) =>
     Array.isArray(r.checks) && r.checks.length
@@ -234,22 +232,9 @@ const AppLayout = () => {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <div className="hidden xl:flex items-center gap-2 rounded-lg border border-line bg-card px-3 py-1.5 text-sm text-ink-muted shadow-sm w-72">
-              <Search className="h-4 w-4" />
-              <input
-                placeholder="Search directory, leaves, adjustments…"
-                className="w-full bg-transparent outline-none placeholder:text-ink-faint"
-              />
-            </div>
-
-            <button className="relative rounded-lg border border-line bg-card p-2 text-ink-muted shadow-sm hover:text-brand">
-              <Bell className="h-4 w-4" />
-              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-brand" />
-            </button>
-
             <div className="flex items-center gap-2 rounded-full border border-line bg-card py-1 pl-1 pr-2 shadow-sm sm:pr-3">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-[11px] font-bold text-white">
-                {initials(name)}
+                {getInitials(name)}
               </div>
               <div className="hidden sm:block text-xs leading-tight">
                 <div className="font-semibold text-ink">{name}</div>

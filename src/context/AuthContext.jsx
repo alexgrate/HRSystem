@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import api from '../services/api';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import api, { getToken, setToken, clearToken } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -9,7 +9,7 @@ export const AuthProvider = ({ children }) => {
 
   const refreshUser = useCallback(async () => {
     const me = await api.get('/api/auth/me');
-    let roleResources = null;
+    let roleResources;
 
     try {
       roleResources = await api.get('/api/role-permissions/me/resources');
@@ -38,8 +38,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('user');
 
     const validateToken = async () => {
-      const token = localStorage.getItem('token');
-      if (!token) {
+      if (!getToken()) {
         setLoading(false);
         return;
       }
@@ -48,7 +47,7 @@ export const AuthProvider = ({ children }) => {
         await refreshUser();
       } catch (err) {
         console.error('[AuthContext] Token validation failed:', err);
-        localStorage.removeItem('token');
+        clearToken();
         setUser(null);
       } finally {
         setLoading(false);
@@ -58,11 +57,16 @@ export const AuthProvider = ({ children }) => {
     validateToken();
   }, [refreshUser]);
 
-  const login = async (email, password) => {
+  const login = async (email, password, remember = true) => {
     const response = await api.post('/api/auth/login', { email, password });
-    const { token } = response;
+    // Guard against a differently-wrapped response — storing an absent token
+    // would persist the string "undefined" and silently break every request.
+    const token = response?.token || response?.data?.token || response?.authUser?.token;
+    if (typeof token !== 'string' || !token) {
+      throw new Error('Login succeeded but no token was returned.');
+    }
 
-    localStorage.setItem('token', token);
+    setToken(token, remember);
     return refreshUser();
   };
 
@@ -72,7 +76,7 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.warn('Logout endpoint failed:', err);
     } finally {
-      localStorage.removeItem('token');
+      clearToken();
       localStorage.removeItem('user');
       setUser(null);
     }

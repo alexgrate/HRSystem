@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Users, Layers, Inbox, Wallet, UserPlus, CalendarDays, ArrowRight, ShieldCheck } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -93,7 +93,7 @@ const DashboardPage = () => {
       }
     })();
     return () => { stale = true; };
-  }, [ready]);
+  }, [ready, can]);
 
   const tiles = useMemo(() => {
     const t = [];

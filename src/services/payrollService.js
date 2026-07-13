@@ -1,12 +1,9 @@
-import api from './api';
-
-const unwrapList = (res) =>
-  Array.isArray(res) ? res : res?.runs || res?.adjustments || res?.items || res?.data || [];
+import api, { unwrapList } from './api';
 
 export const payrollService = {
   preview: (data) => api.post('/api/payroll/preview', data),
 
-  listRuns: () => api.get('/api/payroll/runs').then(unwrapList),
+  listRuns: () => api.get('/api/payroll/runs').then((res) => unwrapList(res, ['runs'])),
   getRun: (runId) => api.get(`/api/payroll/runs/${runId}`),
 
   submitRun: (runId) => api.post(`/api/payroll/runs/${runId}/submit`, {}),
@@ -25,7 +22,7 @@ export const payrollService = {
   approveDistribution: (runId, approvalRequestId, comment) =>
     api.post(`/api/payroll/runs/${runId}/approve-distribution`, { approval_request_id: approvalRequestId, comment: comment || null }),
 
-  listAdjustments: () => api.get('/api/payroll/adjustments').then(unwrapList),
+  listAdjustments: () => api.get('/api/payroll/adjustments').then((res) => unwrapList(res, ['adjustments'])),
   createAdjustment: (data) => api.post('/api/payroll/adjustments', data),
   submitAdjustment: (adjustmentId) => api.post(`/api/payroll/adjustments/${adjustmentId}/submit`, {}),
   approveAdjustment: (adjustmentId, approvalRequestId, comment) =>

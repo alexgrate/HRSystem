@@ -1,23 +1,31 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, FileText, Upload } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
-import { useToast } from "../../components/ui/Notifications";
+import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { setupService } from "../../services/setupService";
 import { approvalService } from "../../services/approvalService";
 import { leaveService } from "../../services/leaveService";
 import { payrollService } from "../../services/payrollService";
+import { orgService } from "../../services/orgService";
 import { getEmployeeName, getInitials } from "../../utils/employee";
 import { inclusiveDays } from "../../utils/leave";
 import { MONTHS, fmtMoney, extractRunLines, findEmployeeLine, lineAmounts } from "../../utils/payroll";
+import { statusBadgeCls } from "../../utils/status";
+import { TabPills } from "../../components/ui/TabPills";
 import api from "../../services/api";
 
 function useOrgNames(user) {
     const [lookups, setLookups] = useState({ departments: [], jobRoles: [] });
-    const hasIds = !!(user?.department_id || user?.job_role_id);
+    const departmentId = user?.department_id || null;
+    const jobRoleId = user?.job_role_id || null;
 
+    // Keyed on the actual ids, not a boolean — a mid-session reassignment
+    // (possibly to a department/role created after these lists were cached)
+    // refetches so the new name resolves. The full job-roles list is needed
+    // anyway by the team directory; there's no single-name lookup endpoint.
     useEffect(() => {
-        if (!hasIds) return;
+        if (!departmentId && !jobRoleId) return;
         let mounted = true;
         (async () => {
             const [departments, jobRoles] = await Promise.all([
@@ -27,7 +35,7 @@ function useOrgNames(user) {
             if (mounted) setLookups({ departments: departments || [], jobRoles: jobRoles || [] });
         })();
         return () => { mounted = false; };
-    }, [hasIds]);
+    }, [departmentId, jobRoleId]);
 
     return {
         department: lookups.departments.find((d) => d.id === user?.department_id)?.name || "",
@@ -42,6 +50,10 @@ const ESSPage = () => {
     const [drawer, setDrawer] = useState(null);
 
     const [activeLeaveRequest, setActiveLeaveRequest] = useState(null)
+    // Bumped after a successful submission so sibling components re-fetch —
+    // without this, new requests only appear after a manual page reload.
+    const [leaveTick, setLeaveTick] = useState(0);
+    const [profileTick, setProfileTick] = useState(0);
 
     const bio = user?.employee_biodata || user?.biodata || {};
     const firstName = bio.firstname || "";
@@ -61,30 +73,26 @@ const ESSPage = () => {
                 </div>
             </div>
 
-            <div className="flex gap-1 overflow-x-auto rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit max-w-full">
-                {["profile", "leave", "payslips", "docs", "team"].map((t) => (
-                <button key={t} onClick={() => setTab(t)} className="relative shrink-0 whitespace-nowrap rounded-lg px-4 py-1.5 text-xs font-semibold capitalize">
-                    {tab === t && (
-                        <motion.div
-                            layoutId="ess-tab"
-                            className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2"
-                            transition={{ type: "spring", stiffness: 400, damping: 32 }}
-                        />
-                    )}
-                    <span className={`relative ${tab === t ? "text-white" : "text-ink-muted"}`}>
-                        {t === "docs" ? "Documents" : t === "team" ? "My Team" : t}
-                    </span>
-                </button>
-                ))}
-            </div>
+            <TabPills
+                layoutId="ess-tab"
+                active={tab}
+                onChange={setTab}
+                tabs={[
+                    { key: "profile", label: "Profile" },
+                    { key: "leave", label: "Leave" },
+                    { key: "payslips", label: "Payslips" },
+                    { key: "docs", label: "Documents" },
+                    { key: "team", label: "My Team" },
+                ]}
+            />
 
             {tab === "profile" && (
                 <>
-                    <ProfileChange />
-                    <MyProfileRequests />
+                    <ProfileChange onSubmitted={() => setProfileTick((t) => t + 1)} />
+                    <MyProfileRequests refreshKey={profileTick} />
                 </>
             )}
-            {tab === "leave" && <LeaveTracker onRequestLeave={setActiveLeaveRequest} />}
+            {tab === "leave" && <LeaveTracker onRequestLeave={setActiveLeaveRequest} refreshKey={leaveTick} />}
             {tab === "payslips" && <Payslips onOpen={(run) => setDrawer(run)} />}
             {tab === "docs" && <DocsUpload />}
             {tab === "team" && (
@@ -98,9 +106,12 @@ const ESSPage = () => {
             <AnimatePresence>
                 {drawer && <PayslipDrawer run={drawer} jobTitle={jobTitle} onClose={() => setDrawer(null)} />}
                 {activeLeaveRequest && (
-                    <LeaveRequestModal 
-                        leaveType={activeLeaveRequest}
+                    <LeaveRequestModal
+                        leaveType={activeLeaveRequest.type}
+                        remaining={activeLeaveRequest.remaining}
+                        existingRequests={activeLeaveRequest.requests}
                         onClose={() => setActiveLeaveRequest(null)}
+                        onSubmitted={() => setLeaveTick((t) => t + 1)}
                     />
                 )}
             </AnimatePresence>
@@ -109,7 +120,7 @@ const ESSPage = () => {
 }
 
 
-function ProfileChange() {
+function ProfileChange({ onSubmitted }) {
     const { user } = useAuth();
     const toast = useToast();
     const [loading, setLoading] = useState(false);
@@ -126,6 +137,7 @@ function ProfileChange() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (loading) return;
         setLoading(true);
         try {
 
@@ -150,7 +162,7 @@ function ProfileChange() {
             }
 
             if (Object.keys(changesObj).length === 0) {
-                toast.info("Change your phone or address before submitting.");
+                toast.info("Nothing to submit — change your phone, address or bank details first.");
                 setLoading(false);
                 return;
             }
@@ -163,6 +175,7 @@ function ProfileChange() {
 
             await api.post("/api/profile-update-requests/profile-update-request", payload);
             toast.success("Profile change request submitted for HR approval!");
+            onSubmitted?.();
         } catch (err) {
             console.error("[ESS] Request failed:", err);
             toast.error(err?.error?.message || err?.message || "Error submitting profile change request.");
@@ -173,20 +186,21 @@ function ProfileChange() {
 
     return (
         <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
+            <form onSubmit={handleSubmit}>
             <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
                 <div>
                     <h3 className="font-semibold text-ink">Profile change requests</h3>
                     <p className="text-xs text-ink-muted">Edits require HR validation before being applied to your immutable record.</p>
                 </div>
-                <button 
-                    onClick={handleSubmit} 
+                <button
+                    type="submit"
                     disabled={loading}
                     className="rounded-xl bg-brand text-white px-4 py-2 text-xs font-semibold shadow-sm disabled:opacity-75"
                 >
                     {loading ? "Submitting..." : "Submit Requests"}
                 </button>
             </div>
-        
+
             <div className="grid gap-3 md:grid-cols-2">
                 <div className="relative rounded-xl border border-line p-3 focus-within:border-brand transition-colors">
                     <label className="text-xs font-semibold text-ink-muted block">Phone Number</label>
@@ -215,17 +229,18 @@ function ProfileChange() {
                 <div className="relative rounded-xl border border-line p-3 focus-within:border-brand transition-colors">
                     <label className="text-xs font-semibold text-ink-muted block">Account Number</label>
                     <input 
-                        value={form.accountNumber} 
-                        onChange={(e) => handleChange("accountNumber", e.target.value)} 
-                        className="mt-1 w-full bg-transparent text-sm text-ink-2 outline-none" 
+                        value={form.accountNumber}
+                        onChange={(e) => handleChange("accountNumber", e.target.value)}
+                        className="mt-1 w-full bg-transparent text-sm text-ink-2 outline-none"
                     />
                 </div>
             </div>
+            </form>
         </div>
     );
 }
 
-function MyProfileRequests() {
+function MyProfileRequests({ refreshKey = 0 }) {
     const { user } = useAuth();
     const [state, setState] = useState({ loading: true, items: [], unavailable: false });
     const employeeId = user?.id;
@@ -236,7 +251,11 @@ function MyProfileRequests() {
         (async () => {
             try {
                 const res = await approvalService.getMyProfileUpdates(employeeId);
-                const items = Array.isArray(res) ? res : res?.requests || res?.items || res?.data || [];
+                const rows = Array.isArray(res) ? res : res?.requests || res?.items || res?.data || [];
+                // Defense in depth: the endpoint is org-wide with an
+                // employee_id filter — never display rows that aren't the
+                // current user's, even if the backend ignores the param.
+                const items = rows.filter((r) => !r.employee_id || r.employee_id === employeeId);
                 if (mounted) setState({ loading: false, items, unavailable: false });
             } catch (err) {
                 console.error("[ESS] Request history unavailable:", err);
@@ -244,16 +263,28 @@ function MyProfileRequests() {
             }
         })();
         return () => { mounted = false; };
-    }, [employeeId]);
+    }, [employeeId, refreshKey]);
 
-    if (state.loading || state.unavailable) return null;
+    if (state.loading) return null;
 
-    const badge = (status) => {
-        const s = (status || "pending").toLowerCase();
-        if (s.includes("approv")) return "bg-emerald-50 text-emerald-700";
-        if (s.includes("reject") || s.includes("decl")) return "bg-red-50 text-red-700";
-        return "bg-amber-50 text-amber-700";
-    };
+    // NOTE(backend): the only history endpoint is the admin-gated org-wide
+    // list, so regular employees 403 here. Until a self-history endpoint
+    // exists, say so instead of silently hiding the section.
+    if (state.unavailable) {
+        return (
+            <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
+                <h3 className="font-semibold text-ink">My change requests</h3>
+                <p className="text-xs text-ink-muted">Track the status of updates you’ve submitted.</p>
+                <div className="mt-4 p-6 text-center text-xs text-ink-faint border border-dashed border-line rounded-xl">
+                    Your submission history can’t be displayed with your current permissions.
+                    Requests you submit still reach HR for review — ask them for an update on a
+                    pending change.
+                </div>
+            </div>
+        );
+    }
+
+    const badge = statusBadgeCls;
 
     return (
         <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
@@ -267,14 +298,25 @@ function MyProfileRequests() {
                 <ul className="mt-4 divide-y divide-line-soft">
                     {state.items.map((r, i) => {
                         const changes = r.changes || r.payload?.changes || {};
+                        const entries = Object.entries(changes);
+                        // The org endpoint returns summary rows (counts only,
+                        // no field values) — say what we know instead of
+                        // rendering an empty body.
+                        const itemCount = Number(r.total_items) || entries.length || 1;
                         return (
-                            <li key={r.id || i} className="flex items-start justify-between gap-4 py-3">
+                            <li key={r.id || r.request_id || i} className="flex items-start justify-between gap-4 py-3">
                                 <div className="min-w-0 text-xs text-ink-muted">
-                                    {Object.entries(changes).map(([k, v]) => (
-                                        <div key={k}>
-                                            <span className="font-semibold capitalize">{k.replace(/_/g, " ")}:</span> {String(v)}
+                                    {entries.length ? (
+                                        entries.map(([k, v]) => (
+                                            <div key={k}>
+                                                <span className="font-semibold capitalize">{k.replace(/_/g, " ")}:</span> {String(v)}
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div>
+                                            {itemCount} field update{itemCount === 1 ? "" : "s"} submitted for review
                                         </div>
-                                    ))}
+                                    )}
                                     {r.created_at && (
                                         <div className="mt-1 text-[10px] text-ink-faint">{String(r.created_at).slice(0, 10)}</div>
                                     )}
@@ -302,8 +344,7 @@ function TeamDirectory({ departmentId, departmentName, jobRoles = [] }) {
         let mounted = true;
         (async () => {
             try {
-                const res = await api.get("/api/users/?limit=100");
-                const all = Array.isArray(res) ? res : res?.users || [];
+                const all = await orgService.listAllUsers();
                 if (mounted) {
                     setMembers(all.filter((u) =>
                         u.department_id === departmentId && u.id !== user?.id && u.active !== false
@@ -373,7 +414,7 @@ const leaveStatusCls = (s) => {
     return "bg-amber-50 text-amber-700";
 };
 
-function LeaveTracker({ onRequestLeave }) {
+function LeaveTracker({ onRequestLeave, refreshKey = 0 }) {
     const [loading, setLoading] = useState(false);
     const [leaveTypes, setLeaveTypes] = useState([]);
     const [myRequests, setMyRequests] = useState([]);
@@ -395,15 +436,19 @@ function LeaveTracker({ onRequestLeave }) {
         }
         };
         fetchLeaves();
-    }, []);
+    }, [refreshKey]);
 
-    // Days consumed per leave type = the sum of this employee's APPROVED
-    // requests (pending ones don't count until an approver says yes).
-    const usedDays = (typeId) =>
+    // NOTE(backend): there is no balance endpoint and the API accepts any
+    // request (verified: 45 days against a 10-day allowance → 201), so these
+    // client-side calendar-day sums are the only guard the user sees.
+    const daysFor = (typeId, statusPrefix) =>
         myRequests
             .filter((r) => (r.leave_type_id || r.leave_type?.id) === typeId)
-            .filter((r) => String(r.status || "").toLowerCase().startsWith("approv"))
+            .filter((r) => String(r.status || "").toLowerCase().startsWith(statusPrefix))
             .reduce((sum, r) => sum + inclusiveDays(r.start_date, r.end_date), 0);
+
+    const usedDays = (typeId) => daysFor(typeId, "approv");
+    const pendingDays = (typeId) => daysFor(typeId, "pend");
 
     const typeNameOf = (r) =>
         r.leave_type?.name ||
@@ -422,8 +467,14 @@ function LeaveTracker({ onRequestLeave }) {
                 <div className="grid gap-6 lg:grid-cols-3">
                     {leaveTypes.map((g) => {
                         const daysAllowed = Number(g.days_allowed) || 0;
-                        const daysUsed = Math.min(usedDays(g.id), daysAllowed);
-                        const pct = daysAllowed > 0 ? (daysUsed / daysAllowed) : 0;
+                        // Real consumption, not capped — over-consumption is
+                        // surfaced instead of hidden. Pending days are shown
+                        // as reserved so double-booking is visible too.
+                        const daysUsed = usedDays(g.id);
+                        const daysPending = pendingDays(g.id);
+                        const remaining = daysAllowed - daysUsed - daysPending;
+                        const overBy = daysUsed - daysAllowed;
+                        const pct = daysAllowed > 0 ? Math.min(1, daysUsed / daysAllowed) : 0;
                         const C = 2 * Math.PI * 42;
                         return (
                             <motion.div key={g.id || g.code} whileHover={{ y: -4 }} className="rounded-2xl border border-line/80 bg-card p-6 text-center shadow-sm">
@@ -438,13 +489,17 @@ function LeaveTracker({ onRequestLeave }) {
                                         />
                                     </svg>
                                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                        <div className="text-2xl font-bold text-ink">{daysAllowed - daysUsed}</div>
+                                        <div className={`text-2xl font-bold ${remaining < 0 ? "text-red-600" : "text-ink"}`}>{remaining}</div>
                                         <div className="text-[10px] uppercase text-ink-muted">days left</div>
                                     </div>
                                 </div>
                                 <div className="mt-4 font-semibold text-ink capitalize">{g.name}</div>
-                                <div className="text-xs text-ink-muted">{daysUsed} of {daysAllowed} used</div>
-                                <button onClick={() => onRequestLeave(g)} className="mt-4 w-full rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white active:scale-95 transition-transform">
+                                <div className="text-xs text-ink-muted">
+                                    {daysUsed} of {daysAllowed} used
+                                    {daysPending > 0 && <span className="text-amber-600"> · {daysPending} pending</span>}
+                                    {overBy > 0 && <span className="font-semibold text-red-600"> · over by {overBy}</span>}
+                                </div>
+                                <button onClick={() => onRequestLeave({ type: g, remaining, requests: myRequests })} className="mt-4 w-full rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white active:scale-95 transition-transform">
                                     Request leave
                                 </button>
                             </motion.div>
@@ -488,22 +543,53 @@ function LeaveTracker({ onRequestLeave }) {
     );
 }
 
-function LeaveRequestModal({ leaveType, onClose }) {
+function LeaveRequestModal({ leaveType, remaining = null, existingRequests = [], onClose, onSubmitted }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const requestedDays = startDate && endDate && endDate >= startDate ? inclusiveDays(startDate, endDate) : 0;
+
+  // The backend accepts any dates (no balance or overlap validation), so
+  // this modal is the only guard: block overlaps outright, and make
+  // over-budget requests an explicit informed choice.
+  const overlapping = (start, end) =>
+    existingRequests.find((r) => {
+      const s = String(r.status || "").toLowerCase();
+      if (!s.startsWith("pend") && !s.startsWith("approv")) return null;
+      const rs = String(r.start_date || "").slice(0, 10);
+      const re = String(r.end_date || "").slice(0, 10);
+      return rs && re && rs <= end && start <= re;
+    });
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
+    if (endDate < startDate) {
+      toast.error("End date can’t be before the start date.");
+      return;
+    }
+    const clash = overlapping(startDate, endDate);
+    if (clash) {
+      toast.error(
+        `These dates overlap your existing request (${String(clash.start_date).slice(0, 10)} → ${String(clash.end_date).slice(0, 10)}). Cancel or adjust that one first.`
+      );
+      return;
+    }
+    if (remaining != null && requestedDays > remaining) {
+      const ok = await confirm({
+        title: "Exceed your remaining balance?",
+        message: `This request is ${requestedDays} calendar days, but you have ${Math.max(remaining, 0)} day${remaining === 1 ? "" : "s"} of ${leaveType.name} left (pending requests included). HR can still reject it.`,
+        confirmLabel: "Submit anyway",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     setLoading(true);
     try {
-      if (endDate < startDate) {
-        toast.error("End date can’t be before the start date.");
-        setLoading(false);
-        return;
-      }
       const payload = {
         leave_type_id: leaveType.id,
         start_date: startDate,
@@ -512,6 +598,7 @@ function LeaveRequestModal({ leaveType, onClose }) {
       };
       await api.post("/api/leave-requests/", payload);
       toast.success(`Leave request for ${leaveType.name} submitted successfully!`);
+      onSubmitted?.();
       onClose();
     } catch (err) {
       console.error("[ESS] Leave submission failed:", err);
@@ -542,6 +629,12 @@ function LeaveRequestModal({ leaveType, onClose }) {
               <input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(e.target.value)} className="w-full h-11 border border-line rounded-xl px-3 outline-none mt-1" required />
             </div>
           </div>
+          {requestedDays > 0 && (
+            <div className={`text-xs ${remaining != null && requestedDays > remaining ? "font-semibold text-red-600" : "text-ink-muted"}`}>
+              {requestedDays} calendar day{requestedDays === 1 ? "" : "s"}
+              {remaining != null && ` · ${Math.max(remaining, 0)} remaining for ${leaveType.name}`}
+            </div>
+          )}
           <div>
             <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Purpose / Reason</label>
             <textarea value={reason} onChange={e => setReason(e.target.value)} className="w-full h-24 border border-line rounded-xl p-3 outline-none mt-1 resize-none" placeholder="Provide a brief reason for cover..." required />
@@ -713,85 +806,152 @@ function Line({ label, value, bold }) {
     );
 }
 
+const DOC_ACCEPTED_TYPES = { "application/pdf": "PDF", "image/png": "PNG", "image/jpeg": "JPG" };
+const DOC_MAX_BYTES = 8 * 1024 * 1024;
+
+function UploadDropzone({ id, onPick }) {
+    return (
+        <div className="mt-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-line bg-sunken/60 px-4 py-6 text-center">
+            <Upload className="h-5 w-5 text-ink-faint" />
+            <input
+                type="file"
+                id={id}
+                accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                className="hidden"
+                onChange={(e) => {
+                    onPick(e.target.files[0]);
+                    e.target.value = ""; // allow re-picking the same file
+                }}
+            />
+            <label htmlFor={id} className="mt-2 text-xs text-ink-muted cursor-pointer">
+                Drop file or <span className="font-semibold text-brand">browse</span>
+            </label>
+        </div>
+    );
+}
+
 function DocsUpload() {
+    const { user } = useAuth();
     const toast = useToast();
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [requiredDocs, setRequiredDocs] = useState([]);
+    const [uploads, setUploads] = useState([]);
+    const [tick, setTick] = useState(0);
 
     useEffect(() => {
-        const fetchRequiredDocs = async () => {
-            setLoading(true);
+        let stale = false;
+        (async () => {
             try {
-                const res = await api.get("/api/documentations/");
-                setRequiredDocs(res || []);
-            } catch (err) {
-                console.error("[DocsUpload] Error loading criteria:", err);
+                // Requirements come from the job role; /api/documentations/
+                // lists what's already been uploaded (with approval status).
+                const [roleRes, docsRes] = await Promise.all([
+                    user?.job_role_id ? api.get(`/api/job-roles/${user.job_role_id}`).catch(() => null) : Promise.resolve(null),
+                    api.get("/api/documentations/").catch(() => []),
+                ]);
+                if (stale) return;
+                const jr = roleRes?.jobRole || roleRes?.job_role || roleRes || {};
+                setRequiredDocs(Array.isArray(jr.required_documents) ? jr.required_documents : []);
+                const rows = Array.isArray(docsRes) ? docsRes : docsRes?.documents || docsRes?.items || [];
+                // Show only the user's own uploads even if the API returns more.
+                setUploads(rows.filter((d) => !d.uploaded_by_employee_id || d.uploaded_by_employee_id === user?.id));
             } finally {
-                setLoading(false);
+                if (!stale) setLoading(false);
             }
-        };
-        fetchRequiredDocs();
-    }, []);
+        })();
+        return () => { stale = true; };
+    }, [user?.job_role_id, user?.id, tick]);
 
-  const handleUpload = async (doc, file) => {
+    const handleUpload = async (doc, file) => {
         if (!file) return;
+        if (!DOC_ACCEPTED_TYPES[file.type]) {
+            toast.error("That file type isn't accepted — use a PDF, PNG or JPG.");
+            return;
+        }
+        if (file.size > DOC_MAX_BYTES) {
+            toast.error("File is too large — the limit is 8 MB.");
+            return;
+        }
         const formData = new FormData();
         formData.append("file", file);
-        // Link the upload to the requirement card it was dropped on — without
-        // this the backend can't tell which required document it satisfies.
-        // TODO(backend): confirm the expected field name for the reference.
-        formData.append("required_document_id", doc.id);
-        if (doc.name) formData.append("name", doc.name);
+        // Contract (confirmed against the API): feature_type is required.
+        // required_document_id/name are accepted but currently ignored by the
+        // backend — sent anyway for when it learns to link uploads to
+        // requirements (backend ask).
+        formData.append("feature_type", "EMPLOYEE_DOCUMENT");
+        if (doc?.id) formData.append("required_document_id", doc.id);
+        if (doc?.name) formData.append("name", doc.name);
         try {
             await api.post("/api/documentations/upload", formData, {
-                headers: {
-                "Content-Type": "multipart/form-data",
-                },
-        });
-            toast.success(`${doc.name || "Document"} uploaded and queued for approval!`);
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            toast.success(`${doc?.name || file.name} uploaded and queued for approval!`);
+            setTick((t) => t + 1);
         } catch (err) {
             console.error("[DocsUpload] Upload failed:", err);
-            toast.error(err?.message || "Error uploading document.");
+            toast.error(err?.error?.message || err?.message || "Error uploading document.");
         }
-  };
+    };
 
-  return (
-    <div className="grid gap-4 md:grid-cols-2">
-        {loading ? (
-            <div className="p-8 text-center text-ink-muted bg-card border rounded-2xl md:col-span-2">Retrieving document templates...</div>
-        ) : requiredDocs.length === 0 ? (
-            <div className="p-8 text-center text-ink-faint bg-card border border-dashed rounded-2xl md:col-span-2">
-                No required documents assigned to your profile yet.
-            </div>
-        ) : (
-            requiredDocs.map((d) => (
-                <div key={d.id} className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm">
-                    <div className="flex items-start justify-between">
-                        <div>
-                            <div className="font-semibold text-ink">{d.name || ""}</div>
-                            <div className="text-xs text-ink-muted mt-0.5">PDF, PNG or JPG up to 8MB</div>
+    const docStatus = (d) => String(d.status || "pending").toLowerCase();
+    // Shared helper uses startsWith — "pending_approval" stays amber instead
+    // of reading as approved (the old includes("approv") bug).
+    const statusChip = (d) => statusBadgeCls(d.status);
+
+    if (loading) {
+        return <div className="p-8 text-center text-ink-muted bg-card border rounded-2xl">Retrieving document templates...</div>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+                {requiredDocs.map((d) => (
+                    <div key={d.id} className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <div className="font-semibold text-ink">{d.name || ""}</div>
+                                <div className="text-xs text-ink-muted mt-0.5">PDF, PNG or JPG up to 8MB{d.is_mandatory ? " · Required" : ""}</div>
+                            </div>
                         </div>
+                        <UploadDropzone id={`file-${d.id}`} onPick={(file) => handleUpload(d, file)} />
                     </div>
-                    <div className="mt-4 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-line bg-sunken/60 px-4 py-6 text-center">
-                        <Upload className="h-5 w-5 text-ink-faint" />
-                        <input
-                            type="file"
-                            id={`file-${d.id}`}
-                            className="hidden"
-                            onChange={(e) => {
-                                handleUpload(d, e.target.files[0]);
-                                e.target.value = ""; // allow re-picking the same file
-                            }}
-                        />
-                        <label htmlFor={`file-${d.id}`} className="mt-2 text-xs text-ink-muted cursor-pointer">
-                            Drop file or <span className="font-semibold text-brand">browse</span>
-                        </label>
+                ))}
+                <div className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm">
+                    <div>
+                        <div className="font-semibold text-ink">{requiredDocs.length ? "Other document" : "Upload a document"}</div>
+                        <div className="text-xs text-ink-muted mt-0.5">PDF, PNG or JPG up to 8MB</div>
                     </div>
+                    <UploadDropzone id="file-general" onPick={(file) => handleUpload(null, file)} />
                 </div>
-            ))
-        )}
-    </div>
-  );
+            </div>
+
+            <div className="rounded-2xl border border-line/80 bg-card shadow-sm">
+                <div className="border-b border-line-soft p-5">
+                    <h3 className="font-semibold text-ink">My uploaded documents</h3>
+                    <p className="text-xs text-ink-muted">Each upload goes through approval — track its status here.</p>
+                </div>
+                {uploads.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-ink-faint">Nothing uploaded yet.</div>
+                ) : (
+                    <ul className="divide-y divide-line-soft">
+                        {uploads.map((d) => (
+                            <li key={d.id} className="flex items-center justify-between gap-3 p-4">
+                                <div className="flex min-w-0 items-center gap-3">
+                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand"><FileText className="h-4 w-4" /></div>
+                                    <div className="min-w-0">
+                                        <div className="truncate text-sm font-semibold text-ink">{d.title || d.original_file_name || "Document"}</div>
+                                        <div className="text-xs text-ink-muted">{String(d.created_at || "").slice(0, 10)}</div>
+                                    </div>
+                                </div>
+                                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusChip(d)}`}>
+                                    {docStatus(d).replace(/_/g, " ")}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+        </div>
+    );
 }
 
 

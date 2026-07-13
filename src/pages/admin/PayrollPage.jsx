@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Plus, X, AlertCircle, Check, CheckCircle2 } from "lucide-react";
 import { payrollService, findApprovalRequestId } from "../../services/payrollService";
@@ -11,7 +11,7 @@ import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getEmployeeName } from "../../utils/employee";
 import { MONTHS, fmtMoney, extractRunLines } from "../../utils/payroll";
-import api from "../../services/api";
+import { orgService } from "../../services/orgService";
 
 const STATUS_META = {
   draft: { label: "Draft", cls: "bg-sunken text-ink-muted", step: 0 },
@@ -90,6 +90,11 @@ const PayrollPage = () => {
   const canUpdate = can(RESOURCE_CODES.PAYROLL, "update");
   const canManage = can(RESOURCE_CODES.PAYROLL, "manage");
 
+  // Mirror of selectedId readable inside async callbacks, so a detail write
+  // can check the selection hasn't moved on since the fetch started.
+  const selectedIdRef = useRef(selectedId);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
+
   const detail = selectedId && detailState.forId === selectedId ? detailState.data : null;
   const detailLoading = !!selectedId && detailState.forId !== selectedId;
 
@@ -129,8 +134,8 @@ const PayrollPage = () => {
       // from the run items' snapshots instead, so don't even ask.
       if (!can(RESOURCE_CODES.EMPLOYEES, "read")) return;
       try {
-        const res = await api.get("/api/users/?page=1&limit=100");
-        if (!stale) setStaff(Array.isArray(res) ? res : res?.users || []);
+        const res = await orgService.listAllUsers();
+        if (!stale) setStaff(res);
       } catch (err) {
         console.error("[Payroll] Staff list unavailable:", err);
       }
@@ -169,10 +174,16 @@ const PayrollPage = () => {
   }, [selectedId]);
 
   const refreshAfterAction = async () => {
+    // The run in view when the refresh began. If the user selects another run
+    // while this is in flight, a late write here would land forId != selectedId
+    // and wedge the detail panel on "Loading…" permanently — so re-check the
+    // selection before every write.
+    const runId = selectedIdRef.current;
     await Promise.all([loadRuns(), loadAdjustments()]);
-    if (selectedId) {
+    if (runId && selectedIdRef.current === runId) {
       try {
-        setDetailState({ forId: selectedId, data: await payrollService.getRun(selectedId) });
+        const data = await payrollService.getRun(runId);
+        if (selectedIdRef.current === runId) setDetailState({ forId: runId, data });
       } catch { /* keep old detail */ }
     }
   };
@@ -586,12 +597,17 @@ function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!payGroup) { setError("Pick a pay group — payroll is generated per pay group."); return; }
+    const y = Number(year);
+    if (!Number.isInteger(y) || y < 2000 || y > 2100) {
+      setError("Enter a valid year between 2000 and 2100.");
+      return;
+    }
     setError("");
     setSaving(true);
     try {
       const created = await payrollService.preview({
         month: Number(month),
-        year: Number(year),
+        year: y,
         pay_group: payGroup,
         currency: currency || undefined,
       });
@@ -626,7 +642,7 @@ function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
             </div>
             <div>
               <label className={labelCls}>Year</label>
-              <input type="number" min="2000" value={year} onChange={(e) => setYear(e.target.value)} className={inputCls} />
+              <input type="number" min="2000" max="2100" value={year} onChange={(e) => setYear(e.target.value)} className={inputCls} />
             </div>
           </div>
           <div>

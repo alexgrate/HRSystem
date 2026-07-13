@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CalendarDays, FileText, UserCog, Check, X, Inbox } from "lucide-react";
 import { approvalService } from "../../services/approvalService";
@@ -6,10 +6,11 @@ import { usePermissions } from "../../context/PermissionContext";
 import { useAuth } from "../../context/AuthContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
-import { getEmployeeName } from "../../utils/employee";
+import { resolvePersonName } from "../../utils/employee";
 import { isDesignatedApprover } from "../../utils/approvers";
 import { setupService } from "../../services/setupService";
-import api from "../../services/api";
+import { orgService } from "../../services/orgService";
+import { TabPills } from "../../components/ui/TabPills";
 
 const fmtDate = (d) => {
   if (!d) return "—";
@@ -71,8 +72,8 @@ const ApprovalsInboxPage = () => {
     let stale = false;
     (async () => {
       try {
-        const res = await api.get("/api/users/?page=1&limit=100");
-        if (!stale) setStaff(Array.isArray(res) ? res : res?.users || []);
+        const res = await orgService.listAllUsers();
+        if (!stale) setStaff(res);
       } catch {
         /* names fall back to shortened ids */
       }
@@ -81,18 +82,7 @@ const ApprovalsInboxPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const personName = (r) => {
-    const embedded = r.employee || r.user || r.requester;
-    if (embedded && typeof embedded === "object") {
-      const n = getEmployeeName(embedded, "");
-      if (n) return n;
-    }
-    if (r.employee_name || r.snapshot?.employee_name) return r.employee_name || r.snapshot.employee_name;
-    const id = r.employee_id || r.user_id || r.uploaded_by_employee_id;
-    const s = staff.find((u) => u.id === id);
-    if (s) return getEmployeeName(s);
-    return r.employee_email || (id ? `${String(id).slice(0, 8)}…` : "Employee");
-  };
+  const personName = (r) => resolvePersonName(r, staff, "Employee");
 
   useEffect(() => {
     let stale = false;
@@ -186,23 +176,7 @@ const ApprovalsInboxPage = () => {
         <p className="mt-1 text-sm text-ink-muted">Review and action requests waiting on you.</p>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto rounded-xl border border-line/80 bg-card p-1 shadow-sm w-fit max-w-full">
-        {visibleTabs.map((t) => {
-          const Icon = t.Icon;
-          const isActive = activeTab.key === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`relative shrink-0 whitespace-nowrap inline-flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${isActive ? "text-white" : "text-ink-muted"}`}
-            >
-              {isActive && <motion.div layoutId="approvals-tab" className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2" transition={{ type: "spring", stiffness: 400, damping: 32 }} />}
-              <Icon className="relative h-3.5 w-3.5" />
-              <span className="relative">{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <TabPills layoutId="approvals-tab" active={activeTab.key} onChange={setTab} tabs={visibleTabs} />
 
       {loading ? (
         <div className="p-12 text-center text-ink-muted bg-card rounded-2xl border border-line-soft">Loading pending approvals…</div>

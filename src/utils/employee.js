@@ -17,3 +17,24 @@ export function getInitials(name) {
       .toUpperCase() || "U"
   );
 }
+
+// One resolver for "whose row is this?" across the leave/approvals/audit
+// tables: embedded person object → *_name field → staff-roster lookup by any
+// known id → email → shortened id → fallback.
+export function resolvePersonName(row, staff = [], fallback = "Employee") {
+  const embedded = row.employee || row.user || row.requester || row.actor || row.performed_by_employee;
+  if (embedded && typeof embedded === "object") {
+    const n = getEmployeeName(embedded, "");
+    if (n) return n;
+  }
+  const direct = row.employee_name || row.actor_name || row.user_full_name || row.snapshot?.employee_name;
+  if (direct) return direct;
+  const id =
+    row.employee_id || row.actor_id || row.performed_by_employee_id ||
+    row.performed_by || row.user_id || row.uploaded_by_employee_id || null;
+  const s = id ? staff.find((u) => u.id === id || u.auth_id === id) : null;
+  if (s) return getEmployeeName(s);
+  const email = row.employee_email || row.actor_email || row.email;
+  if (email) return email;
+  return id ? `${String(id).slice(0, 8)}…` : fallback;
+}

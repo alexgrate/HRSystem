@@ -1,10 +1,24 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, Plus, Trash2, HelpCircle, Pencil } from "lucide-react";
 import { setupService } from "../../services/setupService";
+import { auditService } from "../../services/auditService";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
+
+// "approval.request.rejected" → "Request rejected"
+const humanizeAction = (action) =>
+  String(action || "")
+    .replace(/^approval\./, "")
+    .replace(/[._]/g, " ")
+    .replace(/^\w/, (c) => c.toUpperCase());
+
+const fmtLogTime = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso || "").slice(0, 16);
+  return d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+};
 
 const getTypeColor = (type) => {
   const t = (type || "").toUpperCase();
@@ -24,6 +38,8 @@ const WorkflowPage = () => {
   const [activeId, setActiveId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null); // { flow: null } = create, { flow } = edit
+  // null = audit log unavailable to this user (panel hidden); [] = loaded, empty.
+  const [approvalLog, setApprovalLog] = useState(null);
 
   const canUpdate = can(RESOURCE_CODES.APPROVAL_WORKFLOWS, "update");
   const canDelete = can(RESOURCE_CODES.APPROVAL_WORKFLOWS, "delete");
@@ -46,6 +62,23 @@ const WorkflowPage = () => {
 
   useEffect(() => {
     loadWorkflowData();
+  }, []);
+
+  // Approval decisions from the org audit log (viewers without audit access
+  // simply don't get the panel).
+  useEffect(() => {
+    let stale = false;
+    auditService
+      .list(200)
+      .then((rows) => {
+        if (stale) return;
+        const decisions = (rows || []).filter(
+          (r) => r.process === "approval_request" || String(r.action || "").startsWith("approval.")
+        );
+        setApprovalLog(decisions.slice(0, 8));
+      })
+      .catch(() => { /* keep null — hide the panel */ });
+    return () => { stale = true; };
   }, []);
 
   const activeFlow = workflows.find((w) => w.workflow?.id === activeId) || workflows[0] || null;
@@ -153,6 +186,7 @@ const WorkflowPage = () => {
               <h3 className="font-semibold text-ink capitalize">{activeFlow.workflow?.name || "Unnamed Workflow"}</h3>
               <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
                 {(activeFlow.steps || [])
+                  .slice()
                   .sort((a, b) => a.step_order - b.step_order)
                   .map((s, i) => {
                     const approverTitle = getApproverTitle(s);
@@ -187,18 +221,31 @@ const WorkflowPage = () => {
         </>
       )}
 
-      <div className="rounded-2xl border border-line/80 bg-card shadow-sm">
-        <div className="flex items-center justify-between border-b border-line-soft p-5">
-          <div>
-            <h3 className="font-semibold text-ink">Audit-ready approval log</h3>
-            <p className="text-xs text-ink-muted">Chronological database records of transactional decisions.</p>
+      {approvalLog !== null && (
+        <div className="rounded-2xl border border-line/80 bg-card shadow-sm">
+          <div className="border-b border-line-soft p-5">
+            <h3 className="font-semibold text-ink">Recent approval decisions</h3>
+            <p className="text-xs text-ink-muted">The latest workflow decisions from the organization audit log.</p>
           </div>
-          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700">SOC 2 · IMMUTABLE</span>
+          {approvalLog.length === 0 ? (
+            <div className="p-8 text-center text-ink-faint text-sm">
+              No approval decisions recorded yet.
+            </div>
+          ) : (
+            <ul className="divide-y divide-line-soft">
+              {approvalLog.map((r, i) => (
+                <li key={r.id || i} className="flex items-center justify-between gap-3 px-5 py-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-ink-2">{humanizeAction(r.action)}</div>
+                    <div className="text-xs text-ink-muted">{r.user_full_name || r.actor_name || "System"}</div>
+                  </div>
+                  <div className="shrink-0 text-xs text-ink-faint">{fmtLogTime(r.time || r.created_at)}</div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-        <div className="p-8 text-center text-ink-faint text-sm">
-          No immutable transaction logs recorded yet in your tenant workspace.
-        </div>
-      </div>
+      )}
 
       <AnimatePresence>
         {modal && (
@@ -220,16 +267,21 @@ function WorkflowFormModal({ flow = null, onClose, onSaved, jobRoles }) {
   const isEdit = !!flow?.workflow?.id;
   const [name, setName] = useState(flow?.workflow?.name || "");
   const [workflowType, setWorkflowType] = useState(flow?.workflow?.workflow_type || "LEAVE_REQUEST");
+  const [saving, setSaving] = useState(false);
   const [steps, setSteps] = useState(() => {
     const existing = (flow?.steps || [])
       .slice()
       .sort((a, b) => a.step_order - b.step_order)
-      .map((s, i) => ({ id: s.id || i + 1, approver_job_role_id: s.approver_job_role_id || "" }));
-    return existing.length ? existing : [{ id: 1, approver_job_role_id: "" }];
+      .map((s, i) => ({
+        id: s.id || i + 1,
+        approver_job_role_id: s.approver_job_role_id || "",
+        require_all_approvers: !!s.require_all_approvers,
+      }));
+    return existing.length ? existing : [{ id: 1, approver_job_role_id: "", require_all_approvers: false }];
   });
 
   const addStep = () => {
-    setSteps((prev) => [...prev, { id: Date.now(), approver_job_role_id: "" }]);
+    setSteps((prev) => [...prev, { id: Date.now(), approver_job_role_id: "", require_all_approvers: false }]);
   };
 
   const removeStep = (id) => {
@@ -243,8 +295,16 @@ function WorkflowFormModal({ flow = null, onClose, onSaved, jobRoles }) {
     );
   };
 
+  const toggleStepRequireAll = (id) => {
+    setSteps((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, require_all_approvers: !s.require_all_approvers } : s))
+    );
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
+    setSaving(true);
     try {
       const payload = {
         name: name.trim(),
@@ -253,7 +313,7 @@ function WorkflowFormModal({ flow = null, onClose, onSaved, jobRoles }) {
         steps: steps.map((s, idx) => ({
           step_order: idx + 1,
           approver_job_role_id: s.approver_job_role_id,
-          require_all_approvers: false
+          require_all_approvers: !!s.require_all_approvers,
         }))
       };
 
@@ -269,6 +329,8 @@ function WorkflowFormModal({ flow = null, onClose, onSaved, jobRoles }) {
     } catch (err) {
       console.error("Workflow save failed:", err);
       toast.error(err?.error?.message || err?.message || "Error saving workflow chain.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -320,8 +382,8 @@ function WorkflowFormModal({ flow = null, onClose, onSaved, jobRoles }) {
               {steps.map((step, index) => (
                 <div key={step.id} className="flex items-center gap-2">
                   <span className="text-xs font-bold text-ink-faint w-16">Step {index + 1}</span>
-                  <select 
-                    value={step.approver_job_role_id} 
+                  <select
+                    value={step.approver_job_role_id}
                     onChange={e => updateStepRole(step.id, e.target.value)}
                     className="flex-1 h-11 border border-line bg-card rounded-xl px-3 outline-none"
                     required
@@ -331,8 +393,20 @@ function WorkflowFormModal({ flow = null, onClose, onSaved, jobRoles }) {
                       <option key={r.id} value={r.id}>{r.title}</option>
                     ))}
                   </select>
-                  <button 
-                    type="button" 
+                  <label
+                    title="Every holder of this job role must approve before the step clears"
+                    className="flex shrink-0 cursor-pointer items-center gap-1 text-[10px] font-semibold text-ink-muted"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!step.require_all_approvers}
+                      onChange={() => toggleStepRequireAll(step.id)}
+                      className="h-3.5 w-3.5 rounded border-line text-brand focus:ring-brand"
+                    />
+                    All must approve
+                  </label>
+                  <button
+                    type="button"
                     onClick={() => removeStep(step.id)}
                     className="p-2 text-ink-faint hover:text-red-600 disabled:opacity-50"
                     disabled={steps.length === 1}
@@ -345,8 +419,10 @@ function WorkflowFormModal({ flow = null, onClose, onSaved, jobRoles }) {
           </div>
 
           <div className="flex gap-2 justify-end pt-4">
-            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
-            <button type="submit" className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold">Save Workflow</button>
+            <button type="button" onClick={onClose} disabled={saving} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted disabled:opacity-60">Cancel</button>
+            <button type="submit" disabled={saving} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-75">
+              {saving ? "Saving..." : "Save Workflow"}
+            </button>
           </div>
         </form>
       </div>

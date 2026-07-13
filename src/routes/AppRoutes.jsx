@@ -1,4 +1,4 @@
-import React from "react";
+import { Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "../context/AuthContext";
 import { PermissionProvider, usePermissions } from "../context/PermissionContext";
@@ -8,6 +8,15 @@ import AppLayout from "../components/layout/AppLayout";
 import Login from "../pages/auth/Login";
 import ForgotPassword from "../pages/auth/ForgotPassword";
 import { RESOURCES, pathFor } from "../config/resources";
+
+// Shown while a lazy route chunk downloads.
+function PageLoading() {
+  return (
+    <div className="flex h-64 items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent" />
+    </div>
+  );
+}
 
 function IndexRedirect() {
   const { can, canAccess } = usePermissions();
@@ -50,7 +59,9 @@ export default function AppRoutes() {
                         action={r.action || "read"}
                         checks={r.checks}
                       >
-                        <Component />
+                        <Suspense fallback={<PageLoading />}>
+                          <Component />
+                        </Suspense>
                       </ProtectedRoute>
                     }
                   />

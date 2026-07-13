@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight, Mail, Lock, AlertCircle, Eye, EyeOff } from "lucide-react";
@@ -10,7 +10,8 @@ const Login = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false); 
+  const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -29,7 +30,7 @@ const Login = () => {
     setError("");
     setSubmitting(true);
     try {
-      await login(email, password);
+      await login(email, password, remember);
       navigate("/app");
     } catch (err) {
       setError(err?.error?.message || err?.message || "Invalid email credentials or password.");
@@ -39,7 +40,7 @@ const Login = () => {
   };
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#faf8f3] text-ink select-none" style={{ height: "100dvh" }}>
+    <div className="relative h-screen w-screen overflow-hidden bg-[#faf8f3] text-ink" style={{ height: "100dvh" }}>
       <div className="pointer-events-none absolute inset-0 opacity-[0.5] grain" />
 
       <div className="relative mx-auto h-full w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-[1.15fr_1fr]">
@@ -168,9 +169,14 @@ const Login = () => {
               </div>
 
               <div className="flex items-center justify-between pt-1 text-xs">
-                <label className="flex items-center gap-2 text-ink-muted cursor-pointer">
-                  <input type="checkbox" className="h-3.5 w-3.5 rounded border-line text-brand focus:ring-brand" defaultChecked />
-                  Remember me 
+                <label className="flex items-center gap-2 text-ink-muted cursor-pointer" title="Unchecked: you'll be signed out when the browser closes">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-line text-brand focus:ring-brand"
+                  />
+                  Remember me
                 </label>
                 <Link className="font-semibold text-brand hover:underline" to="/forgot-password">Forgot password?</Link>
               </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Building2, Palette, Globe, ShieldCheck, GitBranch, Save, Upload, X, ImageIcon } from "lucide-react";
 import { configService } from "../../services/configService";
 import { useConfig } from "../../context/ConfigContext";
@@ -58,28 +58,41 @@ function Text({ label, value, onChange, disabled, placeholder, full }) {
   );
 }
 
+// Branding images are stored as data URIs inside the config record (there is
+// no server-side asset upload yet — backend ask), so every byte here rides
+// along on every config fetch for every user. Everything — including SVG —
+// is therefore rasterized through a canvas and re-encoded: the stored value
+// is always a plain bitmap (no SVG markup, scripts or foreignObject survive)
+// and its size is bounded.
+const OUTPUT_CAP = 300 * 1024;
+
 const fileToDataUri = (file, maxDim) =>
   new Promise((resolve, reject) => {
     if (file.size > 2 * 1024 * 1024) return reject(new Error("Image is too large — pick a file under 2 MB."));
-    if (file.type === "image/svg+xml") {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error("Couldn't read the file."));
-      return reader.readAsDataURL(file);
-    }
-    if (!/^image\/(png|jpe?g|webp|gif|x-icon|vnd\.microsoft\.icon)$/.test(file.type)) {
+    if (!/^image\/(png|jpe?g|webp|gif|svg\+xml|x-icon|vnd\.microsoft\.icon)$/.test(file.type)) {
       return reject(new Error("Use a PNG, JPG, WebP, SVG or ICO image."));
     }
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      // SVGs can lack intrinsic dimensions — fall back to the target size.
+      const w = img.naturalWidth || maxDim;
+      const h = img.naturalHeight || maxDim;
+      const scale = Math.min(1, maxDim / Math.max(w, h));
       const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(img.width * scale));
-      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.width = Math.max(1, Math.round(w * scale));
+      canvas.height = Math.max(1, Math.round(h * scale));
       canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL("image/png"));
+      const png = canvas.toDataURL("image/png");
+      const webp = canvas.toDataURL("image/webp");
+      // toDataURL silently falls back to PNG for unsupported types — only
+      // prefer the webp result when it really is webp, and smaller.
+      const out = webp.startsWith("data:image/webp") && webp.length < png.length ? webp : png;
+      if (out.length > OUTPUT_CAP) {
+        return reject(new Error("Image is too detailed to store — use a simpler or smaller image."));
+      }
+      resolve(out);
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -249,16 +262,30 @@ const OrganizationSettingsPage = () => {
     });
   };
 
-  // Leaving without saving restores the saved theme and colors.
+  // Leaving without saving restores the saved theme and colors. The config
+  // lives in a ref so the restore runs ONLY on unmount — a cleanup keyed on
+  // [config] would also fire on every save (setConfig) with the pre-save
+  // closure values, visibly reverting the theme the user just saved.
+  const configRef = useRef(config);
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
   useEffect(() => {
     return () => {
-      previewTheme(config?.theme_mode || "light");
-      previewBrand(config || {});
+      previewTheme(configRef.current?.theme_mode || "light");
+      previewBrand(configRef.current || {});
     };
+    // previewTheme/previewBrand are stable (empty-dep useCallback in ConfigContext).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config]);
+  }, []);
 
   const handleSave = async () => {
+    // Validate instead of silently coercing (0 or garbage used to become 30).
+    const timeoutMinutes = Number(form.session_timeout_minutes);
+    if (!Number.isInteger(timeoutMinutes) || timeoutMinutes < 5 || timeoutMinutes > 1440) {
+      toast.error("Session timeout must be a whole number between 5 and 1440 minutes.");
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -276,7 +303,7 @@ const OrganizationSettingsPage = () => {
         language: form.language,
         enable_2fa: !!form.enable_2fa,
         enforce_2fa_for_admins: !!form.enforce_2fa_for_admins,
-        session_timeout_minutes: Number(form.session_timeout_minutes) || 30,
+        session_timeout_minutes: timeoutMinutes,
         allow_self_service_profile_update: !!form.allow_self_service_profile_update,
         payroll_requires_approval: !!form.payroll_requires_approval,
         leave_requires_approval: !!form.leave_requires_approval,

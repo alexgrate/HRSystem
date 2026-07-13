@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useMemo, useState } from "react";
+import { TabPills } from "../../components/ui/TabPills";
 import { Search, Check, X, BellRing, Trash2, CalendarDays } from "lucide-react";
 import { leaveService } from "../../services/leaveService";
 import { approvalService } from "../../services/approvalService";
@@ -8,25 +8,22 @@ import { usePermissions } from "../../context/PermissionContext";
 import { useAuth } from "../../context/AuthContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
-import { getEmployeeName } from "../../utils/employee";
+import { resolvePersonName } from "../../utils/employee";
+import { statusBadgeCls } from "../../utils/status";
 import { inclusiveDays } from "../../utils/leave";
 import { isDesignatedApprover } from "../../utils/approvers";
-import api from "../../services/api";
+import { orgService } from "../../services/orgService";
 
 const STATUS_TABS = [
-  { key: "pending", label: "Pending" },
-  { key: "approved", label: "Approved" },
-  { key: "rejected", label: "Rejected" },
+  { key: "pending", label: "Pending", matches: ["pend"] },
+  { key: "approved", label: "Approved", matches: ["approv"] },
+  // The "didn't happen" bucket — the backend emits rejected, declined and
+  // cancelled, and all three belong here, not only under All.
+  { key: "rejected", label: "Rejected", matches: ["reject", "decl", "cancel"] },
   { key: "all", label: "All" },
 ];
 
 const statusOf = (r) => String(r.status || "pending").toLowerCase();
-
-const statusCls = (s) => {
-  if (s.startsWith("approv")) return "bg-emerald-50 text-emerald-700";
-  if (s.startsWith("reject") || s.startsWith("cancel") || s.startsWith("decl")) return "bg-red-50 text-red-700";
-  return "bg-amber-50 text-amber-700";
-};
 
 const fmtDate = (d) => (d ? String(d).slice(0, 10) : "—");
 
@@ -62,7 +59,7 @@ const LeaveAdminPage = () => {
           // case fall back to their own requests rather than an empty page.
           leaveService.listAll().catch(() => leaveService.list()),
           setupService.getLeaveTypes().catch(() => []),
-          api.get("/api/users/?page=1&limit=100").catch(() => []),
+          orgService.listAllUsers().catch(() => []),
           setupService.getWorkflows().catch(() => null),
         ]);
         if (stale) return;
@@ -85,12 +82,7 @@ const LeaveAdminPage = () => {
     leaveTypes.find((t) => t.id === (r.leave_type_id || r.leave_type))?.name ||
     "Leave";
 
-  const requesterName = (r) => {
-    const embedded = r.employee || r.user || r.requester;
-    if (embedded && typeof embedded === "object") return getEmployeeName(embedded, "Employee");
-    const s = staff.find((u) => u.id === (r.employee_id || r.user_id));
-    return s ? getEmployeeName(s) : r.employee_email || "Employee";
-  };
+  const requesterName = (r) => resolvePersonName(r, staff, "Employee");
 
   const today = new Date().toISOString().slice(0, 10);
   const counts = useMemo(() => {
@@ -104,7 +96,8 @@ const LeaveAdminPage = () => {
 
   const visible = useMemo(() => {
     let list = requests;
-    if (tab !== "all") list = list.filter((r) => statusOf(r).startsWith(tab.slice(0, 6)));
+    const tabDef = STATUS_TABS.find((t) => t.key === tab);
+    if (tabDef?.matches) list = list.filter((r) => tabDef.matches.some((p) => statusOf(r).startsWith(p)));
     if (q.trim()) {
       const s = q.trim().toLowerCase();
       list = list.filter((r) =>
@@ -214,16 +207,7 @@ const LeaveAdminPage = () => {
 
       <div className="rounded-2xl border border-line/80 bg-card shadow-sm">
         <div className="flex flex-wrap items-center gap-3 border-b border-line-soft p-4">
-          <div className="flex gap-1 overflow-x-auto rounded-xl border border-line/80 bg-card p-1 shadow-sm">
-            {STATUS_TABS.map((t) => (
-              <button key={t.key} onClick={() => setTab(t.key)} className="relative shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold">
-                {tab === t.key && (
-                  <motion.div layoutId="leave-tab" className="absolute inset-0 rounded-lg bg-gradient-to-r from-brand to-brand-2" transition={{ type: "spring", stiffness: 400, damping: 32 }} />
-                )}
-                <span className={`relative ${tab === t.key ? "text-white" : "text-ink-muted"}`}>{t.label}</span>
-              </button>
-            ))}
-          </div>
+          <TabPills layoutId="leave-tab" active={tab} onChange={setTab} tabs={STATUS_TABS} />
           <div className="flex flex-1 min-w-[220px] items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm">
             <Search className="h-4 w-4 text-ink-faint" />
             <input
@@ -269,7 +253,7 @@ const LeaveAdminPage = () => {
                       <td className="px-4 py-3 text-ink-2">{inclusiveDays(r.start_date, r.end_date) || "—"}</td>
                       <td className="max-w-[260px] truncate px-4 py-3 text-ink-muted">{r.reason || "—"}</td>
                       <td className="px-4 py-3">
-                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusCls(s)}`}>
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusBadgeCls(s)}`}>
                           {s.replace(/_/g, " ")}
                         </span>
                       </td>

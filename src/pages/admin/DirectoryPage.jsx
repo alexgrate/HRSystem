@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, X, Plus, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Pencil, Trash2, UserX, UserCheck, Mail, Download, Upload } from "lucide-react";
-import { useAuth } from "../../context/AuthContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { setupService } from "../../services/setupService";
+import { orgService } from "../../services/orgService";
 import { authService } from "../../services/authService";
 import { getEmployeeName } from "../../utils/employee";
 import { getValueByAliases, parseBulkFile, parseDocList, toBoolean, toCsv, toNumber } from "../../utils/bulkUpload";
@@ -43,6 +43,23 @@ const genThrowawayPassword = () => {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => chars[b % chars.length]).join("") + "!2a";
+};
+
+// POST /api/auth/register returns the new account's AUTH id (authUser.id), but
+// PUT /api/users/{id} needs the org-user id (a different record — def-11 has
+// both `id` and `auth_id`). There's no lookup-by-email endpoint, so match
+// across the full roster (every page, not a 100-row cap) by auth_id, falling
+// back to email. Returns null when it can't link — callers must treat that as
+// a failure, never silently skip the profile update.
+const findNewEmployeeId = async (email, registerResponse) => {
+  const authId = registerResponse?.authUser?.id || registerResponse?.user?.id || registerResponse?.id || null;
+  const roster = await orgService.listAllUsers().catch(() => []);
+  const lower = String(email || "").toLowerCase();
+  return (
+    (authId && roster.find((u) => u.auth_id === authId)?.id) ||
+    roster.find((u) => String(u.email || "").toLowerCase() === lower)?.id ||
+    null
+  );
 };
 
 const activationLinkFor = (email) =>
@@ -85,6 +102,7 @@ const EMPLOYEE_BULK_TEMPLATE = {
     "job_title",
     "manager_email",
     "pay_grade",
+    "pay_group",
     "base_salary",
     "employment_status",
     "contract_type",
@@ -98,6 +116,7 @@ const EMPLOYEE_BULK_TEMPLATE = {
     job_title: "HR Lead",
     manager_email: "hr.head@company.com",
     pay_grade: "PG_G1",
+    pay_group: "Monthly Staff",
     base_salary: "450000",
     employment_status: "probation",
     contract_type: "permanent",
@@ -123,7 +142,6 @@ const DirectoryPage = () => {
 
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
-  const [searchCapped, setSearchCapped] = useState(false);
 
   const [refreshTick, setRefreshTick] = useState(0);
   const [lookupsTick, setLookupsTick] = useState(0);
@@ -447,7 +465,7 @@ const DirectoryPage = () => {
     }
 
     const contractType = (getValueByAliases(record, ["contract_type", "contract"]) || "permanent").trim() || "permanent";
-    await api.post("/api/auth/register", {
+    const reg = await api.post("/api/auth/register", {
       firstName,
       lastName,
       email,
@@ -456,33 +474,68 @@ const DirectoryPage = () => {
     });
 
     let userId = getValueByAliases(record, ["id", "user_id"]);
+    if (!userId) userId = await findNewEmployeeId(email, reg);
     if (!userId) {
-      const res = await api.get("/api/users/?page=1&limit=100");
-      const users = Array.isArray(res) ? res : res?.users || [];
-      userId = users.find((u) => (u.email || "").toLowerCase() === email.toLowerCase())?.id;
+      // The account exists but we can't link its profile record — fail the row
+      // loudly rather than report a success with department/salary/role missing.
+      throw new Error(`Account created, but its profile record couldn't be linked. Set department, salary and role from the employee's row.`);
     }
 
-    if (userId) {
-      const dept = getValueByAliases(record, ["department_id", "department", "department_name", "department_code"]);
-      const role = getValueByAliases(record, ["job_role_id", "job_title", "job_role", "title"]);
-      const manager = getValueByAliases(record, ["manager_id", "manager", "manager_email"]);
-      const payGrade = getValueByAliases(record, ["pay_grade", "pay_grade_id", "pay_grade_code", "pay_grade_name"]);
-      const baseSalaryRaw = getValueByAliases(record, ["base_salary", "salary"]);
+    const dept = getValueByAliases(record, ["department_id", "department", "department_name", "department_code"]);
+    const role = getValueByAliases(record, ["job_role_id", "job_title", "job_role", "title"]);
+    const manager = getValueByAliases(record, ["manager_id", "manager", "manager_email"]);
+    const payGrade = getValueByAliases(record, ["pay_grade", "pay_grade_id", "pay_grade_code", "pay_grade_name"]);
+    const payGroup = getValueByAliases(record, ["pay_group", "pay_group_id", "pay_group_code", "pay_group_name"]);
+    const baseSalaryRaw = getValueByAliases(record, ["base_salary", "salary"]);
 
-      const details = pruneEmpty({
-        phone: (getValueByAliases(record, ["phone", "phone_number"]) || "").trim(),
-        department_id: resolveByNameCodeOrId(allDepartments, dept, ["id", "name", "code"]),
-        job_role_id: resolveByNameCodeOrId(allJobRoles, role, ["id", "title", "code"]),
-        manager_id: resolveByNameCodeOrId(allStaff, manager, ["id", "email", "firstname", "lastname"]),
-        pay_grade: resolvePayGradeId(payGrade, allPayGrades),
-        base_salary: toNumber(baseSalaryRaw),
-        employment_status: (getValueByAliases(record, ["employment_status", "status"]) || "probation").trim(),
-        contract_type: contractType,
-      });
+    // Collect a warning for any value that was PROVIDED but couldn't be
+    // resolved, so the import never silently drops a column the admin filled in.
+    const warnings = [];
+    const resolveWithWarn = (raw, resolver, label) => {
+      const v = raw == null ? "" : String(raw).trim();
+      if (!v) return "";
+      const id = resolver(v);
+      if (!id) warnings.push(`${label} "${v}" not found — left unset`);
+      return id;
+    };
+    // Staff names live in employee_biodata, so match a manager by id, email,
+    // or full name (getEmployeeName) — not the top-level firstname/lastname
+    // fields that don't exist on the row.
+    const resolveManager = (raw) => {
+      const v = raw == null ? "" : String(raw).trim();
+      if (!v) return "";
+      const needle = v.toLowerCase();
+      const found = allStaff.find(
+        (u) =>
+          u.id === v ||
+          String(u.email || "").toLowerCase() === needle ||
+          getEmployeeName(u, "").toLowerCase() === needle
+      );
+      if (!found) warnings.push(`Manager "${v}" not found — left unset`);
+      return found?.id || "";
+    };
 
-      if (Object.keys(details).length) {
-        await api.put(`/api/users/${userId}`, details);
-      }
+    let baseSalary = "";
+    const rawSalary = baseSalaryRaw == null ? "" : String(baseSalaryRaw).trim();
+    if (rawSalary) {
+      baseSalary = toNumber(rawSalary);
+      if (baseSalary === "") warnings.push(`Base salary "${rawSalary}" isn't a valid number — left unset`);
+    }
+
+    const details = pruneEmpty({
+      phone: (getValueByAliases(record, ["phone", "phone_number"]) || "").trim(),
+      department_id: resolveWithWarn(dept, (v) => resolveByNameCodeOrId(allDepartments, v, ["id", "name", "code"]), "Department"),
+      job_role_id: resolveWithWarn(role, (v) => resolveByNameCodeOrId(allJobRoles, v, ["id", "title", "code"]), "Job title"),
+      manager_id: resolveManager(manager),
+      pay_grade: resolveWithWarn(payGrade, (v) => resolvePayGradeId(v, allPayGrades), "Pay grade"),
+      pay_group: resolveWithWarn(payGroup, (v) => resolvePayGroupId(v, allPayGroups), "Pay group"),
+      base_salary: baseSalary,
+      employment_status: (getValueByAliases(record, ["employment_status", "status"]) || "probation").trim(),
+      contract_type: contractType,
+    });
+
+    if (Object.keys(details).length) {
+      await api.put(`/api/users/${userId}`, details);
     }
 
     try {
@@ -490,6 +543,8 @@ const DirectoryPage = () => {
     } catch (inviteErr) {
       console.error("[BulkUpload] Invite email failed:", inviteErr);
     }
+
+    return { warnings };
   };
 
   const buildSetupPayloadFromRecord = (record) => {
@@ -529,31 +584,55 @@ const DirectoryPage = () => {
     }
 
     const failures = [];
+    const warnings = [];
     let successCount = 0;
+
+    // CSV data starts on file line 2 (line 1 is the header); a JSON array has
+    // no header, so record N is simply index N+1. Label each accordingly.
+    const isCsv = /\.csv$/i.test(file?.name || "");
+    const label = (index) => (isCsv ? `row ${index + 2}` : `record ${index + 1}`);
 
     for (let index = 0; index < records.length; index += 1) {
       const row = records[index];
       try {
         if (tab === "Employees") {
-          await registerAndPopulateEmployee(row);
+          const result = await registerAndPopulateEmployee(row);
+          if (result?.warnings?.length) warnings.push({ where: label(index), messages: result.warnings });
         } else {
           const payload = buildSetupPayloadFromRecord(row);
           await activeSetup.create(payload);
         }
         successCount += 1;
       } catch (err) {
-        failures.push({ row: index + 2, message: err?.message || "Unknown error" });
+        failures.push({ where: label(index), message: err?.message || "Unknown error" });
       }
     }
 
     refreshAll();
-    if (failures.length === 0) {
+
+    // Full detail to the console for large imports; the toast carries counts
+    // and a short preview so nothing is silently dropped.
+    if (warnings.length) {
+      console.warn("[BulkUpload] Rows imported with unset fields:",
+        warnings.map((w) => `${w.where}: ${w.messages.join("; ")}`));
+    }
+
+    if (failures.length === 0 && warnings.length === 0) {
       toast.success(`Bulk upload complete: ${successCount} ${tab.toLowerCase()} record(s) created.`);
       return;
     }
 
-    const preview = failures.slice(0, 3).map((f) => `row ${f.row}: ${f.message}`).join(" | ");
-    toast.error(`Imported ${successCount}/${records.length}. Failed rows: ${failures.length}${preview ? ` (${preview})` : ""}`);
+    const bits = [`Imported ${successCount}/${records.length}.`];
+    if (failures.length) {
+      const failPreview = failures.slice(0, 2).map((f) => `${f.where}: ${f.message}`).join(" | ");
+      bits.push(`${failures.length} failed${failPreview ? ` (${failPreview})` : ""}.`);
+    }
+    if (warnings.length) {
+      const warnPreview = warnings.slice(0, 2).map((w) => `${w.where}: ${w.messages.join("; ")}`).join(" | ");
+      bits.push(`${warnings.length} imported with unset fields${warnPreview ? ` (${warnPreview})` : ""} — see console.`);
+    }
+    const msg = bits.join(" ");
+    if (failures.length) toast.error(msg); else toast.info(msg);
   };
 
   useEffect(() => {
@@ -565,7 +644,7 @@ const DirectoryPage = () => {
           setupService.getBenefitLevels(),
           setupService.getJobRoles(),
           setupService.getPayGroups(),
-          api.get("/api/users/?limit=100"),
+          orgService.listAllUsers(),
         ]);
         setAllDepartments(depts || []);
         setAllPayGrades(grades || []);
@@ -588,26 +667,24 @@ const DirectoryPage = () => {
       setLoading(true);
       try {
         if (tab === "Employees") {
-          const url = employeeSearch
-            ? `/api/users/?page=1&limit=100`
-            : `/api/users/?page=${page}&limit=${PAGE_SIZE}`;
-          const res = await api.get(url);
-          if (stale) return;
-          if (Array.isArray(res)) {
-            setListData(res);
+          if (employeeSearch) {
+            // Client-side search needs the whole roster — the API has no
+            // server-side search parameter.
+            const all = await orgService.listAllUsers();
+            if (stale) return;
+            setListData(all);
             setPagination(null);
-            setSearchCapped(false);
           } else {
-            setListData(res.users || []);
-            setPagination(employeeSearch ? null : res.pagination || null);
-            setSearchCapped(!!employeeSearch && (res.pagination?.total || 0) > 100);
+            const res = await api.get(`/api/users/?page=${page}&limit=${PAGE_SIZE}`);
+            if (stale) return;
+            setListData(Array.isArray(res) ? res : res.users || []);
+            setPagination(Array.isArray(res) ? null : res.pagination || null);
           }
         } else {
           const res = await SETUPS[tab].list();
           if (stale) return;
           setListData(res || []);
           setPagination(null);
-          setSearchCapped(false);
         }
       } catch (err) {
         console.error("Error retrieving directory data:", err);
@@ -881,12 +958,6 @@ const DirectoryPage = () => {
           )}
         </div>
 
-        {tab === "Employees" && searchCapped && (
-          <div className="border-t border-line-soft p-3 text-center text-xs text-amber-700 bg-amber-50/60">
-            Search covers the first 100 employees — refine the search if who you’re looking for isn’t shown.
-          </div>
-        )}
-
         {tab === "Employees" && pagination && totalPages > 1 && (
           <div className="flex items-center justify-between gap-3 border-t border-line-soft p-4">
             <span className="text-xs text-ink-muted">
@@ -950,7 +1021,7 @@ const DirectoryPage = () => {
             onSubmit={async (data) => {
               const email = data.email.trim();
               try {
-                await api.post("/api/auth/register", {
+                const reg = await api.post("/api/auth/register", {
                   firstName: data.firstName.trim(),
                   lastName: data.lastName.trim(),
                   email,
@@ -958,14 +1029,10 @@ const DirectoryPage = () => {
                   contract: data.contract_type || "permanent",
                 });
 
-                let newId = null;
-                try {
-                  const res = await api.get(`/api/users/?page=1&limit=100`);
-                  const list = Array.isArray(res) ? res : res?.users || [];
-                  newId = list.find((u) => (u.email || "").toLowerCase() === email.toLowerCase())?.id || null;
-                } catch (lookupErr) {
+                const newId = await findNewEmployeeId(email, reg).catch((lookupErr) => {
                   console.error("[DirectoryPage] New-employee lookup failed:", lookupErr);
-                }
+                  return null;
+                });
 
                 if (newId) {
                   try {

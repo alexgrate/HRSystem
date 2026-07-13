@@ -1,7 +1,6 @@
-import api from './api';
+import api, { unwrapList as unwrapListBy } from './api';
 
-const unwrapList = (res) =>
-  Array.isArray(res) ? res : res?.requests || res?.items || res?.data || [];
+const unwrapList = (res) => unwrapListBy(res, ['requests', 'documents']);
 
 export const approvalService = {
 
