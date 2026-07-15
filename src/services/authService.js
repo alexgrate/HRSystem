@@ -1,5 +1,9 @@
 import api from './api';
 
+
+export const isSessionConflict = (err) =>
+  err?.httpStatus === 409 && typeof err?.token === 'string' && err.token.length > 0;
+
 export const authService = {
   requestPasswordReset: (email) =>
     api.post('/api/auth/forgot-password', { email }),

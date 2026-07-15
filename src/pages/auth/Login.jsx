@@ -3,10 +3,13 @@ import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight, Mail, Lock, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { useConfirm } from "../../components/ui/Notifications";
+import { isSessionConflict } from "../../services/authService";
 import logoImg from "../../assets/dashIcon.jpg"
 
 const Login = () => {
-  const { login } = useAuth();
+  const { login, forceLogin } = useAuth();
+  const confirm = useConfirm();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -25,6 +28,31 @@ const Login = () => {
     el.style.setProperty("--spot-y", `${e.clientY - r.top}px`);
   };
 
+  const messageOf = (err) =>
+    err?.error?.message || err?.message || "Invalid email credentials or password.";
+
+  // The account already has a live session in another browser. Ask before
+  // evicting it; on consent, sign that session out server-side and retry.
+  const takeOverSession = async (conflict) => {
+    const ok = await confirm({
+      title: "Already signed in elsewhere",
+      message:
+        "This account has an active session in another browser or device. Sign out that session and continue here?",
+      confirmLabel: "Sign out & continue",
+    });
+    if (!ok) return;
+    try {
+      await forceLogin(email, password, remember, conflict);
+      navigate("/app");
+    } catch (err) {
+      setError(
+        isSessionConflict(err)
+          ? "The other session could not be signed out. Please try again."
+          : messageOf(err)
+      );
+    }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setError("");
@@ -33,7 +61,11 @@ const Login = () => {
       await login(email, password, remember);
       navigate("/app");
     } catch (err) {
-      setError(err?.error?.message || err?.message || "Invalid email credentials or password.");
+      if (isSessionConflict(err)) {
+        await takeOverSession(err);
+      } else {
+        setError(messageOf(err));
+      }
     } finally {
       setSubmitting(false);
     }
