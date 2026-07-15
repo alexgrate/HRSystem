@@ -81,6 +81,50 @@ export function NotificationProvider({ children }) {
     }
   };
 
+  // While a confirm is open, behave like a real modal: move focus into the
+  // dialog (and back where it was on close), keep Tab cycling inside it, and
+  // let Escape answer "no" — the form behind the overlay must not keep
+  // receiving keystrokes (e.g. the login form during a session takeover).
+  const panelRef = useRef(null);
+  const cancelBtnRef = useRef(null);
+  const restoreFocusRef = useRef(null);
+  useEffect(() => {
+    if (!confirmState) return;
+    restoreFocusRef.current = document.activeElement;
+    cancelBtnRef.current?.focus();
+
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        closeConfirm(false);
+        return;
+      }
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const focusables = panelRef.current.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (!panelRef.current.contains(document.activeElement)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      restoreFocusRef.current?.focus?.();
+    };
+  }, [confirmState]);
+
   return (
     <ToastCtx.Provider value={toast}>
       <ConfirmCtx.Provider value={confirm}>
@@ -128,6 +172,11 @@ export function NotificationProvider({ children }) {
                   onClick={() => closeConfirm(false)}
                 >
                   <motion.div
+                    ref={panelRef}
+                    role="alertdialog"
+                    aria-modal="true"
+                    aria-labelledby="confirm-dialog-title"
+                    aria-describedby={confirmState.message ? "confirm-dialog-message" : undefined}
                     initial={{ opacity: 0, scale: 0.96, y: 8 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.96, y: 8 }}
@@ -140,12 +189,12 @@ export function NotificationProvider({ children }) {
                         <AlertTriangle className="h-5 w-5" />
                       </div>
                       <div className="min-w-0">
-                        <h3 className="text-base font-bold text-ink">{confirmState.title}</h3>
-                        {confirmState.message && <p className="mt-1 text-sm text-ink-muted">{confirmState.message}</p>}
+                        <h3 id="confirm-dialog-title" className="text-base font-bold text-ink">{confirmState.title}</h3>
+                        {confirmState.message && <p id="confirm-dialog-message" className="mt-1 text-sm text-ink-muted">{confirmState.message}</p>}
                       </div>
                     </div>
                     <div className="mt-6 flex justify-end gap-2">
-                      <button onClick={() => closeConfirm(false)} className="h-10 rounded-xl border border-line px-4 text-sm font-semibold text-ink-muted hover:bg-sunken">
+                      <button ref={cancelBtnRef} onClick={() => closeConfirm(false)} className="h-10 rounded-xl border border-line px-4 text-sm font-semibold text-ink-muted hover:bg-sunken">
                         {confirmState.cancelLabel}
                       </button>
                       <button
