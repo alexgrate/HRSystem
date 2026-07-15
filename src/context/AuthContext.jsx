@@ -71,18 +71,16 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Single-session takeover: `login` rejected with a 409 conflict carrying a
-  // handoff token for the session that's already active elsewhere. Sign that
-  // session out with it, then run the normal login again. A failed logout is
-  // not fatal — if the other session ended in the meantime the backend answers
-  // "User doesn't have an active session." and the retry just succeeds; any
-  // other failure resurfaces as a fresh 409 on the retry for the caller.
+  // short-lived revoke token for the sessions already active elsewhere. Spend
+  // it on logout-all (revoking with no sessions left still succeeds), then run
+  // the normal login again. A failed revoke (e.g. the 15-minute token expired)
+  // is not fatal here — it resurfaces as a fresh 409 on the retry, and
+  // resubmitting the form mints a new revoke token.
   const forceLogin = async (email, password, remember = true, conflict) => {
     try {
-      await api.post('/api/auth/logout', {}, {
-        headers: { Authorization: `Bearer ${conflict?.token}` },
-      });
+      await api.post('/api/auth/logout-all', { token: conflict?.token });
     } catch (err) {
-      console.warn('[AuthContext] Takeover logout failed:', err?.message || err);
+      console.warn('[AuthContext] Session revoke failed:', err?.message || err);
     }
     return login(email, password, remember);
   };

@@ -6,7 +6,6 @@ import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { setupService } from "../../services/setupService";
 import { orgService } from "../../services/orgService";
-import { authService } from "../../services/authService";
 import { getEmployeeName } from "../../utils/employee";
 import { getValueByAliases, parseBulkFile, parseDocList, toBoolean, toCsv, toNumber } from "../../utils/bulkUpload";
 import api from "../../services/api";
@@ -62,8 +61,26 @@ const findNewEmployeeId = async (email, registerResponse) => {
   );
 };
 
-const activationLinkFor = (email) =>
-  `${window.location.origin}/forgot-password?mode=activate&email=${encodeURIComponent(email)}`;
+// POST /api/auth/register restricts `contract` to this enum, but CSV files use
+// looser labels ("Full-Time", "Contract") — normalize and map synonyms rather
+// than let AJV 400 the whole row.
+const CONTRACT_TYPES = ["permanent", "part_time", "fixed_term", "temporary", "intern", "contractor"];
+const CONTRACT_SYNONYMS = {
+  full_time: "permanent",
+  fulltime: "permanent",
+  perm: "permanent",
+  contract: "contractor",
+  temp: "temporary",
+  internship: "intern",
+};
+const resolveContractType = (raw) => {
+  const v = String(raw ?? "").trim();
+  if (!v) return { value: "permanent", warning: null };
+  const normalized = v.toLowerCase().replace(/[\s-]+/g, "_");
+  const mapped = CONTRACT_TYPES.includes(normalized) ? normalized : CONTRACT_SYNONYMS[normalized];
+  if (mapped) return { value: mapped, warning: null };
+  return { value: "permanent", warning: `Contract type "${v}" not recognized — defaulted to permanent` };
+};
 
 const BULK_SETUP_ALIASES = {
   Offices: { headquarter: ["headquarter", "is_headquarter", "hq"] },
@@ -463,8 +480,17 @@ const DirectoryPage = () => {
     if (!firstName || !lastName || !email) {
       throw new Error("first_name, last_name and email are required.");
     }
+    // register enforces 2-50 char names — fail early with a readable message
+    // instead of the raw AJV error after the account call.
+    if (firstName.length < 2 || firstName.length > 50) {
+      throw new Error("First name must be 2-50 characters.");
+    }
+    if (lastName.length < 2 || lastName.length > 50) {
+      throw new Error("Last name must be 2-50 characters.");
+    }
 
-    const contractType = (getValueByAliases(record, ["contract_type", "contract"]) || "permanent").trim() || "permanent";
+    const contract = resolveContractType(getValueByAliases(record, ["contract_type", "contract"]));
+    const contractType = contract.value;
     const reg = await api.post("/api/auth/register", {
       firstName,
       lastName,
@@ -491,6 +517,7 @@ const DirectoryPage = () => {
     // Collect a warning for any value that was PROVIDED but couldn't be
     // resolved, so the import never silently drops a column the admin filled in.
     const warnings = [];
+    if (contract.warning) warnings.push(contract.warning);
     const resolveWithWarn = (raw, resolver, label) => {
       const v = raw == null ? "" : String(raw).trim();
       if (!v) return "";
@@ -539,9 +566,9 @@ const DirectoryPage = () => {
     }
 
     try {
-      await authService.requestPasswordReset(email);
+      await orgService.sendOnboardingLink(email);
     } catch (inviteErr) {
-      console.error("[BulkUpload] Invite email failed:", inviteErr);
+      console.error("[BulkUpload] Onboarding email failed:", inviteErr);
     }
 
     return { warnings };
@@ -758,21 +785,22 @@ const DirectoryPage = () => {
 
   const handleSendInvite = async (item) => {
     const ok = await confirm({
-      title: `Send password setup email to ${empName(item)}?`,
-      message: `A setup code will be emailed to ${item.email}. They enter it on the activation page to choose their password.`,
+      title: `Send onboarding email to ${empName(item)}?`,
+      message: `An onboarding link will be emailed to ${item.email}. They open it to set their password (the link works once and expires in 48 hours).`,
       confirmLabel: "Send email",
     });
     if (!ok) return;
     try {
-      await authService.requestPasswordReset(item.email);
+      const res = await orgService.sendOnboardingLink(item.email);
       try {
-        await navigator.clipboard.writeText(activationLinkFor(item.email));
-        toast.success("Setup email sent — the activation link was also copied to your clipboard to share.");
+        if (!res?.onboarding_url) throw new Error("no link returned");
+        await navigator.clipboard.writeText(res.onboarding_url);
+        toast.success("Onboarding email sent — the link was also copied to your clipboard to share.");
       } catch {
-        toast.success("Setup email sent.");
+        toast.success("Onboarding email sent.");
       }
     } catch (err) {
-      toast.error(err?.message || "Couldn’t send the setup email.");
+      toast.error(err?.message || "Couldn’t send the onboarding email.");
     }
   };
 
@@ -911,7 +939,7 @@ const DirectoryPage = () => {
                               <button onClick={() => setSelectedEmployee(item)} className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken hover:text-brand" title="Edit">
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
-                              <button onClick={() => handleSendInvite(item)} className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken hover:text-brand" title="Send password setup email">
+                              <button onClick={() => handleSendInvite(item)} className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken hover:text-brand" title="Send onboarding email">
                                 <Mail className="h-3.5 w-3.5" />
                               </button>
                               <button
@@ -1055,11 +1083,11 @@ const DirectoryPage = () => {
                   toast.info("Account created, but the profile details couldn’t be attached automatically — open the row to finish.");
                 }
                 try {
-                  await authService.requestPasswordReset(email);
-                  toast.success(`Employee onboarded — a password setup email is on its way to ${email}.`);
+                  await orgService.sendOnboardingLink(email);
+                  toast.success(`Employee onboarded — an onboarding link is on its way to ${email}.`);
                 } catch (mailErr) {
-                  console.error("[DirectoryPage] Invite email failed:", mailErr);
-                  toast.info("Employee created, but the setup email didn’t send — use the mail icon on their row to resend it.");
+                  console.error("[DirectoryPage] Onboarding email failed:", mailErr);
+                  toast.info("Employee created, but the onboarding email didn’t send — use the mail icon on their row to resend it.");
                 }
 
                 setShowAddEmployee(false);
@@ -1516,8 +1544,14 @@ function AddEmployeeDrawer({ departments = [], jobRoles = [], payGrades = [], pa
 
   const validate = () => {
     const next = {};
-    if (!form.firstName.trim()) next.firstName = "Required";
-    if (!form.lastName.trim()) next.lastName = "Required";
+    // register enforces 2-50 char names — mirror it here so a bad name fails
+    // with a friendly message before the API call.
+    const firstName = form.firstName.trim();
+    const lastName = form.lastName.trim();
+    if (!firstName) next.firstName = "First name is required";
+    else if (firstName.length < 2 || firstName.length > 50) next.firstName = "First name must be 2-50 characters";
+    if (!lastName) next.lastName = "Last name is required";
+    else if (lastName.length < 2 || lastName.length > 50) next.lastName = "Last name must be 2-50 characters";
     if (!form.email.trim() || !/^\S+@\S+\.\S+$/.test(form.email)) next.email = "Enter a valid email address";
     if (form.baseSalary !== "" && Number(form.baseSalary) < 0) next.baseSalary = "Salary can't be negative";
     return next;
@@ -1562,7 +1596,7 @@ function AddEmployeeDrawer({ departments = [], jobRoles = [], payGrades = [], pa
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
                 <div>
                   <div className="font-semibold">Please check the form</div>
-                  <div className="text-xs text-red-700/80">First name, last name and a valid email are required.</div>
+                  <div className="text-xs text-red-700/80">{Object.values(errors).join(" · ")}</div>
                 </div>
               </div>
             )}

@@ -6,6 +6,7 @@ import {
   GitBranch,
   Wallet,
   CalendarDays,
+  HandCoins,
   ShieldCheck,
   Building2,
   Inbox,
@@ -27,6 +28,7 @@ const PayrollPage = lazy(() => import("../pages/admin/PayrollPage"));
 const DashboardPage = lazy(() => import("../pages/DashboardPage"));
 const AuditTrailPage = lazy(() => import("../pages/admin/AuditTrailPage"));
 const LeaveAdminPage = lazy(() => import("../pages/admin/LeaveAdminPage"));
+const LoanAdminPage = lazy(() => import("../pages/admin/LoanAdminPage"));
 
 import { RESOURCE_CODES } from "./resourceCodes";
 export { RESOURCE_CODES };
@@ -165,6 +167,15 @@ export const RESOURCES = [
     // employee can read and would make this appear for the whole company.
     checks: checksFromRoutes(["/approvals/leave-requests"]),
     component: LeaveAdminPage,
+  },
+  {
+    key: "loans",
+    label: "Loans",
+    segment: "loans",
+    Icon: HandCoins,
+    resource: RESOURCE_CODES.LOANS,
+    action: "read",
+    component: LoanAdminPage,
   },
   {
     key: "settings",

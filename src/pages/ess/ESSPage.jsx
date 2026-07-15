@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, FileText, Upload } from "lucide-react";
+import { X, FileText, Upload, Banknote, AlertCircle } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { useConfig } from "../../context/ConfigContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { setupService } from "../../services/setupService";
 import { approvalService } from "../../services/approvalService";
 import { leaveService } from "../../services/leaveService";
 import { payrollService } from "../../services/payrollService";
+import { loanService, computeLoanTerms, addMonthsISO } from "../../services/loanService";
 import { orgService } from "../../services/orgService";
 import { getEmployeeName, getInitials } from "../../utils/employee";
 import { inclusiveDays } from "../../utils/leave";
@@ -55,6 +57,12 @@ const ESSPage = () => {
     const [leaveTick, setLeaveTick] = useState(0);
     const [profileTick, setProfileTick] = useState(0);
 
+    // Loans mirror the leave flow: modal state holds the active loan-type
+    // catalog (loaded by the tracker) so the modal never re-fetches it.
+    const [loanModalOpen, setLoanModalOpen] = useState(null);
+    const [activeLoanSchedule, setActiveLoanSchedule] = useState(null);
+    const [loanTick, setLoanTick] = useState(0);
+
     const bio = user?.employee_biodata || user?.biodata || {};
     const firstName = bio.firstname || "";
     const { department: departmentName, jobTitle, jobRoles } = useOrgNames(user);
@@ -81,6 +89,7 @@ const ESSPage = () => {
                     { key: "profile", label: "Profile" },
                     { key: "leave", label: "Leave" },
                     { key: "payslips", label: "Payslips" },
+                    { key: "loans", label: "Loans" },
                     { key: "docs", label: "Documents" },
                     { key: "team", label: "My Team" },
                 ]}
@@ -94,6 +103,14 @@ const ESSPage = () => {
             )}
             {tab === "leave" && <LeaveTracker onRequestLeave={setActiveLeaveRequest} refreshKey={leaveTick} />}
             {tab === "payslips" && <Payslips onOpen={(run) => setDrawer(run)} />}
+            {tab === "loans" && (
+                <LoansTracker
+                    refreshKey={loanTick}
+                    onRequestLoan={setLoanModalOpen}
+                    onOpenSchedule={setActiveLoanSchedule}
+                    onChanged={() => setLoanTick((t) => t + 1)}
+                />
+            )}
             {tab === "docs" && <DocsUpload />}
             {tab === "team" && (
                 <TeamDirectory
@@ -112,6 +129,20 @@ const ESSPage = () => {
                         existingRequests={activeLeaveRequest.requests}
                         onClose={() => setActiveLeaveRequest(null)}
                         onSubmitted={() => setLeaveTick((t) => t + 1)}
+                    />
+                )}
+                {loanModalOpen && (
+                    <LoanRequestModal
+                        loanTypes={loanModalOpen}
+                        onClose={() => setLoanModalOpen(null)}
+                        onSubmitted={() => setLoanTick((t) => t + 1)}
+                    />
+                )}
+                {activeLoanSchedule && (
+                    <LoanScheduleDrawer
+                        loan={activeLoanSchedule.loan}
+                        typeName={activeLoanSchedule.typeName}
+                        onClose={() => setActiveLoanSchedule(null)}
                     />
                 )}
             </AnimatePresence>
@@ -651,6 +682,628 @@ function LeaveRequestModal({ leaveType, remaining = null, existingRequests = [],
   );
 }
 
+// Loan-specific chip colors (statuses the shared statusBadgeCls can't tell
+// apart): 'active' is a healthy in-flight state, not a warning, and 'repaid'
+// is a stronger success than 'approved'. 'defaulted' is mapped defensively —
+// no backend code path ever sets it today.
+const LOAN_STATUS_META = {
+    draft: { label: "Draft", cls: "bg-sunken text-ink-muted" },
+    pending_approval: { label: "Pending approval", cls: "bg-amber-50 text-amber-700" },
+    approved: { label: "Approved", cls: "bg-emerald-50 text-emerald-700" },
+    active: { label: "Active", cls: "bg-sky-50 text-sky-700" },
+    repaid: { label: "Repaid", cls: "bg-emerald-600 text-white" },
+    rejected: { label: "Rejected", cls: "bg-red-50 text-red-700" },
+    cancelled: { label: "Cancelled", cls: "bg-sunken text-ink-muted" },
+    defaulted: { label: "Defaulted", cls: "bg-red-50 text-red-700" },
+};
+
+const loanStatusMeta = (status) =>
+    LOAN_STATUS_META[String(status || "").toLowerCase()] || {
+        label: String(status || "unknown").replace(/_/g, " "),
+        cls: "bg-sunken text-ink-muted",
+    };
+
+const LOAN_CHIP_CLS = "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider";
+
+const scheduleChipCls = (s) => {
+    if (s === "paid") return "bg-emerald-50 text-emerald-700";
+    if (s === "overdue") return "bg-red-50 text-red-700";
+    return "bg-sunken text-ink-muted";
+};
+
+// Local calendar date, not toISOString() — that returns the UTC date, which
+// is yesterday/tomorrow for users west/east of Greenwich around midnight.
+const localTodayISO = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// Statuses past approval — a repayment schedule exists for these.
+const LOAN_SCHEDULE_STATUSES = ["approved", "active", "repaid", "defaulted"];
+
+function LoanRow({ loan, typeName, currency, busy, onSchedule, onRemind, onCancel, dim = false }) {
+    const status = String(loan.status || "").toLowerCase();
+    const meta = loanStatusMeta(status);
+    const pending = status === "pending_approval";
+    const tenure = Math.trunc(Number(loan.tenure_month)) || 0;
+    return (
+        <li className={`flex flex-wrap items-center justify-between gap-3 py-3 ${dim ? "opacity-70" : ""}`}>
+            <div className="min-w-0">
+                <div className="text-sm font-semibold text-ink">
+                    {typeName}
+                    <span className="ml-2 text-xs font-normal text-ink-muted">
+                        {fmtMoney(loan.amount, currency)} · {tenure} month{tenure === 1 ? "" : "s"}
+                        {loan.created_at && <> · requested {String(loan.created_at).slice(0, 10)}</>}
+                    </span>
+                </div>
+                {loan.reason && <div className="truncate text-xs text-ink-faint">“{loan.reason}”</div>}
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {LOAN_SCHEDULE_STATUSES.includes(status) && (
+                    <button
+                        onClick={onSchedule}
+                        className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-brand hover:bg-sunken"
+                    >
+                        View schedule
+                    </button>
+                )}
+                {pending && (
+                    <>
+                        <button
+                            disabled={busy}
+                            onClick={onRemind}
+                            className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-muted hover:bg-sunken disabled:opacity-60"
+                        >
+                            Remind
+                        </button>
+                        <button
+                            disabled={busy}
+                            onClick={onCancel}
+                            className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                        >
+                            Cancel
+                        </button>
+                    </>
+                )}
+                <span className={`${LOAN_CHIP_CLS} ${meta.cls}`}>{meta.label}</span>
+            </div>
+        </li>
+    );
+}
+
+function LoansTracker({ onRequestLoan, onOpenSchedule, onChanged, refreshKey = 0 }) {
+    const toast = useToast();
+    const confirm = useConfirm();
+    const { config } = useConfig();
+    const currency = config?.currency || "NGN";
+
+    const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
+    const [loans, setLoans] = useState([]);
+    const [loanTypes, setLoanTypes] = useState([]);
+    const [busyId, setBusyId] = useState(null);
+
+    useEffect(() => {
+        let mounted = true;
+        const fetchLoans = async () => {
+            setLoading(true);
+            try {
+                const [mine, types] = await Promise.all([
+                    loanService.listMine(),
+                    loanService.listLoanTypes("active"),
+                ]);
+                if (!mounted) return;
+                setLoans(Array.isArray(mine) ? mine : []);
+                setLoanTypes(Array.isArray(types) ? types : []);
+                setFailed(false);
+            } catch (err) {
+                console.error("[Loans] Error loading loans:", err);
+                if (mounted) setFailed(true);
+            } finally {
+                if (mounted) setLoading(false);
+            }
+        };
+        fetchLoans();
+        return () => { mounted = false; };
+    }, [refreshKey]);
+
+    // Only active loan products are listed, so a loan against a retired
+    // product falls back to a generic label rather than an empty string.
+    const typeNameOf = (loan) => loanTypes.find((t) => t.id === loan.loan_type_id)?.name || "Loan";
+
+    // Money owed is still owed — approved and active both count as open.
+    // Terminal negatives (cancelled/rejected) drop to the de-emphasized
+    // "Past requests" list; the API keeps soft-cancelled rows in the list.
+    const statusOf = (l) => String(l.status || "").toLowerCase();
+    const openLoans = loans.filter((l) => ["approved", "active"].includes(statusOf(l)));
+    const pastLoans = loans.filter((l) => ["cancelled", "rejected"].includes(statusOf(l)));
+    const currentLoans = loans.filter((l) => !["cancelled", "rejected"].includes(statusOf(l)));
+
+    const openSchedule = (loan) => onOpenSchedule({ loan, typeName: typeNameOf(loan) });
+
+    const handleRemind = async (loan) => {
+        if (busyId) return;
+        setBusyId(loan.id);
+        try {
+            await loanService.remind(loan.id);
+            toast.success("Reminder sent to your approvers.");
+        } catch (err) {
+            console.error("[Loans] Reminder failed:", err);
+            toast.error(err?.error?.message || err?.message || "Couldn't send the reminder.");
+        } finally {
+            setBusyId(null);
+        }
+    };
+
+    const handleCancel = async (loan) => {
+        if (busyId) return;
+        const ok = await confirm({
+            title: "Cancel this loan request?",
+            message: `Your ${typeNameOf(loan)} request for ${fmtMoney(loan.amount, currency)} will be withdrawn from approval. This can't be undone.`,
+            confirmLabel: "Cancel request",
+            danger: true,
+        });
+        if (!ok) return;
+        setBusyId(loan.id);
+        try {
+            await loanService.cancel(loan.id);
+            toast.success("Loan request cancelled.");
+            onChanged?.();
+        } catch (err) {
+            console.error("[Loans] Cancel failed:", err);
+            toast.error(err?.error?.message || err?.message || "Couldn't cancel the loan request.");
+        } finally {
+            setBusyId(null);
+        }
+    };
+
+    if (loading) {
+        return <div className="p-8 text-center text-ink-muted bg-card border rounded-2xl">Retrieving your loans...</div>;
+    }
+    if (failed) {
+        return (
+            <div className="p-8 text-center text-ink-faint bg-card border border-dashed rounded-2xl">
+                Your loans couldn’t be loaded right now. Please try again shortly.
+            </div>
+        );
+    }
+    if (loans.length === 0) {
+        return (
+            <div className="p-12 text-center border border-dashed border-line rounded-2xl bg-card">
+                <Banknote className="mx-auto h-12 w-12 text-ink-ghost" />
+                <h4 className="mt-4 font-semibold text-ink">No loans yet</h4>
+                <p className="mt-1 text-sm text-ink-muted">
+                    {loanTypes.length
+                        ? "Request a staff loan and repay it in monthly installments."
+                        : "Loan requests open up once HR configures at least one active loan product."}
+                </p>
+                <button
+                    onClick={() => onRequestLoan(loanTypes)}
+                    disabled={!loanTypes.length}
+                    className="mt-4 rounded-xl bg-brand text-white px-4 py-2 text-xs font-semibold shadow-sm disabled:opacity-60"
+                >
+                    Request a loan
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            {openLoans.length > 0 && (
+                <div className="grid gap-6 lg:grid-cols-3">
+                    {openLoans.map((loan) => {
+                        // Strings from the API — Number() before any math.
+                        const total = Number(loan.total_repayable) || 0;
+                        const repaid = Number(loan.amount_repaid) || 0;
+                        const outstanding = Math.max(0, total - repaid);
+                        const pct = total > 0 ? Math.min(1, repaid / total) : 0;
+                        const C = 2 * Math.PI * 42;
+                        const meta = loanStatusMeta(loan.status);
+                        return (
+                            <motion.div key={loan.id} whileHover={{ y: -4 }} className="rounded-2xl border border-line/80 bg-card p-6 text-center shadow-sm">
+                                <div className="relative mx-auto h-32 w-32">
+                                    <svg viewBox="0 0 100 100" className="-rotate-90">
+                                        <circle cx="50" cy="50" r="42" stroke="#f1f5f9" strokeWidth="10" fill="none" />
+                                        <motion.circle cx="50" cy="50" r="42" stroke="var(--brand-primary)" strokeWidth="10" fill="none" strokeLinecap="round"
+                                            strokeDasharray={C}
+                                            initial={{ strokeDashoffset: C }}
+                                            animate={{ strokeDashoffset: C * (1 - pct) }}
+                                            transition={{ duration: 1, ease: "easeOut" }}
+                                        />
+                                    </svg>
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                        <div className="text-2xl font-bold text-ink">{Math.round(pct * 100)}%</div>
+                                        <div className="text-[10px] uppercase text-ink-muted">repaid</div>
+                                    </div>
+                                </div>
+                                <div className="mt-4 font-semibold text-ink capitalize">{typeNameOf(loan)}</div>
+                                <div className="mt-1 text-xs text-ink-muted">
+                                    <span className="font-semibold text-ink-2">{fmtMoney(outstanding, currency)}</span> outstanding
+                                    {" · "}{fmtMoney(loan.monthly_installment, currency)}/month
+                                </div>
+                                <div className="mt-3 flex items-center justify-center gap-3">
+                                    <span className={`${LOAN_CHIP_CLS} ${meta.cls}`}>{meta.label}</span>
+                                    <button onClick={() => openSchedule(loan)} className="text-xs font-semibold text-brand">
+                                        View schedule →
+                                    </button>
+                                </div>
+                            </motion.div>
+                        );
+                    })}
+                </div>
+            )}
+
+            <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
+                <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                        <h4 className="font-semibold text-ink">My loan requests</h4>
+                        <p className="text-xs text-ink-muted">Every loan you’ve requested, with its current status.</p>
+                    </div>
+                    <button
+                        onClick={() => onRequestLoan(loanTypes)}
+                        disabled={!loanTypes.length}
+                        title={loanTypes.length ? undefined : "No active loan products are configured yet — contact HR."}
+                        className="rounded-xl bg-brand text-white px-4 py-2 text-xs font-semibold shadow-sm disabled:opacity-60"
+                    >
+                        Request a loan
+                    </button>
+                </div>
+                {!loanTypes.length && (
+                    <p className="mb-3 text-xs text-ink-faint">
+                        New loan requests are unavailable until HR configures at least one active loan product.
+                    </p>
+                )}
+                {currentLoans.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-ink-faint border border-dashed border-line rounded-xl">
+                        No open loan requests.
+                    </div>
+                ) : (
+                    <ul className="divide-y divide-line-soft">
+                        {currentLoans.map((loan) => (
+                            <LoanRow
+                                key={loan.id}
+                                loan={loan}
+                                typeName={typeNameOf(loan)}
+                                currency={currency}
+                                busy={busyId === loan.id}
+                                onSchedule={() => openSchedule(loan)}
+                                onRemind={() => handleRemind(loan)}
+                                onCancel={() => handleCancel(loan)}
+                            />
+                        ))}
+                    </ul>
+                )}
+
+                {pastLoans.length > 0 && (
+                    <div className="mt-6 border-t border-line-soft pt-4">
+                        <h5 className="text-xs font-semibold uppercase tracking-wider text-ink-faint">Past requests</h5>
+                        <ul className="divide-y divide-line-soft">
+                            {pastLoans.map((loan) => (
+                                <LoanRow
+                                    key={loan.id}
+                                    loan={loan}
+                                    typeName={typeNameOf(loan)}
+                                    currency={currency}
+                                    dim
+                                />
+                            ))}
+                        </ul>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function LoanRequestModal({ loanTypes = [], onClose, onSubmitted }) {
+    const toast = useToast();
+    const { config } = useConfig();
+    const currency = config?.currency || "NGN";
+    const today = localTodayISO();
+
+    const [typeId, setTypeId] = useState(loanTypes[0]?.id || "");
+    const [amount, setAmount] = useState("");
+    const [tenure, setTenure] = useState("");
+    const [startDate, setStartDate] = useState(today);
+    const [reason, setReason] = useState("");
+    const [error, setError] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    const type = loanTypes.find((t) => t.id === typeId) || null;
+    const maxTenure = Math.trunc(Number(type?.repayment_period_months)) || null;
+    const ratePerAnnum = Number(type?.interest_per_annum) || 0;
+
+    const amountNum = Number(amount);
+    const tenureNum = Math.trunc(Number(tenure));
+    const amountValid = amount !== "" && amountNum > 0;
+    const tenureValid = tenure !== "" && tenureNum >= 1 && (!maxTenure || tenureNum <= maxTenure);
+
+    // Live preview mirroring the backend's own amortization — the backend
+    // stores these terms exactly as sent.
+    const terms = type && amountValid && tenureValid ? computeLoanTerms(amountNum, ratePerAnnum, tenureNum) : null;
+    const endDate = startDate && tenureValid ? addMonthsISO(startDate, tenureNum) : "";
+    const canSubmit = !!type && amountValid && tenureValid && !!startDate && !!reason.trim();
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (loading || !canSubmit) return;
+        setLoading(true);
+        setError("");
+        try {
+            await loanService.create({
+                loan_type_id: type.id,
+                amount: amountNum,
+                // The backend uses the loan type's rate regardless — send it
+                // so the stored row matches what the preview promised.
+                interest_rate: ratePerAnnum,
+                tenure_month: tenureNum,
+                monthly_installment: terms.installment,
+                total_repayable: terms.total,
+                reason: reason.trim(),
+                start_date: startDate,
+                end_date: endDate,
+            });
+            toast.success(`${type.name} request submitted for approval!`);
+            onSubmitted?.();
+            onClose();
+        } catch (err) {
+            console.error("[Loans] Loan submission failed:", err);
+            const msg = err?.error?.message || err?.message || "Error submitting loan request.";
+            setError(msg);
+            toast.error(msg);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
+                <div className="flex items-center justify-between border-b pb-3">
+                    <h3 className="text-lg font-bold text-ink">Request a loan</h3>
+                    <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken">
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+                    {error && (
+                        <div className="flex items-center gap-2.5 rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
+                            <AlertCircle className="h-4 w-4 shrink-0 text-red-600" /> <span>{error}</span>
+                        </div>
+                    )}
+                    <div>
+                        <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Loan type</label>
+                        <select
+                            value={typeId}
+                            onChange={(e) => setTypeId(e.target.value)}
+                            className="w-full h-11 border border-line rounded-xl px-3 outline-none mt-1 bg-transparent text-sm text-ink-2"
+                            required
+                        >
+                            <option value="" disabled>— Select a loan type —</option>
+                            {loanTypes.map((t) => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                        </select>
+                        {type && (
+                            <p className="mt-1 text-xs text-ink-muted">
+                                {ratePerAnnum}%/yr · max {maxTenure ?? "—"} months
+                                {type.description ? ` · ${type.description}` : ""}
+                            </p>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Amount</label>
+                            <input
+                                type="number"
+                                min="1"
+                                step="0.01"
+                                value={amount}
+                                onChange={(e) => setAmount(e.target.value)}
+                                placeholder="50000"
+                                className="w-full h-11 border border-line rounded-xl px-3 outline-none mt-1"
+                                required
+                            />
+                            {amount !== "" && !amountValid && (
+                                <p className="mt-1 text-xs font-semibold text-red-600">Enter an amount greater than 0.</p>
+                            )}
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Tenure (months)</label>
+                            <input
+                                type="number"
+                                min="1"
+                                max={maxTenure ?? undefined}
+                                step="1"
+                                value={tenure}
+                                onChange={(e) => setTenure(e.target.value)}
+                                placeholder={maxTenure ? `1–${maxTenure}` : "6"}
+                                className="w-full h-11 border border-line rounded-xl px-3 outline-none mt-1"
+                                required
+                            />
+                            {tenure !== "" && !tenureValid && (
+                                <p className="mt-1 text-xs font-semibold text-red-600">
+                                    {maxTenure ? `Tenure must be between 1 and ${maxTenure} months.` : "Tenure must be at least 1 month."}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Start Date</label>
+                        <input
+                            type="date"
+                            value={startDate}
+                            min={today}
+                            onChange={(e) => setStartDate(e.target.value)}
+                            className="w-full h-11 border border-line rounded-xl px-3 outline-none mt-1"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Purpose / Reason</label>
+                        <textarea
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            className="w-full h-24 border border-line rounded-xl p-3 outline-none mt-1 resize-none"
+                            placeholder="What is this loan for?"
+                            required
+                        />
+                    </div>
+                    {terms && (
+                        <div className="rounded-xl bg-gradient-to-r from-brand/10 to-brand-2/5 p-4 space-y-1">
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm font-semibold text-ink-2">Monthly installment</span>
+                                <span className="text-2xl font-bold text-brand">{fmtMoney(terms.installment, currency)}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-ink-muted">
+                                <span>Total repayable over {tenureNum} month{tenureNum === 1 ? "" : "s"}</span>
+                                <span className="font-semibold">{fmtMoney(terms.total, currency)}</span>
+                            </div>
+                            {endDate && <div className="text-xs text-ink-faint">Repayments run until {endDate}.</div>}
+                        </div>
+                    )}
+                    <div className="flex gap-2 justify-end pt-2">
+                        <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+                        <button type="submit" disabled={loading || !canSubmit} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-75">
+                            {loading ? "Submitting..." : "Submit Loan Request"}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+function LoanScheduleDrawer({ loan, typeName = "Loan", onClose }) {
+    const { config } = useConfig();
+    const currency = config?.currency || "NGN";
+    const [state, setState] = useState({ loading: true, data: null, error: false });
+
+    useEffect(() => {
+        let stale = false;
+        (async () => {
+            try {
+                const data = await loanService.getSchedule(loan.id);
+                if (!stale) setState({ loading: false, data, error: false });
+            } catch (err) {
+                console.error("[Loans] Error loading repayment schedule:", err);
+                if (!stale) setState({ loading: false, data: null, error: true });
+            }
+        })();
+        return () => { stale = true; };
+    }, [loan.id]);
+
+    // The schedule response carries a fresher copy of the loan — prefer it.
+    const loanRow = state.data?.loan || loan;
+    const summary = state.data?.summary || null;
+    const schedule = Array.isArray(state.data?.schedule) ? state.data.schedule : [];
+    const meta = loanStatusMeta(loanRow.status);
+
+    return (
+        <>
+            <div onClick={onClose} className="fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-sm" />
+            <motion.div
+                initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
+                transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-2xl flex-col bg-card shadow-2xl"
+            >
+                <div className="flex items-center justify-between border-b border-line-soft p-4">
+                    <h3 className="font-semibold text-ink">Repayment schedule · {typeName}</h3>
+                    <button onClick={onClose} className="rounded-lg p-1.5 text-ink-muted hover:bg-sunken"><X className="h-4 w-4" /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto bg-sunken p-6">
+                    <div className="mx-auto max-w-xl rounded-2xl bg-card shadow-lg ring-1 ring-line p-6 space-y-4">
+                        <div className="flex items-center justify-between border-b pb-4">
+                            <div>
+                                <h4 className="font-bold text-ink text-lg capitalize">{typeName}</h4>
+                                <p className="text-xs text-ink-muted">
+                                    {String(loanRow.start_date).slice(0, 10)} → {String(loanRow.end_date).slice(0, 10)}
+                                </p>
+                            </div>
+                            <span className={`${LOAN_CHIP_CLS} ${meta.cls}`}>{meta.label}</span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-4 text-xs">
+                            <div>
+                                <span className="text-ink-faint block">Principal</span>
+                                <span className="font-semibold text-ink">{fmtMoney(loanRow.amount, currency)}</span>
+                            </div>
+                            <div>
+                                <span className="text-ink-faint block">Interest rate</span>
+                                <span className="font-semibold text-ink">{Number(loanRow.interest_rate) || 0}%/yr</span>
+                            </div>
+                            <div>
+                                <span className="text-ink-faint block">Monthly installment</span>
+                                <span className="font-semibold text-ink">{fmtMoney(loanRow.monthly_installment, currency)}</span>
+                            </div>
+                        </div>
+
+                        {state.loading ? (
+                            <div className="p-8 text-center text-ink-faint text-xs border-t border-dashed">
+                                Retrieving your repayment schedule…
+                            </div>
+                        ) : state.error || !summary ? (
+                            <div className="p-8 text-center text-ink-faint text-xs border-t border-dashed">
+                                The repayment schedule couldn’t be retrieved right now. Please try again later or contact HR.
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex items-center justify-between gap-3 rounded-xl bg-gradient-to-r from-brand/10 to-brand-2/5 p-4">
+                                    <div>
+                                        <div className="text-sm font-semibold text-ink-2">Outstanding balance</div>
+                                        <div className="text-xs text-ink-muted">
+                                            {fmtMoney(summary.amount_repaid, currency)} of {fmtMoney(summary.total_repayable, currency)} repaid
+                                            {" · "}{summary.periods_paid} paid / {summary.periods_remaining} remaining
+                                        </div>
+                                    </div>
+                                    <div className="text-2xl font-bold text-brand">{fmtMoney(summary.outstanding_balance, currency)}</div>
+                                </div>
+
+                                <div className="overflow-x-auto rounded-xl border border-line">
+                                    <table className="w-full min-w-[440px] text-sm">
+                                        <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
+                                            <tr>
+                                                <th className="px-3 py-2 text-left font-semibold">#</th>
+                                                <th className="px-3 py-2 text-left font-semibold">Due date</th>
+                                                <th className="px-3 py-2 text-right font-semibold">Amount</th>
+                                                <th className="px-3 py-2 text-left font-semibold">Status</th>
+                                                <th className="px-3 py-2 text-left font-semibold">Paid on</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {schedule.map((p) => (
+                                                <tr key={p.period} className="border-t border-line-soft">
+                                                    <td className="px-3 py-2 text-ink-muted">{p.period}</td>
+                                                    <td className="px-3 py-2 text-ink-2">{p.due_date}</td>
+                                                    <td className="px-3 py-2 text-right text-ink-2">{fmtMoney(p.scheduled_amount, currency)}</td>
+                                                    <td className="px-3 py-2">
+                                                        <span className={`${LOAN_CHIP_CLS} ${scheduleChipCls(p.status)}`}>{p.status}</span>
+                                                    </td>
+                                                    <td className="px-3 py-2 text-ink-muted">
+                                                        {p.payment_date ? String(p.payment_date).slice(0, 10) : "—"}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {loanRow.repayment_method === "payroll_deduction" && (
+                                    <p className="text-xs text-ink-faint">
+                                        Repaid automatically via payroll — each approved payroll distribution records your deduction.
+                                    </p>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
+            </motion.div>
+        </>
+    );
+}
+
 function Payslips({ onOpen }) {
     const [payruns, setPayruns] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -844,16 +1497,22 @@ function DocsUpload() {
             try {
                 // Requirements come from the job role; /api/documentations/
                 // lists what's already been uploaded (with approval status).
+                // The unfiltered list is org-wide (everyone's uploads plus
+                // leave/profile-update attachments) — ask the server for just
+                // this employee's own documents.
                 const [roleRes, docsRes] = await Promise.all([
                     user?.job_role_id ? api.get(`/api/job-roles/${user.job_role_id}`).catch(() => null) : Promise.resolve(null),
-                    api.get("/api/documentations/").catch(() => []),
+                    user?.id
+                        ? api.get(`/api/documentations/?feature_type=EMPLOYEE_DOCUMENT&uploaded_by_employee_id=${encodeURIComponent(user.id)}`).catch(() => [])
+                        : Promise.resolve([]),
                 ]);
                 if (stale) return;
                 const jr = roleRes?.jobRole || roleRes?.job_role || roleRes || {};
                 setRequiredDocs(Array.isArray(jr.required_documents) ? jr.required_documents : []);
                 const rows = Array.isArray(docsRes) ? docsRes : docsRes?.documents || docsRes?.items || [];
-                // Show only the user's own uploads even if the API returns more.
-                setUploads(rows.filter((d) => !d.uploaded_by_employee_id || d.uploaded_by_employee_id === user?.id));
+                // Defense in depth: only the user's own uploads, even if the
+                // backend ignores the query filter.
+                setUploads(rows.filter((d) => d.uploaded_by_employee_id === user?.id));
             } finally {
                 if (!stale) setLoading(false);
             }
@@ -873,12 +1532,18 @@ function DocsUpload() {
         }
         const formData = new FormData();
         formData.append("file", file);
-        // Contract (confirmed against the API): feature_type is required.
-        // required_document_id/name are accepted but currently ignored by the
-        // backend — sent anyway for when it learns to link uploads to
-        // requirements (backend ask).
+        // Contract (confirmed against the API): feature_type is required;
+        // title/description are persisted, and without a title the backend
+        // falls back to the raw file name. title is also how requirement
+        // cards recognise their upload (matched by title === doc.name).
+        // required_document_id/name are still ignored — sent anyway for when
+        // the backend learns to link uploads to requirements (backend ask).
         formData.append("feature_type", "EMPLOYEE_DOCUMENT");
-        if (doc?.id) formData.append("required_document_id", doc.id);
+        if (doc?.name) formData.append("title", doc.name);
+        if (doc?.id) {
+            formData.append("required_document_id", doc.id);
+            formData.append("description", `Required document: ${doc.name} (${doc.id})`);
+        }
         if (doc?.name) formData.append("name", doc.name);
         try {
             await api.post("/api/documentations/upload", formData, {
@@ -896,6 +1561,11 @@ function DocsUpload() {
     // Shared helper uses startsWith — "pending_approval" stays amber instead
     // of reading as approved (the old includes("approv") bug).
     const statusChip = (d) => statusBadgeCls(d.status);
+    // Uploads are linked to requirement cards by title (set to doc.name at
+    // upload time); prefer an approved copy over a newer pending one.
+    const uploadFor = (name) =>
+        uploads.find((d) => d.title === name && docStatus(d).startsWith("approv")) ||
+        uploads.find((d) => d.title === name);
 
     if (loading) {
         return <div className="p-8 text-center text-ink-muted bg-card border rounded-2xl">Retrieving document templates...</div>;
@@ -904,17 +1574,25 @@ function DocsUpload() {
     return (
         <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
-                {requiredDocs.map((d) => (
-                    <div key={d.id} className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm">
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <div className="font-semibold text-ink">{d.name || ""}</div>
-                                <div className="text-xs text-ink-muted mt-0.5">PDF, PNG or JPG up to 8MB{d.is_mandatory ? " · Required" : ""}</div>
+                {requiredDocs.map((d) => {
+                    const uploaded = uploadFor(d.name);
+                    return (
+                        <div key={d.id} className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm">
+                            <div className="flex items-start justify-between gap-2">
+                                <div>
+                                    <div className="font-semibold text-ink">{d.name || ""}</div>
+                                    <div className="text-xs text-ink-muted mt-0.5">PDF, PNG or JPG up to 8MB{d.is_mandatory ? " · Required" : ""}</div>
+                                </div>
+                                {uploaded && (
+                                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusChip(uploaded)}`}>
+                                        {docStatus(uploaded).replace(/_/g, " ")}
+                                    </span>
+                                )}
                             </div>
+                            <UploadDropzone id={`file-${d.id}`} onPick={(file) => handleUpload(d, file)} />
                         </div>
-                        <UploadDropzone id={`file-${d.id}`} onPick={(file) => handleUpload(d, file)} />
-                    </div>
-                ))}
+                    );
+                })}
                 <div className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm">
                     <div>
                         <div className="font-semibold text-ink">{requiredDocs.length ? "Other document" : "Upload a document"}</div>

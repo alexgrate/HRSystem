@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Mail, Lock, KeyRound, ArrowRight, ArrowLeft, AlertCircle,
@@ -7,6 +7,9 @@ import {
 import { authService } from "../../services/authService";
 
 const emailValid = (e) => /^\S+@\S+\.\S+$/.test(e);
+
+// Mirrors the backend's 2-minute resend window (resendPasswordResetOTP).
+const RESEND_WINDOW_S = 120;
 
 const Field = ({ icon: Icon, children }) => (
   <div className="flex items-center gap-2.5 border-b border-line py-2.5 focus-within:border-brand transition-colors">
@@ -30,6 +33,15 @@ const ForgotPassword = () => {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
+  // Seconds until Resend is allowed again — client-side mirror of the
+  // backend's resend rate limit.
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   // Cursor glow on the brand panel — CSS variables via ref, no re-renders.
   const brandRef = useRef(null);
@@ -71,6 +83,8 @@ const ForgotPassword = () => {
       // Always show the same outcome regardless of whether the email exists.
       setInfo(`If an account exists for ${email.trim()}, we've sent it a code.`);
       setPhase("reset");
+      // The backend's resend window starts at the first send too.
+      setCooldown(RESEND_WINDOW_S);
       setBusy(false);
     }
   };
@@ -80,13 +94,23 @@ const ForgotPassword = () => {
     setInfo("");
     setBusy(true);
     try {
-      await authService.resendOtp(email.trim());
+      const res = await authService.resendOtp(email.trim());
+      // Rate limits arrive inside the success envelope ({ canResend: false,
+      // waitTime? in seconds }) — no code was sent, so don't claim one was.
+      if (res?.canResend === false) {
+        setInfo("Please wait a moment before requesting another code.");
+        setCooldown(res.waitTime > 0 ? Math.ceil(res.waitTime) : RESEND_WINDOW_S);
+        return;
+      }
+      setInfo("If an account exists for that email, a new code is on its way.");
+      setCooldown(RESEND_WINDOW_S);
     } catch (err) {
       // Same enumeration guard as the initial send — neutral wording, no
       // backend "no such account" leakage.
       console.warn("[ForgotPassword] resend failed:", err);
-    } finally {
       setInfo("If an account exists for that email, a new code is on its way.");
+      setCooldown(RESEND_WINDOW_S);
+    } finally {
       setBusy(false);
     }
   };
@@ -102,7 +126,13 @@ const ForgotPassword = () => {
     if (password !== confirm) return setError("Passwords don’t match.");
     setBusy(true);
     try {
-      await authService.resetPassword(email.trim(), otp.trim(), password);
+      const res = await authService.resetPassword(email.trim(), otp.trim(), password);
+      // A bad/expired code resolves inside the success envelope with
+      // { success: false } instead of throwing — don't advance on it.
+      if (res && res.success === false) {
+        setError(res.message || "Couldn’t set your password. Check the code and try again.");
+        return;
+      }
       setPhase("done");
     } catch (err) {
       setError(err?.message || "Couldn’t set your password. Check the code and try again.");
@@ -258,10 +288,12 @@ const ForgotPassword = () => {
                       <button
                         type="button"
                         onClick={resend}
-                        disabled={busy}
+                        disabled={busy || cooldown > 0}
                         className="text-[11px] font-semibold text-brand hover:underline disabled:opacity-60"
                       >
-                        Didn’t get it? Resend code
+                        {cooldown > 0
+                          ? `Resend available in ${cooldown}s`
+                          : "Didn’t get it? Resend code"}
                       </button>
                     </div>
 

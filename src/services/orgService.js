@@ -1,10 +1,6 @@
 import api from './api';
 
-// Org roster fetches for screens that need the complete user list (name
-// resolution, manager pickers, assignment tables, client-side search).
-// GET /api/users/ caps `limit` at 100 and offers no server-side search or
-// department filter, so completeness means walking the pages via the
-// response's pagination metadata.
+
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 50; // safety stop at 5,000 users
 
@@ -13,6 +9,9 @@ const pageUsers = (res) => (Array.isArray(res) ? res : res?.users || []);
 export const orgService = {
   listUsersPage: (page = 1, limit = PAGE_LIMIT) =>
     api.get(`/api/users/?page=${page}&limit=${limit}`),
+
+  sendOnboardingLink: (email) =>
+    api.post("/api/users/onboarding-link", { email }),
 
   listAllUsers: async () => {
     const first = await orgService.listUsersPage(1);
