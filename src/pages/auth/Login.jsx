@@ -8,7 +8,7 @@ import { isSessionConflict } from "../../services/authService";
 import logoImg from "../../assets/dashIcon.jpg"
 
 const Login = () => {
-  const { login, forceLogin } = useAuth();
+  const { login, logoutAllSessionsFromConflict } = useAuth();
   const confirm = useConfirm();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -31,23 +31,30 @@ const Login = () => {
   const messageOf = (err) =>
     err?.error?.message || err?.message || "Invalid email credentials or password.";
 
-  // The account already has a live session in another browser. Ask before
-  // evicting it; on consent, sign that session out server-side and retry.
-  const takeOverSession = async (conflict) => {
+  // If the backend reports an active session elsewhere, let the user either
+  // invalidate all sessions and sign in again, or cancel and keep the active
+  // session untouched.
+  const handleSessionConflict = async (conflict) => {
     const ok = await confirm({
       title: "Already signed in elsewhere",
       message:
-        "This account has an active session in another browser or device. Sign out that session and continue here?",
-      confirmLabel: "Sign out & continue",
+        "This account already has an active session. Do you want to log out all sessions and sign in again here, or cancel and return to the active session?",
+      confirmLabel: "Log out all sessions",
+      cancelLabel: "Cancel",
+      danger: true,
     });
-    if (!ok) return;
+    if (!ok) {
+      setError("Sign-in cancelled. Continue in your active session.");
+      return;
+    }
     try {
-      await forceLogin(email, password, remember, conflict);
-      navigate("/app");
+      await logoutAllSessionsFromConflict(conflict);
+      setPassword("");
+      setError("All sessions were signed out. Please sign in again.");
     } catch (err) {
       setError(
         isSessionConflict(err)
-          ? "The other session could not be signed out. Please try again."
+          ? "Sessions could not be cleared. Please try again."
           : messageOf(err)
       );
     }
@@ -62,7 +69,7 @@ const Login = () => {
       navigate("/app");
     } catch (err) {
       if (isSessionConflict(err)) {
-        await takeOverSession(err);
+        await handleSessionConflict(err);
       } else {
         setError(messageOf(err));
       }

@@ -26,6 +26,40 @@ export const setToken = (token, remember) => {
 export const clearToken = () => {
     localStorage.removeItem('token');
     sessionStorage.removeItem('token');
+    localStorage.removeItem('user');
+};
+
+const SESSION_EXPIRED_MSG = 'Session expired or revoked. Please login again.';
+
+const parseJwtPayload = (token) => {
+    try {
+        const part = token?.split('.')?.[1];
+        if (!part) return null;
+        const normalized = part.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+        return JSON.parse(window.atob(padded));
+    } catch {
+        return null;
+    }
+};
+
+const isTokenExpired = (token) => {
+    const payload = parseJwtPayload(token);
+    if (!payload?.exp) return false;
+    return Date.now() >= Number(payload.exp) * 1000;
+};
+
+const forceLogoutToLogin = () => {
+    clearToken();
+    if (window.location.pathname !== '/login') {
+        window.location.assign('/login');
+    }
+};
+
+const isSessionExpired401 = (error) => {
+    if (error?.response?.status !== 401) return false;
+    const responseMessage = error?.response?.data?.error?.message || error?.response?.data?.message;
+    return responseMessage === SESSION_EXPIRED_MSG;
 };
 
 api.interceptors.request.use(
@@ -34,6 +68,10 @@ api.interceptors.request.use(
         if (!config.headers.Authorization) {
             const token = getToken();
             if(token) {
+                if (isTokenExpired(token)) {
+                    forceLogoutToLogin();
+                    return Promise.reject({ message: SESSION_EXPIRED_MSG, httpStatus: 401 });
+                }
                 config.headers.Authorization = `Bearer ${token}`;
             }
         }
@@ -56,16 +94,16 @@ api.interceptors.response.use(
     },
     (error) => {
         scrubError(error);
+        if (isSessionExpired401(error)) {
+            forceLogoutToLogin();
+        }
         if(error.response) {
             if (error.response.status === 401) {
 
                 const url = error.config?.url || '';
                 const isAuthEndpoint = url.includes('/api/auth/');
-                if (!isAuthEndpoint && getToken()) {
-                    clearToken();
-                    if (window.location.pathname !== '/login') {
-                        window.location.assign('/login');
-                    }
+                if (getToken() && (!isAuthEndpoint || isSessionExpired401(error))) {
+                    forceLogoutToLogin();
                 }
             }
 
