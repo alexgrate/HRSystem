@@ -13,6 +13,19 @@ export const orgService = {
   sendOnboardingLink: (email) =>
     api.post("/api/users/onboarding-link", { email }),
 
+  listDirectory: () =>
+    api.get("/api/users/directory").then((res) => (Array.isArray(res) ? res : res?.users || [])),
+
+  // Organization workforce aggregates for the HR/executive dashboard, computed
+  // in SQL server-side (no client-side counting over the roster). EMPLOYEE:read.
+  getOrgStats: () => api.get("/api/users/org-stats"),
+
+  // Full single-employee record (biodata, bank, education, employment) — admin.
+  getEmployee: (id) => api.get(`/api/users/${id}`),
+
+  // Employee sub-records (next of kin, family, dependants, experience, training).
+  getEmployeeRecords: (id) => api.get(`/api/users/${id}/records`),
+
   listAllUsers: async () => {
     const first = await orgService.listUsersPage(1);
     const users = pageUsers(first);

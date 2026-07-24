@@ -1,18 +1,39 @@
 import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, LogOut, Menu, X } from "lucide-react";
+import { ChevronLeft, LogOut, Menu, X, Bell } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { useConfig } from "../../context/ConfigContext";
+import { useNotifications } from "../../context/NotificationContext";
 import { RESOURCES, pathFor } from "../../config/resources";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getEmployeeName, getInitials } from "../../utils/employee";
 import { isDesignatedApprover } from "../../utils/approvers";
 import { approvalService } from "../../services/approvalService";
+import { loanService } from "../../services/loanService";
 import { setupService } from "../../services/setupService";
 
 const displayName = (user) => getEmployeeName(user, "User");
+
+const HeaderBell = () => {
+  const { unreadCount } = useNotifications();
+  const navigate = useNavigate();
+  return (
+    <button
+      onClick={() => navigate("/app")}
+      aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"}
+      className="relative rounded-full border border-line bg-card p-2 text-ink-muted shadow-sm transition-colors hover:text-brand focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+    >
+      <Bell className="h-4 w-4" />
+      {unreadCount > 0 && (
+        <span className="absolute -right-1 -top-1 flex min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-none text-white" style={{ height: 16 }}>
+          {unreadCount > 99 ? "99+" : unreadCount}
+        </span>
+      )}
+    </button>
+  );
+};
 
 
 const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMobile, items, onSignout, logoUrl, orgName, badges = {} }) => (
@@ -144,6 +165,12 @@ const AppLayout = () => {
         jobs.push(approvalService.getPendingDocuments().catch(() => []));
       if (can(RESOURCE_CODES.PROFILE_UPDATE, "manage") && isDesignatedApprover(approverFlows, "EMPLOYEE_UPDATE", user, isAdmin))
         jobs.push(approvalService.getPendingProfileUpdates().catch(() => []));
+      if (can(RESOURCE_CODES.LOANS, "manage") && isDesignatedApprover(approverFlows, "LOAN_REQUEST", user, isAdmin))
+        jobs.push(
+          loanService.listAll()
+            .then((rows) => (Array.isArray(rows) ? rows : []).filter((r) => String(r.status).toLowerCase() === "pending_approval"))
+            .catch(() => [])
+        );
       if (!jobs.length) {
         if (!stale) setPendingCount(0);
         return;
@@ -232,6 +259,7 @@ const AppLayout = () => {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <HeaderBell />
             <div className="flex items-center gap-2 rounded-full border border-line bg-card py-1 pl-1 pr-2 shadow-sm sm:pr-3">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-[11px] font-bold text-white">
                 {getInitials(name)}

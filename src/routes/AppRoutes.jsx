@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "../context/AuthContext";
 import { PermissionProvider, usePermissions } from "../context/PermissionContext";
 import { ConfigProvider } from "../context/ConfigContext";
+import { NotificationProvider } from "../context/NotificationContext";
 import ProtectedRoute from "./ProtectedRoute";
 import AppLayout from "../components/layout/AppLayout";
 import Login from "../pages/auth/Login";
@@ -42,7 +43,9 @@ export default function AppRoutes() {
               path="/app"
               element={
                 <ProtectedRoute>
-                  <AppLayout />
+                  <NotificationProvider>
+                    <AppLayout />
+                  </NotificationProvider>
                 </ProtectedRoute>
               }
             >

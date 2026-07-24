@@ -11,6 +11,7 @@ import {
   Building2,
   Inbox,
   ScrollText,
+  ClipboardCheck,
 } from "lucide-react";
 import { lazy } from "react";
 import frontendResourceCatalog from "./frontend-resource-catalog.json";
@@ -29,6 +30,7 @@ const DashboardPage = lazy(() => import("../pages/DashboardPage"));
 const AuditTrailPage = lazy(() => import("../pages/admin/AuditTrailPage"));
 const LeaveAdminPage = lazy(() => import("../pages/admin/LeaveAdminPage"));
 const LoanAdminPage = lazy(() => import("../pages/admin/LoanAdminPage"));
+const AppraisalPage = lazy(() => import("../pages/admin/AppraisalPage"));
 
 import { RESOURCE_CODES } from "./resourceCodes";
 export { RESOURCE_CODES };
@@ -49,6 +51,7 @@ const CATALOG_ROUTE_RESOURCE = {
   "/approvals/leave-requests": RESOURCE_CODES.LEAVE_REQUESTS,
   "/approvals/documents": RESOURCE_CODES.DOCUMENTS,
   "/approvals/profile-updates": RESOURCE_CODES.PROFILE_UPDATE,
+  "/approvals/loans": RESOURCE_CODES.LOANS,
   "/access/roles": RESOURCE_CODES.ROLE_PERMISSIONS,
   "/access/resources": RESOURCE_CODES.ROLE_PERMISSIONS,
   "/access/assignments": RESOURCE_CODES.ROLE_MAPPING,
@@ -135,13 +138,14 @@ export const RESOURCES = [
     label: "Approvals Inbox",
     segment: "approvals",
     Icon: Inbox,
-    // The inbox multiplexes three approval types — access with any of them.
-    resource: [RESOURCE_CODES.LEAVE_REQUESTS, RESOURCE_CODES.DOCUMENTS, RESOURCE_CODES.PROFILE_UPDATE],
+    // The inbox multiplexes four approval types — access with any of them.
+    resource: [RESOURCE_CODES.LEAVE_REQUESTS, RESOURCE_CODES.DOCUMENTS, RESOURCE_CODES.PROFILE_UPDATE, RESOURCE_CODES.LOANS],
     action: "read",
     checks: checksFromRoutes([
       "/approvals/leave-requests",
       "/approvals/documents",
       "/approvals/profile-updates",
+      "/approvals/loans",
     ]),
     component: ApprovalsInboxPage,
   },
@@ -176,6 +180,21 @@ export const RESOURCES = [
     resource: RESOURCE_CODES.LOANS,
     action: "read",
     component: LoanAdminPage,
+  },
+  {
+    key: "appraisals",
+    label: "Appraisals",
+    segment: "appraisals",
+    Icon: ClipboardCheck,
+    // Visible to every authenticated user: the page itself adapts its tabs to
+    // the viewer (all employees get My Targets / My Reviews; managers & dept
+    // heads additionally get Team Reviews; admins get Cycles; admins/dept heads
+    // get Indicators). The appraisal backend authorizes by relationship
+    // (admin / department head / owner / reviewer), not by a single resource
+    // code, so a code-based route gate would mismatch — hence resource: null
+    // with per-action gating inside the page.
+    resource: null,
+    component: AppraisalPage,
   },
   {
     key: "settings",

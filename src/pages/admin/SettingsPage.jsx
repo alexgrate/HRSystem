@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TabPills } from "../../components/ui/TabPills";
-import { Check, ShieldAlert, ShieldCheck, Users, Search, X } from "lucide-react";
+import { Check, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import {
   rolePermissionService,
   EMPTY_PERMS,
   PERMISSION_ACTIONS,
 } from "../../services/rolePermissionService";
-import { orgService } from "../../services/orgService";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
-import { getEmployeeName } from "../../utils/employee";
 
 const ACTIVE_CLASSES = {
   can_read: "border-emerald-500 bg-emerald-500 text-white",
@@ -34,7 +32,6 @@ const Legend = () => (
 
 const VIEWS = [
   { key: "job-title-resources", label: "Job Title Resources", Icon: ShieldCheck },
-  { key: "user-job-titles", label: "User Job Titles", Icon: Users },
 ];
 
 export function SettingsPage() {
@@ -54,9 +51,7 @@ export function SettingsPage() {
         <div className="text-xs font-semibold uppercase tracking-wider text-brand">Platform Security</div>
         <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink"> Roles Permissions</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          {view === "job-title-resources"
-            ? "Directly assign system resources to each job title with fully customizable permissions."
-            : "Assign job titles to users. Users inherit all resource permissions from their assigned job title."}
+          Directly assign system resources to each job title with fully customizable permissions.
         </p>
       </div>
 
@@ -64,9 +59,6 @@ export function SettingsPage() {
 
       {visited["job-title-resources"] && (
         <div className={view === "job-title-resources" ? "" : "hidden"}><JobTitleResourceMatrix /></div>
-      )}
-      {visited["user-job-titles"] && (
-        <div className={view === "user-job-titles" ? "" : "hidden"}><UserJobTitleAssignment /></div>
       )}
     </div>
   );
@@ -349,181 +341,6 @@ function JobTitleResourceMatrix() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function UserJobTitleAssignment() {
-  const { can, refreshPermissions } = usePermissions();
-  const toast = useToast();
-
-  const canManage = can(RESOURCE_CODES.EMPLOYEES, "update") || can(RESOURCE_CODES.ROLE_MAPPING, "assign");
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [savingId, setSavingId] = useState(null);
-  const [search, setSearch] = useState("");
-  const [jobRoles, setJobRoles] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [drafts, setDrafts] = useState({});
-
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [rolesRes, userRows] = await Promise.all([
-          rolePermissionService.getJobRoles(),
-          orgService.listAllUsers(),
-        ]);
-
-        const allRoles = rolesRes || [];
-
-        setJobRoles(allRoles);
-        setUsers(userRows);
-
-        const nextDrafts = {};
-        userRows.forEach((user) => {
-          nextDrafts[user.id] = user.job_role_id || "";
-        });
-        setDrafts(nextDrafts);
-      } catch (err) {
-        console.error("[SettingsPage] Failed to load user job-title assignment data:", err);
-        setError(err?.message || "Failed to load users and job titles.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
-  }, []);
-
-  const filteredUsers = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((u) => {
-      const name = getEmployeeName(u, "").toLowerCase();
-      const email = (u.email || "").toLowerCase();
-      return name.includes(q) || email.includes(q);
-    });
-  }, [search, users]);
-
-  const jobRoleName = (jobRoleId) => jobRoles.find((r) => r.id === jobRoleId)?.title || "Unassigned";
-
-  const save = async (userId) => {
-    if (!canManage) return;
-    const nextJobRoleId = drafts[userId] || null;
-
-    setSavingId(userId);
-    try {
-      await rolePermissionService.assignUserJobRole(userId, nextJobRoleId);
-      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, job_role_id: nextJobRoleId } : u)));
-      refreshPermissions?.(); // in case the admin reassigned their own title
-      toast.success("Job title assignment saved.");
-    } catch (err) {
-      console.error("[SettingsPage] Failed to save user job-title assignment:", err);
-      toast.error(err?.message || "Failed to save assignment.");
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  if (loading) {
-    return <div className="p-12 text-center text-ink-muted bg-card rounded-2xl border border-line-soft">Loading user assignments...</div>;
-  }
-
-  if (error) {
-    return (
-      <div className="p-12 text-center border border-dashed border-red-200 rounded-2xl bg-red-50/40">
-        <ShieldAlert className="mx-auto h-12 w-12 text-red-300" />
-        <h3 className="mt-4 text-sm font-semibold text-ink">{error}</h3>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {!canManage && (
-        <div className="inline-flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 border border-amber-200">
-          <ShieldAlert className="h-3.5 w-3.5" /> Read-only - you need Employee Update or Role Mapping Assign rights.
-        </div>
-      )}
-
-      <div className="rounded-2xl border border-line/80 bg-card shadow-sm overflow-hidden">
-        <div className="border-b border-line-soft p-4">
-          <div className="flex min-w-[240px] items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm">
-            <Search className="h-4 w-4 text-ink-faint" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search users by name or email..."
-              className="w-full bg-transparent outline-none placeholder:text-ink-faint"
-            />
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold">User</th>
-                <th className="px-4 py-3 text-left font-semibold">Current Job Title</th>
-                <th className="px-4 py-3 text-left font-semibold">Assign Job Title</th>
-                <th className="px-4 py-3 text-right font-semibold">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="p-8 text-center text-ink-faint">No users found.</td>
-                </tr>
-              ) : (
-                filteredUsers.map((user) => {
-                  const draftValue = drafts[user.id] || "";
-                  const changed = (user.job_role_id || "") !== draftValue;
-                  const busy = savingId === user.id;
-
-                  return (
-                    <tr key={user.id} className="border-t border-line-soft">
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-ink">{getEmployeeName(user, "Employee")}</div>
-                        <div className="text-xs text-ink-muted">{user.email || "-"}</div>
-                      </td>
-                      <td className="px-4 py-3 text-ink-muted">{jobRoleName(user.job_role_id)}</td>
-                      <td className="px-4 py-3">
-                        <select
-                          value={draftValue}
-                          onChange={(e) => setDrafts((prev) => ({ ...prev, [user.id]: e.target.value }))}
-                          disabled={!canManage || busy}
-                          className="h-10 min-w-[240px] rounded-xl border border-line bg-card px-3 outline-none focus:border-brand disabled:opacity-60"
-                        >
-                          <option value="">Unassigned</option>
-                          {jobRoles.map((role) => (
-                            <option key={role.id} value={role.id}>{role.title}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => save(user.id)}
-                          disabled={!canManage || !changed || busy}
-                          className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 disabled:opacity-40"
-                        >
-                          {busy ? "Saving..." : "Apply"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <p className="text-xs text-ink-muted">
-        Job titles determine each user's resource access profile. Assigning a new job title updates inherited permissions.
-      </p>
     </div>
   );
 }

@@ -57,7 +57,7 @@ const applyBrandVars = ({ primary_color, secondary_color, accent_color } = {}) =
 };
 
 export function ConfigProvider({ children }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -82,6 +82,10 @@ export function ConfigProvider({ children }) {
   // the boot script applied from cache — clearing here would cause a flash.
   useEffect(() => {
     if (!user) {
+      // Auth is still rehydrating the session on this refresh — `user` is
+      // transiently null. Keep the branding the boot script applied from cache;
+      // stripping it here is exactly what caused the theme flash on every reload.
+      if (authLoading) return;
       const root = document.documentElement.style;
       BRAND_VARS.forEach((v) => root.removeProperty(v));
       localStorage.removeItem("dash_brand");
@@ -90,11 +94,12 @@ export function ConfigProvider({ children }) {
     if (!config) return;
     const applied = applyBrandVars(config);
     try { localStorage.setItem("dash_brand", JSON.stringify(applied)); } catch { /* storage full/blocked */ }
-  }, [config, user]);
+  }, [config, user, authLoading]);
 
-  // Theme mode. Same rule: never un-theme during the loading gap.
+  // Theme mode. Same rule: never un-theme during the auth rehydration gap.
   useEffect(() => {
     if (!user) {
+      if (authLoading) return;
       localStorage.removeItem("dash_theme");
       document.documentElement.classList.remove("dark");
       return;
@@ -110,7 +115,7 @@ export function ConfigProvider({ children }) {
       return () => mq.removeEventListener("change", apply);
     }
     applyThemeClass(mode === "dark");
-  }, [config, user]);
+  }, [config, user, authLoading]);
 
   // Apply the organization's favicon to the browser tab once config loads.
   useEffect(() => {

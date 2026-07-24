@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertCircle,
+  Archive,
   Banknote,
   BellRing,
   Check,
@@ -27,11 +28,11 @@ import { resolvePersonName, getInitials } from "../../utils/employee";
 import { fmtMoney } from "../../utils/payroll";
 import { TabPills } from "../../components/ui/TabPills";
 
-
 const STATUS_META = {
   draft: { label: "Draft", cls: "bg-sunken text-ink-muted", step: 0 },
   pending_approval: { label: "Pending approval", cls: "bg-amber-50 text-amber-700", step: 1 },
   approved: { label: "Approved", cls: "bg-emerald-50 text-emerald-700", step: 2 },
+  disbursed: { label: "Disbursed", cls: "bg-teal-50 text-teal-700", step: 3 },
   active: { label: "Active", cls: "bg-sky-50 text-sky-700", step: 3 },
   repaid: { label: "Repaid", cls: "bg-emerald-600 text-white", step: 4 },
   rejected: { label: "Rejected", cls: "bg-red-50 text-red-700", step: -1 },
@@ -51,7 +52,7 @@ const MILESTONES = [
 
 const STATUS_TABS = [
   { key: "pending", label: "Pending", statuses: ["draft", "pending_approval"] },
-  { key: "approved", label: "Approved", statuses: ["approved"] },
+  { key: "approved", label: "Approved", statuses: ["approved", "disbursed"] },
   { key: "active", label: "Active", statuses: ["active"] },
   { key: "repaid", label: "Repaid", statuses: ["repaid"] },
   { key: "closed", label: "Closed", statuses: ["rejected", "cancelled", "defaulted"] },
@@ -73,6 +74,7 @@ const REPAYMENT_METHODS = [
 
 const SCHEDULE_CHIP = {
   paid: "bg-emerald-50 text-emerald-700",
+  partial: "bg-amber-50 text-amber-700",
   overdue: "bg-red-50 text-red-700",
   upcoming: "bg-sunken text-ink-muted",
 };
@@ -97,9 +99,12 @@ const LoanAdminPage = () => {
 
   const [loans, setLoans] = useState([]);
   const [loanTypes, setLoanTypes] = useState([]);
+  const [productTypes, setProductTypes] = useState([]); // org-defined loan product types
   const [staff, setStaff] = useState([]);
   const [workflows, setWorkflows] = useState(null); // null = unknown → approve buttons stay hidden for non-admins
   const [repaymentConfig, setRepaymentConfig] = useState(null); // null = unknown, [] = not configured yet
+  const [policy, setPolicy] = useState(null); // org loan policy (effective values)
+  const [savingPolicy, setSavingPolicy] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [tab, setTab] = useState("pending");
@@ -131,8 +136,6 @@ const LoanAdminPage = () => {
 
   const loadLoans = async () => {
     try {
-      // /all is admin-only; a non-admin reviewer falls back to their own list
-      // rather than an empty page.
       const list = await loanService.listAll().catch(() => loanService.listMine());
       setLoans(Array.isArray(list) ? list : []);
     } catch (err) {
@@ -150,6 +153,17 @@ const LoanAdminPage = () => {
     }
   };
 
+  const loadProductTypes = async () => {
+    try {
+      // Include archived so the management card can list + restore them; the
+      // loan-product dropdown filters to active on its own.
+      const types = await loanService.listProductTypes(true);
+      setProductTypes(Array.isArray(types) ? types : []);
+    } catch (err) {
+      console.error("[Loans] Failed to load product types:", err);
+    }
+  };
+
   const fetchDetail = async (id) => {
     const [loan, schedule, repayments] = await Promise.all([
       loanService.get(id).catch(() => null),
@@ -163,12 +177,13 @@ const LoanAdminPage = () => {
     let stale = false;
     (async () => {
       try {
-        const [loanList, types, cfg, flows, users] = await Promise.all([
+        const [loanList, types, ptypes, cfg, pol, flows, users] = await Promise.all([
           loanService.listAll().catch(() => loanService.listMine().catch(() => [])),
           loanService.listLoanTypes().catch(() => []),
+          loanService.listProductTypes(true).catch(() => []),
           loanService.getRepaymentConfig().catch(() => null),
+          loanService.getPolicy().catch(() => null),
           setupService.getWorkflows().catch(() => null),
-          // The users list is admin-gated — don't even ask without the grant.
           can(RESOURCE_CODES.EMPLOYEES, "read")
             ? orgService.listAllUsers().catch(() => [])
             : Promise.resolve([]),
@@ -176,7 +191,9 @@ const LoanAdminPage = () => {
         if (stale) return;
         setLoans(Array.isArray(loanList) ? loanList : []);
         setLoanTypes(Array.isArray(types) ? types : []);
+        setProductTypes(Array.isArray(ptypes) ? ptypes : []);
         setRepaymentConfig(Array.isArray(cfg) ? cfg : null);
+        setPolicy(pol && typeof pol === "object" ? pol : null);
         setWorkflows(Array.isArray(flows) ? flows : null);
         setStaff(Array.isArray(users) ? users : []);
       } catch (err) {
@@ -310,6 +327,27 @@ const LoanAdminPage = () => {
     }
   };
 
+  const disburse = async () => {
+    if (!selectedLoan) return;
+    const ok = await confirm({
+      title: "Disburse loan?",
+      message: "This records the loan as disbursed (money released) and starts repayment. This can't be undone.",
+      confirmLabel: "Disburse",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await loanService.disburse(selectedLoan.id, {});
+      toast.success("Loan marked as disbursed.");
+      await refreshAfterAction();
+    } catch (err) {
+      console.error("[Loans] Disbursement failed:", err);
+      toast.error(err?.message || "Couldn't disburse the loan.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submitRepayment = async (payload) => {
     setBusy(true);
     try {
@@ -349,6 +387,23 @@ const LoanAdminPage = () => {
       toast.error(err?.message || "Couldn't update the repayment configuration.");
     } finally {
       setSavingConfig(false);
+    }
+  };
+
+  const savePolicy = async (patch) => {
+    setSavingPolicy(true);
+    try {
+      const updated = await loanService.setPolicy(patch);
+      setPolicy(updated && typeof updated === "object" ? updated : policy);
+      toast.success("Loan policy updated.");
+    } catch (err) {
+      console.error("[Loans] Loan policy update failed:", err);
+      toast.error(err?.message || "Couldn't update the loan policy.");
+      // Re-sync from server so the UI never shows an unsaved value.
+      const fresh = await loanService.getPolicy().catch(() => null);
+      if (fresh && typeof fresh === "object") setPolicy(fresh);
+    } finally {
+      setSavingPolicy(false);
     }
   };
 
@@ -399,6 +454,73 @@ const LoanAdminPage = () => {
     } catch (err) {
       console.error("[Loans] Loan product delete failed:", err);
       toast.error(err?.message || "Couldn't delete the loan product.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addProductType = async (name) => {
+    const nm = String(name || "").trim();
+    if (!nm) return;
+    setBusy(true);
+    try {
+      await loanService.createProductType({ name: nm });
+      toast.success("Product type added.");
+      await loadProductTypes();
+    } catch (err) {
+      console.error("[Loans] Product type create failed:", err);
+      toast.error(err?.message || "Couldn't add the product type.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const renameProductType = async (t, name) => {
+    const nm = String(name || "").trim();
+    if (!nm || nm === t.name) return;
+    setBusy(true);
+    try {
+      await loanService.updateProductType(t.id, { name: nm });
+      toast.success("Product type renamed.");
+      await loadProductTypes();
+    } catch (err) {
+      console.error("[Loans] Product type rename failed:", err);
+      toast.error(err?.message || "Couldn't rename the product type.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeProductType = async (t) => {
+    const ok = await confirm({
+      title: "Delete this product type?",
+      message: `"${t.name}" will be removed. Products using it keep working — their type is just cleared. This can't be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await loanService.deleteProductType(t.id);
+      toast.success("Product type deleted.");
+      await Promise.all([loadProductTypes(), loadLoanTypes()]);
+    } catch (err) {
+      console.error("[Loans] Product type delete failed:", err);
+      toast.error(err?.message || "Couldn't delete the product type.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setProductTypeActive = async (t, isActive) => {
+    setBusy(true);
+    try {
+      await loanService.updateProductType(t.id, { is_active: isActive });
+      toast.success(isActive ? "Product type restored." : "Product type archived.");
+      await loadProductTypes();
+    } catch (err) {
+      console.error("[Loans] Product type archive/restore failed:", err);
+      toast.error(err?.message || "Couldn't update the product type.");
     } finally {
       setBusy(false);
     }
@@ -569,6 +691,22 @@ const LoanAdminPage = () => {
               </ul>
             )}
           </div>
+
+          {/* Loan product types — org-defined metadata */}
+          <ProductTypesCard
+            productTypes={productTypes}
+            busy={busy}
+            onAdd={addProductType}
+            onRename={renameProductType}
+            onDelete={removeProductType}
+            onArchive={(t) => setProductTypeActive(t, false)}
+            onRestore={(t) => setProductTypeActive(t, true)}
+          />
+
+          {/* Organization loan policy (Phase 2/3) — full width */}
+          <div className="lg:col-span-2">
+            <LoanPolicyCard policy={policy} saving={savingPolicy} onSave={savePolicy} currency={currency} />
+          </div>
         </div>
       )}
 
@@ -667,6 +805,7 @@ const LoanAdminPage = () => {
             onReject={() => setApproveModal({ danger: true, label: "Reject loan" })}
             onRemind={() => remind(selectedLoan)}
             onAssignMethod={assignMethod}
+            onDisburse={disburse}
             onRecordRepayment={() => setShowRepayModal(true)}
             onClose={() => setSelectedId(null)}
           />
@@ -699,6 +838,7 @@ const LoanAdminPage = () => {
         {typeModal && (
           <LoanTypeModal
             loanType={typeModal.loanType}
+            productTypes={productTypes}
             busy={busy}
             onClose={() => setTypeModal(null)}
             onSubmit={saveLoanType}
@@ -727,22 +867,21 @@ function LoanDetailDrawer({
   onReject,
   onRemind,
   onAssignMethod,
+  onDisburse,
   onRecordRepayment,
   onClose,
 }) {
   const status = statusOf(loan);
   const meta = statusMeta(status);
   const summary = schedule?.summary || null;
-  // summary.outstanding_balance is the money truth once the schedule loads;
-  // the row-level computation only bridges the gap.
+
   const outstanding = summary ? Number(summary.outstanding_balance) : outstandingOf(loan);
   const amountRepaid = summary ? Number(summary.amount_repaid) : Number(loan.amount_repaid || 0);
 
   const pending = status === "pending_approval";
-  const repayable = ["approved", "active"].includes(status);
+  const repayable = ["approved", "disbursed", "active"].includes(status);
+  const disbursable = status === "approved";
 
-  // Keyed by loan id at the call site, so this initializer runs per loan; a
-  // successful assign leaves the local value equal to the refreshed loan's.
   const [method, setMethod] = useState(loan.repayment_method || "");
 
   return (
@@ -799,6 +938,15 @@ function LoanDetailDrawer({
                 >
                   <BellRing className="h-3.5 w-3.5" /> Remind approvers
                   {Number(loan.reminder_count) > 0 && <span className="text-ink-faint">({loan.reminder_count} sent)</span>}
+                </button>
+              )}
+              {disbursable && canAdminister && (
+                <button
+                  disabled={busy || loading}
+                  onClick={onDisburse}
+                  className="inline-flex items-center gap-1 rounded-xl bg-brand px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-60"
+                >
+                  <Banknote className="h-3.5 w-3.5" /> Disburse
                 </button>
               )}
               {repayable && canAdminister && loan.repayment_method === "external" && (
@@ -944,11 +1092,14 @@ function LoanDetailDrawer({
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[520px] text-sm">
+                  <table className="w-full min-w-[760px] text-sm">
                     <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
                       <tr>
                         <th className="px-3 py-2 text-left font-semibold">#</th>
                         <th className="px-3 py-2 text-left font-semibold">Due date</th>
+                        <th className="px-3 py-2 text-right font-semibold">Principal</th>
+                        <th className="px-3 py-2 text-right font-semibold">Interest</th>
+                        <th className="px-3 py-2 text-right font-semibold">Balance</th>
                         <th className="px-3 py-2 text-right font-semibold">Scheduled</th>
                         <th className="px-3 py-2 text-left font-semibold">Status</th>
                         <th className="px-3 py-2 text-left font-semibold">Paid on</th>
@@ -961,6 +1112,9 @@ function LoanDetailDrawer({
                           <td className="px-3 py-2 text-ink-muted">{p.period}</td>
                           {/* due_date is already 'YYYY-MM-DD' */}
                           <td className="whitespace-nowrap px-3 py-2 text-ink-2">{p.due_date}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right text-ink-2">{p.principal != null ? fmtMoney(p.principal, currency) : "—"}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right text-ink-muted">{p.interest != null ? fmtMoney(p.interest, currency) : "—"}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right text-ink-muted">{p.closing_balance != null ? fmtMoney(p.closing_balance, currency) : "—"}</td>
                           <td className="whitespace-nowrap px-3 py-2 text-right text-ink-2">{fmtMoney(p.scheduled_amount, currency)}</td>
                           <td className="px-3 py-2">
                             <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${SCHEDULE_CHIP[p.status] || "bg-sunken text-ink-muted"}`}>
@@ -981,6 +1135,8 @@ function LoanDetailDrawer({
                     <div className="text-xs text-ink-muted">
                       {summary.periods_paid} of {summary.periods_paid + summary.periods_remaining} periods paid ·{" "}
                       {fmtMoney(summary.amount_repaid, currency)} repaid of {fmtMoney(summary.total_repayable, currency)}
+                      {summary.total_interest != null && <> · Interest {fmtMoney(summary.total_interest, currency)}</>}
+                      {summary.settlement_amount != null && <> · Settlement {fmtMoney(summary.settlement_amount, currency)}</>}
                     </div>
                     <div className="text-sm font-bold text-brand">Outstanding: {fmtMoney(summary.outstanding_balance, currency)}</div>
                   </div>
@@ -1135,13 +1291,279 @@ function RecordRepaymentModal({ outstanding, currency, busy, onClose, onSubmit }
   );
 }
 
-function LoanTypeModal({ loanType, busy, onClose, onSubmit }) {
+
+function LoanPolicyCard({ policy, saving, onSave, currency }) {
+  const p = policy || {};
+  const [ratioPct, setRatioPct] = useState("");
+  const [maxConcurrent, setMaxConcurrent] = useState("");
+  const [minMonths, setMinMonths] = useState("");
+  const [graceDays, setGraceDays] = useState("");
+
+  useEffect(() => {
+    if (!policy) return;
+    setRatioPct(
+      Number.isFinite(Number(policy.max_repayment_ratio))
+        ? String(Math.round(Number(policy.max_repayment_ratio) * 1000) / 10)
+        : ""
+    );
+    setMaxConcurrent(
+      policy.max_concurrent_active_loans == null ? "" : String(policy.max_concurrent_active_loans)
+    );
+    setMinMonths(String(Number(policy.min_employment_months) || 0));
+    setGraceDays(String(Number(policy.repayment_grace_days) || 0));
+  }, [policy]);
+
+  if (!policy) {
+    return (
+      <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
+        <h3 className="text-sm font-semibold text-ink">Organization loan policy</h3>
+        <p className="mt-1 text-xs text-ink-muted">
+          The policy couldn't be loaded — you may not have permission, or the page needs a reload.
+        </p>
+      </div>
+    );
+  }
+
+  const patchBool = (key, val) => onSave({ [key]: val });
+  const patchSelect = (key, val) => onSave({ [key]: val });
+
+  const saveRatio = () => {
+    const pct = Number(ratioPct);
+    if (!(pct > 0) || pct > 100) return;
+    onSave({ max_repayment_ratio: Math.round((pct / 100) * 1e6) / 1e6 });
+  };
+  const saveConcurrent = () => {
+    if (maxConcurrent === "") return onSave({ max_concurrent_active_loans: null });
+    const n = Number(maxConcurrent);
+    if (Number.isInteger(n) && n >= 0) onSave({ max_concurrent_active_loans: n });
+  };
+  const saveMinMonths = () => {
+    const n = Number(minMonths);
+    if (Number.isInteger(n) && n >= 0) onSave({ min_employment_months: n });
+  };
+  const saveGrace = () => {
+    const n = Number(graceDays);
+    if (Number.isInteger(n) && n >= 0) onSave({ repayment_grace_days: n });
+  };
+
+  const Toggle = ({ label, hint, k }) => (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-line p-3">
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-ink">{label}</div>
+        {hint && <div className="text-[11px] text-ink-muted">{hint}</div>}
+      </div>
+      <button
+        onClick={() => patchBool(k, !p[k])}
+        disabled={saving}
+        role="switch"
+        aria-checked={!!p[k]}
+        aria-label={`${label} ${p[k] ? "on" : "off"}`}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60 ${p[k] ? "bg-emerald-600" : "bg-slate-300"}`}
+      >
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${p[k] ? "left-[22px]" : "left-0.5"}`} />
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
+      <h3 className="text-sm font-semibold text-ink">Organization loan policy</h3>
+      <p className="mt-1 text-xs text-ink-muted">
+        Configure loan rules for your organization. Changes apply to new applications; defaults reproduce the historical behaviour.
+      </p>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div>
+          <label className={labelCls}>Max repayment ratio (% of monthly gross)</label>
+          <div className="flex gap-2">
+            <input type="number" min="1" max="100" step="0.1" value={ratioPct} onChange={(e) => setRatioPct(e.target.value)} className={inputCls} placeholder="33.3" />
+            <button onClick={saveRatio} disabled={saving} className="h-11 shrink-0 rounded-xl border border-line px-3 text-xs font-semibold text-ink-muted hover:bg-sunken">Save</button>
+          </div>
+          <p className="mt-1 text-[11px] text-ink-faint">Total monthly loan repayments may not exceed this share of gross salary.</p>
+        </div>
+
+        <div>
+          <label className={labelCls}>Max concurrent active loans</label>
+          <div className="flex gap-2">
+            <input type="number" min="0" step="1" value={maxConcurrent} onChange={(e) => setMaxConcurrent(e.target.value)} className={inputCls} placeholder="Unlimited" />
+            <button onClick={saveConcurrent} disabled={saving} className="h-11 shrink-0 rounded-xl border border-line px-3 text-xs font-semibold text-ink-muted hover:bg-sunken">Save</button>
+          </div>
+          <p className="mt-1 text-[11px] text-ink-faint">Blank = unlimited.</p>
+        </div>
+
+        <div>
+          <label className={labelCls}>Minimum employment (months)</label>
+          <div className="flex gap-2">
+            <input type="number" min="0" step="1" value={minMonths} onChange={(e) => setMinMonths(e.target.value)} className={inputCls} placeholder="0" />
+            <button onClick={saveMinMonths} disabled={saving} className="h-11 shrink-0 rounded-xl border border-line px-3 text-xs font-semibold text-ink-muted hover:bg-sunken">Save</button>
+          </div>
+        </div>
+
+        <div>
+          <label className={labelCls}>Repayment grace period (days)</label>
+          <div className="flex gap-2">
+            <input type="number" min="0" step="1" value={graceDays} onChange={(e) => setGraceDays(e.target.value)} className={inputCls} placeholder="0" />
+            <button onClick={saveGrace} disabled={saving} className="h-11 shrink-0 rounded-xl border border-line px-3 text-xs font-semibold text-ink-muted hover:bg-sunken">Save</button>
+          </div>
+        </div>
+
+        <div>
+          <label className={labelCls}>Default repayment method</label>
+          <select value={p.default_repayment_method || "payroll_deduction"} onChange={(e) => patchSelect("default_repayment_method", e.target.value)} disabled={saving} className={inputCls}>
+            <option value="payroll_deduction">Payroll deduction</option>
+            <option value="external">External</option>
+          </select>
+        </div>
+
+        <div>
+          <label className={labelCls}>On resignation / termination</label>
+          <select value={p.resignation_policy || "continue_external"} onChange={(e) => patchSelect("resignation_policy", e.target.value)} disabled={saving} className={inputCls}>
+            <option value="continue_external">Switch to external repayment</option>
+            <option value="stop">Stop payroll deductions</option>
+            <option value="settle">Flag for settlement</option>
+            <option value="notify_only">Notify HR only</option>
+          </select>
+        </div>
+
+        <div>
+          <label className={labelCls}>Missed payroll behaviour</label>
+          <select value={p.missed_payroll_policy || "accumulate"} onChange={(e) => patchSelect("missed_payroll_policy", e.target.value)} disabled={saving} className={inputCls}>
+            <option value="accumulate">Accumulate (catch up next run)</option>
+            <option value="skip">Skip the installment</option>
+            <option value="extend">Extend the schedule</option>
+            <option value="mark_overdue">Mark overdue</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <Toggle label="Payroll deduction mandatory" hint="Force all loans onto payroll deduction." k="payroll_deduction_mandatory" />
+        <Toggle label="Allow external repayment" hint="Permit manual/external repayments." k="allow_external_repayment" />
+        <Toggle label="Salary advance enabled" hint="Offer salary-advance products." k="salary_advance_enabled" />
+        <Toggle label="Allow duplicate active loans" hint="Permit more than one open loan of the same product." k="allow_duplicate_active_loans" />
+        <Toggle label="Allow probation employees" hint="Let employees on probation apply." k="allow_probation" />
+        <Toggle label="Disburse on approval" hint="Approval immediately releases the loan (off = separate disbursement step)." k="disburse_on_approval" />
+      </div>
+      {saving && <p className="mt-3 text-[11px] text-ink-faint">Saving…</p>}
+    </div>
+  );
+}
+
+// Org-defined loan product types — pure metadata, managed entirely from the UI.
+function ProductTypesCard({ productTypes, busy, onAdd, onRename, onDelete, onArchive, onRestore }) {
+  const [newName, setNewName] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const active = productTypes.filter((t) => t.is_active !== false);
+  const archived = productTypes.filter((t) => t.is_active === false);
+  return (
+    <div className="rounded-2xl border border-line/80 bg-card p-6 shadow-sm">
+      <h3 className="text-sm font-semibold text-ink">Loan product types</h3>
+      <p className="mt-1 text-xs text-ink-muted">
+        Your own product types (Education, Emergency, Cooperative…) for grouping, filtering and reports. The loan engine never changes behaviour based on a type.
+      </p>
+      <div className="mt-4 flex gap-2">
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && newName.trim()) { onAdd(newName.trim()); setNewName(""); } }}
+          className={inputCls}
+          placeholder="New type name, e.g. Education"
+        />
+        <button
+          onClick={() => { if (newName.trim()) { onAdd(newName.trim()); setNewName(""); } }}
+          disabled={busy || !newName.trim()}
+          className="h-11 shrink-0 rounded-xl border border-line px-3 text-xs font-semibold text-ink-muted hover:bg-sunken disabled:opacity-60"
+        >
+          <Plus className="mr-1 inline h-3.5 w-3.5" />Add
+        </button>
+      </div>
+      <ul className="mt-3 divide-y divide-line-soft">
+        {active.length === 0 && <li className="py-3 text-xs text-ink-faint">No active product types yet.</li>}
+        {active.map((t) => (
+          <li key={t.id} className="flex items-center justify-between gap-2 py-2">
+            {editingId === t.id ? (
+              <input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { onRename(t, editName); setEditingId(null); } }}
+                className={`${inputCls} h-9`}
+                autoFocus
+              />
+            ) : (
+              <span className="truncate text-sm text-ink">{t.name}</span>
+            )}
+            <div className="flex shrink-0 gap-1">
+              {editingId === t.id ? (
+                <button onClick={() => { onRename(t, editName); setEditingId(null); }} disabled={busy} className="rounded-lg border border-line px-2 py-1 text-xs font-semibold text-ink-muted hover:bg-sunken">Save</button>
+              ) : (
+                <button onClick={() => { setEditingId(t.id); setEditName(t.name); }} className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken"><Pencil className="h-3.5 w-3.5" /></button>
+              )}
+              <button onClick={() => onArchive(t)} disabled={busy} title="Archive type (hide from new products, keeps reports intact)" className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken"><Archive className="h-3.5 w-3.5" /></button>
+              <button onClick={() => onDelete(t)} disabled={busy} title="Delete type (only if unused)" className="rounded-lg p-1.5 text-ink-faint hover:bg-red-50 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {archived.length > 0 && (
+        <div className="mt-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Archived</p>
+          <ul className="mt-1 divide-y divide-line-soft">
+            {archived.map((t) => (
+              <li key={t.id} className="flex items-center justify-between gap-2 py-2">
+                <span className="truncate text-sm text-ink-faint line-through">{t.name}</span>
+                <div className="flex shrink-0 gap-1">
+                  <button onClick={() => onRestore(t)} disabled={busy} className="rounded-lg border border-line px-2 py-1 text-xs font-semibold text-ink-muted hover:bg-sunken">Restore</button>
+                  <button onClick={() => onDelete(t)} disabled={busy} title="Delete type (only if unused)" className="rounded-lg p-1.5 text-ink-faint hover:bg-red-50 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LoanTypeModal({ loanType, productTypes = [], busy, onClose, onSubmit }) {
   const editing = !!loanType;
   const [name, setName] = useState(loanType?.name || "");
   const [rate, setRate] = useState(loanType != null ? String(Number(loanType.interest_per_annum)) : "");
   const [months, setMonths] = useState(loanType?.repayment_period_months ?? "");
+  const [maxAmount, setMaxAmount] = useState(
+    Number(loanType?.max_amount) > 0 ? String(Number(loanType.max_amount)) : ""
+  );
+  const [minAmount, setMinAmount] = useState(
+    Number(loanType?.min_amount) > 0 ? String(Number(loanType.min_amount)) : ""
+  );
+  const [minMonths, setMinMonths] = useState(
+    Number(loanType?.min_tenure_months) > 0 ? String(Number(loanType.min_tenure_months)) : ""
+  );
+  const [interestMethod, setInterestMethod] = useState(loanType?.interest_method || "reducing_balance");
+  const [productTypeId, setProductTypeId] = useState(loanType?.product_type_id || "");
+  const [requiresAdvanceEnablement, setRequiresAdvanceEnablement] = useState(
+    loanType?.capabilities?.requires_advance_enablement === true
+  );
+  const [requiresGuarantor, setRequiresGuarantor] = useState(!!loanType?.requires_guarantor);
+  const [requiresCollateral, setRequiresCollateral] = useState(!!loanType?.requires_collateral);
   const [description, setDescription] = useState(loanType?.description || "");
   const [status, setStatus] = useState(loanType?.status || "active");
+  const ic = loanType?.capabilities || {};
+  const [payrollAllowed, setPayrollAllowed] = useState(ic.payroll_deduction_allowed !== false);
+  const [externalAllowed, setExternalAllowed] = useState(ic.external_repayment_allowed !== false);
+  const [partialAllowed, setPartialAllowed] = useState(ic.partial_repayment_allowed !== false);
+  const [earlyAllowed, setEarlyAllowed] = useState(ic.early_settlement_allowed !== false);
+  const [requiresApproval, setRequiresApproval] = useState(ic.requires_approval !== false);
+  const [disbursementMode, setDisbursementMode] = useState(
+    ic.requires_disbursement == null ? "inherit" : ic.requires_disbursement ? "yes" : "no"
+  );
+  const [affordabilityPct, setAffordabilityPct] = useState(
+    ic.affordability_ratio_override != null ? String(Math.round(Number(ic.affordability_ratio_override) * 1000) / 10) : ""
+  );
+  const [minEmployment, setMinEmployment] = useState(ic.min_employment_months != null ? String(ic.min_employment_months) : "");
+  const [maxConcurrent, setMaxConcurrent] = useState(ic.max_concurrent_loans != null ? String(ic.max_concurrent_loans) : "");
+  const [probationMode, setProbationMode] = useState(ic.allow_probation == null ? "inherit" : ic.allow_probation ? "yes" : "no");
+  const [duplicateMode, setDuplicateMode] = useState(ic.allow_duplicate == null ? "inherit" : ic.allow_duplicate ? "yes" : "no");
   const [error, setError] = useState("");
 
   const submit = (e) => {
@@ -1151,12 +1573,49 @@ function LoanTypeModal({ loanType, busy, onClose, onSubmit }) {
     if (rate === "" || !(r >= 0)) return setError("Enter an interest rate of 0 or more (% per annum).");
     const m = Number(months);
     if (!Number.isInteger(m) || m < 1) return setError("Max tenure must be a whole number of months, at least 1.");
+    const cap = Number(maxAmount);
+    if (maxAmount === "" || !(cap > 0)) return setError("Enter a maximum loan amount greater than 0 — the backend requires a positive cap.");
+    const minCap = minAmount === "" ? 0 : Number(minAmount);
+    if (minAmount !== "" && !(minCap >= 0)) return setError("Minimum amount must be 0 or more.");
+    if (minCap > cap) return setError("Minimum amount cannot exceed the maximum amount.");
+    const minM = minMonths === "" ? 1 : Number(minMonths);
+    if (minMonths !== "" && (!Number.isInteger(minM) || minM < 1)) return setError("Minimum tenure must be a whole number of months, at least 1.");
+    if (minM > m) return setError("Minimum tenure cannot exceed the maximum tenure.");
+    if (affordabilityPct !== "" && !(Number(affordabilityPct) > 0 && Number(affordabilityPct) <= 100))
+      return setError("Affordability override must be a percentage greater than 0 and at most 100 (leave blank to inherit the policy).");
+    if (minEmployment !== "" && (!Number.isInteger(Number(minEmployment)) || Number(minEmployment) < 0))
+      return setError("Minimum employment (months) must be a non-negative whole number.");
+    if (maxConcurrent !== "" && (!Number.isInteger(Number(maxConcurrent)) || Number(maxConcurrent) < 0))
+      return setError("Max concurrent loans must be a non-negative whole number.");
     setError("");
+    const capabilities = {
+      payroll_deduction_allowed: payrollAllowed,
+      external_repayment_allowed: externalAllowed,
+      partial_repayment_allowed: partialAllowed,
+      early_settlement_allowed: earlyAllowed,
+      requires_approval: requiresApproval,
+    };
+
+    if (disbursementMode !== "inherit") capabilities.requires_disbursement = disbursementMode === "yes";
+    if (affordabilityPct !== "") capabilities.affordability_ratio_override = Math.round((Number(affordabilityPct) / 100) * 1e6) / 1e6;
+    if (minEmployment !== "") capabilities.min_employment_months = Number(minEmployment);
+    if (maxConcurrent !== "") capabilities.max_concurrent_loans = Number(maxConcurrent);
+    if (probationMode !== "inherit") capabilities.allow_probation = probationMode === "yes";
+    if (duplicateMode !== "inherit") capabilities.allow_duplicate = duplicateMode === "yes";
+    capabilities.requires_advance_enablement = requiresAdvanceEnablement;
     onSubmit(
       {
         name: name.trim(),
         interest_per_annum: r,
         repayment_period_months: m,
+        max_amount: cap,
+        min_amount: minCap,
+        min_tenure_months: minM,
+        interest_method: interestMethod,
+        product_type_id: productTypeId || null,
+        requires_guarantor: requiresGuarantor,
+        requires_collateral: requiresCollateral,
+        capabilities,
         description: description.trim() || undefined,
         status,
       },
@@ -1191,6 +1650,124 @@ function LoanTypeModal({ loanType, busy, onClose, onSubmit }) {
               <input type="number" min="1" step="1" value={months} onChange={(e) => setMonths(e.target.value)} className={inputCls} placeholder="12" />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Min amount (optional)</label>
+              <input type="number" min="0" step="0.01" value={minAmount} onChange={(e) => setMinAmount(e.target.value)} className={inputCls} placeholder="0" />
+            </div>
+            <div>
+              <label className={labelCls}>Max amount</label>
+              <input type="number" min="0.01" step="0.01" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} className={inputCls} placeholder="500000" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Min tenure (months)</label>
+              <input type="number" min="1" step="1" value={minMonths} onChange={(e) => setMinMonths(e.target.value)} className={inputCls} placeholder="1" />
+            </div>
+            <div>
+              <label className={labelCls}>Interest method</label>
+              <select value={interestMethod} onChange={(e) => setInterestMethod(e.target.value)} className={inputCls}>
+                <option value="reducing_balance">Reducing balance</option>
+                <option value="flat">Flat rate</option>
+                <option value="simple">Simple interest</option>
+                <option value="zero">Zero interest</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>Product type</label>
+            <select value={productTypeId} onChange={(e) => setProductTypeId(e.target.value)} className={inputCls}>
+              <option value="">— None —</option>
+              {productTypes
+                .filter((t) => t.is_active !== false || t.id === productTypeId)
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}{t.is_active === false ? " (archived)" : ""}
+                  </option>
+                ))}
+            </select>
+            <p className="mt-1 text-[11px] text-ink-faint">
+              A label for grouping/reporting. Manage the list under “Loan product types”.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
+              <input type="checkbox" checked={requiresGuarantor} onChange={(e) => setRequiresGuarantor(e.target.checked)} className="h-4 w-4 rounded border-line" />
+              Requires guarantor
+            </label>
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
+              <input type="checkbox" checked={requiresCollateral} onChange={(e) => setRequiresCollateral(e.target.checked)} className="h-4 w-4 rounded border-line" />
+              Requires collateral
+            </label>
+          </div>
+
+          {/* Advanced, per-product rules. Blank / "Inherit" = follow the org loan
+              policy — so a product only overrides what you explicitly set. */}
+          <details className="rounded-xl border border-line/80">
+            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink-muted">Advanced product rules (optional)</summary>
+            <div className="space-y-3 border-t border-line-soft p-3">
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                <label className="flex items-center gap-2 text-sm text-ink-muted">
+                  <input type="checkbox" checked={payrollAllowed} onChange={(e) => setPayrollAllowed(e.target.checked)} className="h-4 w-4 rounded border-line" /> Payroll deduction allowed
+                </label>
+                <label className="flex items-center gap-2 text-sm text-ink-muted">
+                  <input type="checkbox" checked={externalAllowed} onChange={(e) => setExternalAllowed(e.target.checked)} className="h-4 w-4 rounded border-line" /> External repayment allowed
+                </label>
+                <label className="flex items-center gap-2 text-sm text-ink-muted">
+                  <input type="checkbox" checked={partialAllowed} onChange={(e) => setPartialAllowed(e.target.checked)} className="h-4 w-4 rounded border-line" /> Partial repayment allowed
+                </label>
+                <label className="flex items-center gap-2 text-sm text-ink-muted">
+                  <input type="checkbox" checked={earlyAllowed} onChange={(e) => setEarlyAllowed(e.target.checked)} className="h-4 w-4 rounded border-line" /> Early settlement allowed
+                </label>
+                <label className="flex items-center gap-2 text-sm text-ink-muted" title="When unchecked, requests for this product are approved automatically with no approval workflow.">
+                  <input type="checkbox" checked={requiresApproval} onChange={(e) => setRequiresApproval(e.target.checked)} className="h-4 w-4 rounded border-line" /> Requires approval
+                </label>
+                <label className="flex items-center gap-2 text-sm text-ink-muted">
+                  <input type="checkbox" checked={requiresAdvanceEnablement} onChange={(e) => setRequiresAdvanceEnablement(e.target.checked)} className="h-4 w-4 rounded border-line" /> Only available when advances enabled in policy
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Disbursement</label>
+                  <select value={disbursementMode} onChange={(e) => setDisbursementMode(e.target.value)} className={inputCls}>
+                    <option value="inherit">Inherit policy</option>
+                    <option value="no">Auto-disburse on approval</option>
+                    <option value="yes">Require explicit disbursement</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Affordability % override</label>
+                  <input type="number" min="1" max="100" step="0.1" value={affordabilityPct} onChange={(e) => setAffordabilityPct(e.target.value)} className={inputCls} placeholder="Inherit policy" />
+                </div>
+                <div>
+                  <label className={labelCls}>Min employment (months)</label>
+                  <input type="number" min="0" step="1" value={minEmployment} onChange={(e) => setMinEmployment(e.target.value)} className={inputCls} placeholder="Inherit policy" />
+                </div>
+                <div>
+                  <label className={labelCls}>Max concurrent loans</label>
+                  <input type="number" min="0" step="1" value={maxConcurrent} onChange={(e) => setMaxConcurrent(e.target.value)} className={inputCls} placeholder="Inherit policy" />
+                </div>
+                <div>
+                  <label className={labelCls}>Probation eligible</label>
+                  <select value={probationMode} onChange={(e) => setProbationMode(e.target.value)} className={inputCls}>
+                    <option value="inherit">Inherit policy</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Allow duplicate of this product</label>
+                  <select value={duplicateMode} onChange={(e) => setDuplicateMode(e.target.value)} className={inputCls}>
+                    <option value="inherit">Inherit policy</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </details>
+
           <div>
             <label className={labelCls}>Description (optional)</label>
             <textarea

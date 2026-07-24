@@ -37,6 +37,12 @@ api.interceptors.request.use(
                 config.headers.Authorization = `Bearer ${token}`;
             }
         }
+        // Deployed backends resolve the org from the hostname; a localhost
+        // backend can't, so VITE_ORG_SLUG pins the real org in local dev.
+        const orgSlug = import.meta.env.VITE_ORG_SLUG;
+        if (orgSlug && !config.headers['x-organization-slug']) {
+            config.headers['x-organization-slug'] = orgSlug;
+        }
         return config;
     },
     (error) => Promise.reject(scrubError(error))

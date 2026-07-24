@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search, RefreshCw, ScrollText, ChevronLeft, ChevronRight } from "lucide-react";
 import { auditService } from "../../services/auditService";
+import { ErrorState } from "../../components/ui/ErrorState";
 
 // The audit endpoint returns a lean record: { user_full_name, action, time,
 // process }. Names are embedded, so no roster lookup is needed.
@@ -73,6 +74,7 @@ const PAGE_SIZE = 25;
 const AuditTrailPage = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [q, setQ] = useState("");
   const [moduleFilter, setModuleFilter] = useState("all");
   const [showHttp, setShowHttp] = useState(false);
@@ -84,10 +86,12 @@ const AuditTrailPage = () => {
     (async () => {
       try {
         const rows = await auditService.list(500);
-        if (!stale) setLogs(Array.isArray(rows) ? rows : []);
+        if (!stale) { setLogs(Array.isArray(rows) ? rows : []); setError(false); }
       } catch (err) {
         console.error("[Audit] Failed to load audit logs:", err);
-        if (!stale) setLogs([]);
+        // Don't blank the log to an "empty" state — a failed load must read as a
+        // failure, not as "no audit activity" (that would hide an outage).
+        if (!stale) setError(true);
       } finally {
         if (!stale) setLoading(false);
       }
@@ -185,6 +189,13 @@ const AuditTrailPage = () => {
 
         {loading ? (
           <div className="p-12 text-center text-ink-muted">Loading the audit trail…</div>
+        ) : error ? (
+          <ErrorState
+            title="Couldn’t load the audit trail"
+            message="The audit log failed to load. This is not the same as “no activity” — please retry."
+            onRetry={() => { setLoading(true); setError(false); setTick((t) => t + 1); }}
+            retrying={loading}
+          />
         ) : rows.length === 0 ? (
           <div className="p-12 text-center">
             <ScrollText className="mx-auto h-12 w-12 text-ink-ghost" />

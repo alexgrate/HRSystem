@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { TabPills } from "../../components/ui/TabPills";
-import { Search, Check, X, BellRing, Trash2, CalendarDays } from "lucide-react";
+import { Search, Check, X, BellRing, CalendarDays, CalendarClock, Plus, AlertCircle } from "lucide-react";
 import { leaveService } from "../../services/leaveService";
+import { administrationPeriodService, periodDate } from "../../services/administrationPeriodService";
 import { approvalService } from "../../services/approvalService";
 import { setupService } from "../../services/setupService";
 import { usePermissions } from "../../context/PermissionContext";
@@ -33,22 +34,57 @@ const LeaveAdminPage = () => {
   const toast = useToast();
   const confirm = useConfirm();
 
-  const canDelete = can(RESOURCE_CODES.LEAVE_REQUESTS, "delete");
-
   const [requests, setRequests] = useState([]);
   const [leaveTypes, setLeaveTypes] = useState([]);
   const [staff, setStaff] = useState([]);
   const [workflows, setWorkflows] = useState(null);
 
-  // Manage permission AND (when a leave workflow exists) being one of its
-  // designated approver job roles.
-  const canManage =
-    can(RESOURCE_CODES.LEAVE_REQUESTS, "manage") &&
-    isDesignatedApprover(workflows, "LEAVE_REQUEST", user, isAdmin);
+  // Leave approve/reject is authorized backend-side by being the workflow's
+  // designated approver (job role) alone — no RBAC 'manage' is required (the
+  // backend performs no manage check). Gate on the designated-approver signal to
+  // match, so an authorized approver is not hidden from the controls.
+  const canManage = isDesignatedApprover(workflows, "LEAVE_REQUEST", user, isAdmin);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("pending");
   const [q, setQ] = useState("");
   const [busyId, setBusyId] = useState(null);
+
+  // Administration periods gate every leave request (the range must sit
+  // inside one active/scheduled period). null = not loaded yet, so the
+  // "no window open" banner can't flash before the first fetch resolves.
+  const [periods, setPeriods] = useState(null);
+  const [showPeriods, setShowPeriods] = useState(false);
+  const [periodModal, setPeriodModal] = useState(null); // { mode: 'open' | 'schedule' }
+
+  const loadPeriods = async () => {
+    try {
+      const rows = await administrationPeriodService.list();
+      setPeriods(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      console.error("[LeaveAdmin] Periods load failed:", err);
+      setPeriods(null);
+    }
+  };
+
+  useEffect(() => {
+    // The list endpoint is admin-only; non-admin approvers keep periods=null
+    // (unknown) and never see the banner or the manage panel.
+    if (!isAdmin) return;
+    let stale = false;
+    (async () => {
+      try {
+        const rows = await administrationPeriodService.list();
+        if (!stale) setPeriods(Array.isArray(rows) ? rows : []);
+      } catch (err) {
+        console.error("[LeaveAdmin] Periods load failed:", err);
+      }
+    })();
+    return () => { stale = true; };
+  }, [isAdmin]);
+
+  const activePeriod = Array.isArray(periods)
+    ? periods.find((p) => String(p.status).toLowerCase() === "active") || null
+    : null;
 
   useEffect(() => {
     let stale = false;
@@ -163,33 +199,111 @@ const LeaveAdminPage = () => {
     }
   };
 
-  const remove = async (r) => {
-    const ok = await confirm({
-      title: "Delete this leave request?",
-      message: `${requesterName(r)} · ${typeName(r)}. This can't be undone.`,
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (!ok) return;
-    setBusyId(r.id);
-    try {
-      await leaveService.remove(r.id);
-      setRequests((list) => list.filter((x) => x.id !== r.id));
-      toast.success("Leave request deleted.");
-    } catch (err) {
-      toast.error(err?.message || "Couldn't delete the request.");
-    } finally {
-      setBusyId(null);
-    }
-  };
+  // NOTE: deletion is deliberately absent here — the backend only lets the
+  // OWNER cancel their own pending request (a soft-cancel), so an admin
+  // delete button can never succeed. Owners cancel from Self-service → Leave.
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="text-xs font-semibold uppercase tracking-wider text-brand">Leave Engine</div>
-        <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink">Leave Administration</h1>
-        <p className="mt-1 text-sm text-ink-muted">Every leave request in the organization — review, action, and keep coverage in view.</p>
+      <div className="flex items-end justify-between flex-wrap gap-4">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-brand">Leave Engine</div>
+          <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink">Leave Administration</h1>
+          <p className="mt-1 text-sm text-ink-muted">Every leave request in the organization — review, action, and keep coverage in view.</p>
+        </div>
+        {isAdmin && (
+          <button
+            onClick={() => setShowPeriods((s) => !s)}
+            className="inline-flex items-center gap-2 rounded-xl border border-line px-3.5 py-2 text-xs font-semibold text-ink-muted hover:bg-sunken"
+          >
+            <CalendarClock className="h-4 w-4" />
+            {showPeriods ? "Hide periods" : "Manage periods"}
+          </button>
+        )}
       </div>
+
+      {isAdmin && Array.isArray(periods) && !activePeriod && (
+        <div className="flex items-center gap-2.5 rounded-xl bg-amber-50 p-3.5 text-xs text-amber-800 border border-amber-200">
+          <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+          <span>
+            <span className="font-semibold">No administration period is open</span> — employees can't
+            submit leave requests until one covers their dates. Open or schedule a period under
+            “Manage periods”.
+          </span>
+        </div>
+      )}
+
+      {isAdmin && showPeriods && (
+        <div className="rounded-2xl border border-line/80 bg-card shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft p-5">
+            <div>
+              <h3 className="font-semibold text-ink">Administration periods</h3>
+              <p className="text-xs text-ink-muted">
+                Leave requests must fall inside one period; day budgets reset each period. Periods
+                can't overlap and complete themselves when their end date passes.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPeriodModal({ mode: "schedule" })}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-line px-3.5 py-2 text-xs font-semibold text-ink-muted hover:bg-sunken"
+              >
+                <CalendarClock className="h-3.5 w-3.5" /> Schedule period
+              </button>
+              <button
+                onClick={() => setPeriodModal({ mode: "open" })}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-95"
+              >
+                <Plus className="h-3.5 w-3.5" /> Open period now
+              </button>
+            </div>
+          </div>
+          {!Array.isArray(periods) ? (
+            <div className="p-8 text-center text-xs text-ink-muted">Loading periods…</div>
+          ) : periods.length === 0 ? (
+            <div className="p-8 text-center text-xs text-ink-faint">
+              No periods yet — open one to unblock leave requests.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-semibold">Name</th>
+                    <th className="px-4 py-2 text-left font-semibold">Window</th>
+                    <th className="px-4 py-2 text-left font-semibold">Status</th>
+                    <th className="px-4 py-2 text-left font-semibold">Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {periods.map((p) => (
+                    <tr key={p.id} className="border-t border-line-soft">
+                      <td className="px-4 py-2.5 font-medium text-ink">{p.name || "—"}</td>
+                      <td className="px-4 py-2.5 text-ink-2">
+                        {periodDate(p.start_date)} → {periodDate(p.end_date)}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                            p.status === "active"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : p.status === "scheduled"
+                                ? "bg-sky-50 text-sky-700"
+                                : "bg-sunken text-ink-muted"
+                          }`}
+                        >
+                          {p.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-ink-muted">{fmtDate(p.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Summary chips */}
       <div className="grid gap-3 sm:grid-cols-3">
@@ -274,11 +388,6 @@ const LeaveAdminPage = () => {
                               <BellRing className="h-3.5 w-3.5" />
                             </button>
                           )}
-                          {canDelete && (
-                            <button onClick={() => remove(r)} title="Delete request" className="rounded-lg p-1.5 text-ink-faint hover:bg-red-50 hover:text-red-600">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -289,8 +398,109 @@ const LeaveAdminPage = () => {
           </div>
         )}
       </div>
+
+      {periodModal && (
+        <PeriodModal
+          mode={periodModal.mode}
+          onClose={() => setPeriodModal(null)}
+          onSaved={async () => {
+            setPeriodModal(null);
+            setShowPeriods(true);
+            await loadPeriods();
+          }}
+        />
+      )}
     </div>
   );
 };
+
+// Create an administration period. 'open' starts today (backend fixes the
+// start date server-side, so only the end is asked for); 'schedule' takes a
+// full range and the backend activates it immediately if it covers today.
+// Overlap and past-date rules are enforced server-side — errors show inline.
+function PeriodModal({ mode, onClose, onSaved }) {
+  const toast = useToast();
+  const opening = mode === "open";
+  const today = new Date().toLocaleDateString("en-CA");
+  const [name, setName] = useState("");
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const labelCls = "text-xs font-semibold text-ink-muted uppercase tracking-wider";
+  const inputCls = "w-full h-11 border border-line bg-card rounded-xl px-3 outline-none mt-1 focus:border-brand";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    if (!endDate) return setError("Pick an end date for the period.");
+    if (!opening && startDate > endDate) return setError("The start date must be on or before the end date.");
+    if (opening && endDate < today) return setError("The end date must be today or later.");
+    setError("");
+    setBusy(true);
+    try {
+      if (opening) {
+        await administrationPeriodService.openNow({ name: name.trim(), end_date: endDate });
+        toast.success("Period opened — leave requests are unblocked.");
+      } else {
+        await administrationPeriodService.schedule({ name: name.trim(), start_date: startDate, end_date: endDate });
+        toast.success("Period scheduled.");
+      }
+      onSaved?.();
+    } catch (err) {
+      console.error("[LeaveAdmin] Period save failed:", err);
+      setError(err?.error?.message || err?.message || "Couldn't save the period.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="text-lg font-bold text-ink">{opening ? "Open a period from today" : "Schedule a period"}</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
+        </div>
+        <form onSubmit={submit} className="mt-4 space-y-4">
+          {error && (
+            <div className="flex items-center gap-2.5 rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-600" /> <span>{error}</span>
+            </div>
+          )}
+          <div>
+            <label className={labelCls}>Name (optional)</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. H2 2026 leave window" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Start date</label>
+              {opening ? (
+                <input value={today} disabled className={`${inputCls} opacity-60`} />
+              ) : (
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputCls} required />
+              )}
+            </div>
+            <div>
+              <label className={labelCls}>End date</label>
+              <input type="date" value={endDate} min={opening ? today : startDate || undefined} onChange={(e) => setEndDate(e.target.value)} className={inputCls} required />
+            </div>
+          </div>
+          <p className="text-xs text-ink-faint">
+            Periods can't overlap an existing one. Once the end date passes, the period completes
+            automatically and leave requests need a new window.
+          </p>
+          <div className="flex gap-2 justify-end pt-1">
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+            <button type="submit" disabled={busy} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">
+              {busy ? "Saving…" : opening ? "Open period" : "Schedule period"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 export default LeaveAdminPage;

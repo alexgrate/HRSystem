@@ -42,7 +42,19 @@ export function toNumber(value) {
 
 export function parseDocList(value) {
   if (!value) return [];
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) {
+    // JSON imports may carry plain strings — the API only accepts
+    // { name, is_mandatory } objects, so normalize both shapes.
+    return value
+      .map((item) =>
+        typeof item === "string"
+          ? { name: item.trim(), is_mandatory: true }
+          : item && typeof item === "object" && item.name
+            ? { name: String(item.name).trim(), description: item.description ?? null, is_mandatory: item.is_mandatory !== false }
+            : null
+      )
+      .filter((d) => d && d.name);
+  }
   return String(value)
     .split(";")
     .map((part) => part.trim())

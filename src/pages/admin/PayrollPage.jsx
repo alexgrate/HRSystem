@@ -10,19 +10,8 @@ import { isDesignatedApprover } from "../../utils/approvers";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getEmployeeName } from "../../utils/employee";
-import { MONTHS, fmtMoney, extractRunLines } from "../../utils/payroll";
+import { MONTHS, fmtMoney, extractRunLines, runStatusMeta } from "../../utils/payroll";
 import { orgService } from "../../services/orgService";
-
-const STATUS_META = {
-  draft: { label: "Draft", cls: "bg-sunken text-ink-muted", step: 0 },
-  preview_generated: { label: "Preview ready", cls: "bg-sky-50 text-sky-700", step: 1 },
-  submitted_pending_approval: { label: "Awaiting approval", cls: "bg-amber-50 text-amber-700", step: 2 },
-  approved: { label: "Approved", cls: "bg-emerald-50 text-emerald-700", step: 3 },
-  lock_in_pending_approval: { label: "Lock-in pending", cls: "bg-amber-50 text-amber-700", step: 4 },
-  locked_in: { label: "Locked in", cls: "bg-violet-50 text-violet-700", step: 5 },
-  distribution_pending_approval: { label: "Distribution pending", cls: "bg-amber-50 text-amber-700", step: 6 },
-  distributed: { label: "Distributed", cls: "bg-emerald-600 text-white", step: 7 },
-};
 
 const MILESTONES = [
   { label: "Preview", at: 1 },
@@ -30,8 +19,6 @@ const MILESTONES = [
   { label: "Lock-in", at: 5 },
   { label: "Distribution", at: 7 },
 ];
-
-const statusMeta = (status) => STATUS_META[status] || { label: status || "Unknown", cls: "bg-sunken text-ink-muted", step: 0 };
 
 const CURRENCIES = ["NGN", "USD", "GBP", "EUR", "GHS", "KES", "ZAR"];
 
@@ -41,23 +28,25 @@ const actionsForStatus = (status) => {
     case "preview_generated":
       return [{ key: "submit", label: "Submit for approval", perm: "update", confirmMsg: "Submit this payroll run for approval?", exec: (id) => payrollService.submitRun(id) }];
     case "submitted_pending_approval":
+      // Backend approve/reject routes require PAYROLL_RUN 'update' (not 'manage');
+      // the isDesignatedApprover check below is what restricts sign-off eligibility.
       return [
-        { key: "approve", label: "Approve payroll", perm: "manage", approve: true, exec: (id, aid, c) => payrollService.approveRun(id, aid, c) },
-        { key: "reject", label: "Reject payroll", perm: "manage", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectRun(id, aid, c) },
+        { key: "approve", label: "Approve payroll", perm: "update", approve: true, exec: (id, aid, c) => payrollService.approveRun(id, aid, c) },
+        { key: "reject", label: "Reject payroll", perm: "update", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectRun(id, aid, c) },
       ];
     case "approved":
       return [{ key: "lock", label: "Request lock-in", perm: "update", confirmMsg: "Request lock-in? A locked run can no longer be adjusted.", exec: (id) => payrollService.requestLockIn(id) }];
     case "lock_in_pending_approval":
       return [
-        { key: "approve-lock", label: "Approve lock-in", perm: "manage", approve: true, exec: (id, aid, c) => payrollService.approveLockIn(id, aid, c) },
-        { key: "reject-lock", label: "Reject lock-in", perm: "manage", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectLockIn(id, aid, c) },
+        { key: "approve-lock", label: "Approve lock-in", perm: "update", approve: true, exec: (id, aid, c) => payrollService.approveLockIn(id, aid, c) },
+        { key: "reject-lock", label: "Reject lock-in", perm: "update", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectLockIn(id, aid, c) },
       ];
     case "locked_in":
       return [{ key: "distribute", label: "Request distribution", perm: "update", confirmMsg: "Request distribution? Employees will be notified of their payslips once approved.", exec: (id) => payrollService.requestDistribution(id) }];
     case "distribution_pending_approval":
       return [
-        { key: "approve-dist", label: "Approve distribution", perm: "manage", approve: true, exec: (id, aid, c) => payrollService.approveDistribution(id, aid, c) },
-        { key: "reject-dist", label: "Reject distribution", perm: "manage", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectDistribution(id, aid, c) },
+        { key: "approve-dist", label: "Approve distribution", perm: "update", approve: true, exec: (id, aid, c) => payrollService.approveDistribution(id, aid, c) },
+        { key: "reject-dist", label: "Reject distribution", perm: "update", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectDistribution(id, aid, c) },
       ];
     default:
       return [];
@@ -89,6 +78,10 @@ const PayrollPage = () => {
   const canCreate = can(RESOURCE_CODES.PAYROLL, "create");
   const canUpdate = can(RESOURCE_CODES.PAYROLL, "update");
   const canManage = can(RESOURCE_CODES.PAYROLL, "manage");
+  // Adjustments are a SEPARATE backend RBAC resource (PAYROLL_ADJUSTMENT), not
+  // PAYROLL_RUN. Backend routes: create -> create, submit/approve/reject -> update.
+  const canAdjCreate = can(RESOURCE_CODES.PAYROLL_ADJUSTMENT, "create");
+  const canAdjUpdate = can(RESOURCE_CODES.PAYROLL_ADJUSTMENT, "update");
 
   // Mirror of selectedId readable inside async callbacks, so a detail write
   // can check the selection hasn't moved on since the fetch started.
@@ -246,7 +239,7 @@ const PayrollPage = () => {
   // Runs may carry the pay group as a uuid — show the human name.
   const payGroupName = (v) => payGroups.find((g) => g.id === v || g.name === v)?.name || v;
 
-  const meta = selectedRun ? statusMeta(selectedRun.status) : null;
+  const meta = selectedRun ? runStatusMeta(selectedRun.status) : null;
   // Approve/reject only shows for the workflow's designated approver job
   // role (plus admins) — permission alone isn't the right to sign off.
   const STAGE_WORKFLOW_TYPE = {
@@ -261,7 +254,11 @@ const PayrollPage = () => {
           (!a.approve || isDesignatedApprover(workflows, STAGE_WORKFLOW_TYPE[selectedRun.status], user, isAdmin))
       )
     : [];
-  const adjustable = meta ? meta.step < 5 : false; // no more adjustments once locked in
+  // Backend createPayrollAdjustment only accepts these run statuses (adjustments
+  // open after approval and stay open through distribution approval).
+  const adjustable = selectedRun
+    ? ["approved", "locked_in", "distribution_pending_approval"].includes(selectedRun.status)
+    : false;
 
   return (
     <div className="space-y-6">
@@ -296,7 +293,7 @@ const PayrollPage = () => {
           {/* Runs list */}
           <div className="space-y-2">
             {runs.map((r) => {
-              const m = statusMeta(r.status);
+              const m = runStatusMeta(r.status);
               const isSel = selectedId === r.id;
               return (
                 <button
@@ -423,7 +420,13 @@ const PayrollPage = () => {
                             </td>
                             <td className="px-3 py-2 text-right">{fmtMoney(l.base_salary ?? l.base, selectedRun.currency)}</td>
                             <td className="px-3 py-2 text-right text-emerald-600">{fmtMoney(l.allowances_total ?? l.allowances, selectedRun.currency)}</td>
-                            <td className="px-3 py-2 text-right text-red-600">{fmtMoney(l.deductions_total ?? l.total_deductions ?? l.deductions, selectedRun.currency)}</td>
+                            <td
+                              className="px-3 py-2 text-right text-red-600"
+                              title={Number(l.snapshot?.loan_deductions) > 0 ? `Includes ${fmtMoney(l.snapshot.loan_deductions, selectedRun.currency)} loan repayment` : undefined}
+                            >
+                              {fmtMoney(l.deductions_total ?? l.total_deductions ?? l.deductions, selectedRun.currency)}
+                              {Number(l.snapshot?.loan_deductions) > 0 && <span className="ml-1 align-middle text-[9px] font-bold uppercase text-ink-faint">incl. loan</span>}
+                            </td>
                             <td className="px-3 py-2 text-right font-semibold">{fmtMoney(l.net_salary ?? l.net_pay ?? l.net ?? l.total_net, selectedRun.currency)}</td>
                           </tr>
                         ))}
@@ -439,7 +442,7 @@ const PayrollPage = () => {
                       <h4 className="text-sm font-semibold text-ink">Adjustments</h4>
                       <p className="text-[11px] text-ink-muted">One-off earnings or deductions for this run{adjustable ? "" : " (locked)"}.</p>
                     </div>
-                    {canUpdate && adjustable && (
+                    {canAdjCreate && adjustable && (
                       <button
                         onClick={() => setShowAdjustment(true)}
                         className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-sunken"
@@ -468,7 +471,7 @@ const PayrollPage = () => {
                               </div>
                             </div>
                             <div className="flex shrink-0 gap-1.5">
-                              {canUpdate && (st === "draft" || st === "created") && (
+                              {canAdjUpdate && (st === "draft" || st === "created") && (
                                 <button
                                   disabled={busy}
                                   onClick={async () => {
@@ -486,7 +489,7 @@ const PayrollPage = () => {
                                   Submit
                                 </button>
                               )}
-                              {canManage && st.includes("pend") && (
+                              {canAdjUpdate && st.includes("pend") && (
                                 <>
                                   <button
                                     disabled={busy}

@@ -6,6 +6,11 @@ export const payrollService = {
   listRuns: () => api.get('/api/payroll/runs').then((res) => unwrapList(res, ['runs'])),
   getRun: (runId) => api.get(`/api/payroll/runs/${runId}`),
 
+  // Employee self-service payslips: server-scoped to the caller's own lines
+  // (only distributed runs). Use this from ESS instead of reading whole runs —
+  // /runs and /runs/:id return every colleague's pay to any authenticated user.
+  listMyPayslips: () => api.get('/api/payroll/payslips/me').then((res) => unwrapList(res, ['payslips'])),
+
   submitRun: (runId) => api.post(`/api/payroll/runs/${runId}/submit`, {}),
   approveRun: (runId, approvalRequestId, comment) =>
     api.post(`/api/payroll/runs/${runId}/approve`, { approval_request_id: approvalRequestId, comment: comment || null }),
