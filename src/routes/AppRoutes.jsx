@@ -20,12 +20,13 @@ function PageLoading() {
 }
 
 function IndexRedirect() {
-  const { can, canAccess } = usePermissions();
-  const first = RESOURCES.find((r) =>
-    Array.isArray(r.checks) && r.checks.length
+  const { can, canAccess, isAdmin } = usePermissions();
+  const first = RESOURCES.find((r) => {
+    if (r.adminOnly && !isAdmin) return false;
+    return Array.isArray(r.checks) && r.checks.length
       ? canAccess(r.checks, "any")
-      : can(r.resource, r.action || "read")
-  );
+      : can(r.resource, r.action || "read");
+  });
   return <Navigate to={first ? pathFor(first) : "/login"} replace />;
 }
 
@@ -61,6 +62,7 @@ export default function AppRoutes() {
                         resource={r.resource}
                         action={r.action || "read"}
                         checks={r.checks}
+                        adminOnly={r.adminOnly}
                       >
                         <Suspense fallback={<PageLoading />}>
                           <Component />

@@ -75,12 +75,13 @@ const Login = () => {
     <div className="relative h-screen w-screen overflow-hidden bg-[#faf8f3] text-ink" style={{ height: "100dvh" }}>
       <div className="pointer-events-none absolute inset-0 opacity-[0.5] grain" />
 
-      <div className="relative mx-auto h-full w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-[1.15fr_1fr]">
+      {/* Full-bleed split layout — both panels stretch edge to edge on every screen width. */}
+      <div className="relative h-full w-full grid grid-cols-1 lg:grid-cols-[1.15fr_1fr]">
 
         <div
           ref={brandRef}
           onMouseMove={moveSpot}
-          className="relative hidden h-full flex-col justify-between overflow-hidden bg-gradient-to-br from-brand-darkest via-brand-dark to-brand p-12 text-white lg:flex xl:p-16"
+          className="relative hidden h-full flex-col justify-between overflow-hidden bg-gradient-to-br from-brand-darkest via-brand-dark to-brand p-12 text-white lg:flex xl:p-16 2xl:p-20"
         >
           {/* Slow settle-zoom on the decorative field, plus a soft glow that trails the cursor. */}
           <div className="pointer-events-none absolute inset-0 anim-zoom">
@@ -128,7 +129,8 @@ const Login = () => {
           </div>
         </div>
 
-        <div className="relative flex h-full flex-col justify-between px-6 py-12 sm:px-16 lg:px-20">
+        {/* overflow-y-auto keeps the form reachable on short viewports since the page root clips overflow. */}
+        <div className="relative flex h-full flex-col justify-between overflow-y-auto px-6 py-10 sm:px-16 lg:px-20 2xl:px-28">
           
           <div className="flex items-center gap-3.5 lg:hidden shrink-0">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand p-1.5 shadow-md overflow-hidden">

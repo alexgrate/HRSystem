@@ -3,9 +3,9 @@ import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../context/PermissionContext';
 
 
-const ProtectedRoute = ({ children, resource = null, action = 'read', checks = null }) => {
+const ProtectedRoute = ({ children, resource = null, action = 'read', checks = null, adminOnly = false }) => {
   const { user, loading } = useAuth();
-  const { can, canAccess, ready } = usePermissions();
+  const { can, canAccess, ready, isAdmin } = usePermissions();
   const location = useLocation();
   const allowed = Array.isArray(checks) && checks.length
     ? canAccess(checks, 'any')
@@ -21,6 +21,14 @@ const ProtectedRoute = ({ children, resource = null, action = 'read', checks = n
 
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (adminOnly && !isAdmin) {
+    return (
+      <div className="p-8 text-center text-ink-muted border border-dashed border-line rounded-2xl bg-card">
+        This module is limited to organization administrators.
+      </div>
+    );
   }
 
   if (resource && !allowed) {

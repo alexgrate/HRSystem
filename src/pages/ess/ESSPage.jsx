@@ -17,6 +17,7 @@ import { MONTHS, fmtMoney, lineAmounts } from "../../utils/payroll";
 import { statusBadgeCls } from "../../utils/status";
 import { previewDocument } from "../../utils/documentPreview";
 import { TabPills } from "../../components/ui/TabPills";
+import EmployeeAppraisalTab from "../../components/appraisal/EmployeeAppraisal";
 import api from "../../services/api";
 
 function useOrgNames(user) {
@@ -90,6 +91,7 @@ const ESSPage = () => {
                     { key: "profile", label: "Profile" },
                     { key: "records", label: "Records" },
                     { key: "leave", label: "Leave" },
+                    { key: "appraisals", label: "Appraisals" },
                     { key: "payslips", label: "Payslips" },
                     { key: "loans", label: "Loans" },
                     { key: "docs", label: "Documents" },
@@ -106,6 +108,7 @@ const ESSPage = () => {
             )}
             {tab === "records" && <MyRecords refreshKey={recordTick} onAdd={(type) => setRecordModal({ type })} />}
             {tab === "leave" && <LeaveTracker onRequestLeave={setActiveLeaveRequest} refreshKey={leaveTick} />}
+            {tab === "appraisals" && <EmployeeAppraisalTab />}
             {tab === "payslips" && <Payslips onOpen={(run) => setDrawer(run)} />}
             {tab === "loans" && (
                 <LoansTracker

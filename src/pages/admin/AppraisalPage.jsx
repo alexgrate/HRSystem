@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { Link } from "react-router-dom";
 import {
   ClipboardCheck,
-  Target,
+  UserCircle,
   Users,
   Repeat,
   Gauge,
@@ -10,7 +11,6 @@ import {
   Check,
   X,
   Lock,
-  Send,
   Pencil,
   Trash2,
   ChevronRight,
@@ -25,12 +25,13 @@ import {
   performanceIndicatorService,
   appraisalCycleService,
   appraisalCycleLifecycleService,
-  appraisalTargetService,
   appraisalReviewService,
+  appraisalSessionService,
 } from "../../services/appraisalService";
 import { administrationPeriodService } from "../../services/administrationPeriodService";
 import { setupService } from "../../services/setupService";
 import { orgService } from "../../services/orgService";
+import { ReviewDetailModal } from "../../components/appraisal/EmployeeAppraisal";
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -144,25 +145,22 @@ const AppraisalPage = () => {
   const [directory, setDirectory] = useState([]);
   const [cycles, setCycles] = useState([]);
   const [currentCycle, setCurrentCycle] = useState(null);
-  const [currentPeriod, setCurrentPeriod] = useState(null);
   const [bootLoading, setBootLoading] = useState(true);
 
   useEffect(() => {
     let stale = false;
     (async () => {
       try {
-        const [depts, dir, cycle, period, cycleList] = await Promise.all([
+        const [depts, dir, cycle, cycleList] = await Promise.all([
           setupService.getDepartments().then((r) => (Array.isArray(r) ? r : r?.departments || [])).catch(() => []),
           orgService.listDirectory().catch(() => []),
           appraisalCycleService.current().catch(() => null),
-          administrationPeriodService.current().catch(() => null),
           appraisalCycleService.list().catch(() => []),
         ]);
         if (stale) return;
         setDepartments(Array.isArray(depts) ? depts : []);
         setDirectory(Array.isArray(dir) ? dir : []);
         setCurrentCycle(cycle || null);
-        setCurrentPeriod(period || null);
         setCycles(Array.isArray(cycleList) ? cycleList : []);
       } finally {
         if (!stale) setBootLoading(false);
@@ -199,18 +197,18 @@ const AppraisalPage = () => {
   );
   const isDeptHead = headedDeptIds.length > 0;
   const isManager = managedEmployeeIds.length > 0;
-  const canManageCycles = isAdmin; // open/lock/transition/reviewer-assignment are admin-only
+  // Opening cycles, calling up reviews, and lifecycle transitions are admin-only.
   // Department heads reach the Cycles tab too, but only to manage their own
   // department's per-cycle indicator selection (backend allows head or admin).
   const canViewCycles = isAdmin || isDeptHead;
   const canManageIndicators = isAdmin || isDeptHead;
   const canReviewTeam = isAdmin || isDeptHead || isManager || isDesignatedReviewer;
 
+  // Employee-facing views (My Targets / My Reviews) live on the Self-Service
+  // page under the Appraisals tab; this page is the management console.
   const tabs = useMemo(
     () =>
       [
-        { key: "my-targets", label: "My Targets", Icon: Target, show: true },
-        { key: "my-reviews", label: "My Reviews", Icon: ClipboardCheck, show: true },
         { key: "team-reviews", label: "Team Reviews", Icon: Users, show: canReviewTeam },
         { key: "cycles", label: "Cycles", Icon: Repeat, show: canViewCycles },
         { key: "indicators", label: "Indicators", Icon: Gauge, show: canManageIndicators },
@@ -219,10 +217,10 @@ const AppraisalPage = () => {
     [canReviewTeam, canViewCycles, canManageIndicators, isAdmin]
   );
 
-  const [tab, setTab] = useState("my-targets");
+  const [tab, setTab] = useState("team-reviews");
   // Derive the effective tab so capability changes can't strand us on a hidden
   // tab, without a setState-in-effect round-trip.
-  const activeTab = tabs.some((t) => t.key === tab) ? tab : tabs[0]?.key || "my-targets";
+  const activeTab = tabs.some((t) => t.key === tab) ? tab : tabs[0]?.key || null;
 
   if (!user || !ready || bootLoading) {
     return (
@@ -235,17 +233,37 @@ const AppraisalPage = () => {
     );
   }
 
+  // Plain employees have no management role here — their appraisal lives on
+  // the Self-Service page.
+  if (tabs.length === 0) {
+    return (
+      <div className="space-y-6">
+        <Header />
+        <Card>
+          <div className="p-12 text-center">
+            <UserCircle className="mx-auto h-12 w-12 text-ink-ghost" />
+            <h3 className="mt-4 text-sm font-semibold text-ink">Your appraisal is in Self-Service</h3>
+            <p className="mx-auto mt-1 max-w-md text-xs text-ink-muted">
+              Set your targets and record your review results under{" "}
+              <Link to="/app/self-service" className="font-semibold text-brand hover:underline">
+                Self-Service Portal → Appraisals
+              </Link>
+              . This page is for reviewers, department heads, and administrators.
+            </p>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   const shared = {
     myEmployeeId,
-    myDeptId: user?.department_id || null,
-    myJobRoleId: user?.job_role_id || null,
     isAdmin,
     departments,
     directory,
     headedDeptIds,
     managedEmployeeIds,
     currentCycle,
-    currentPeriod,
   };
 
   return (
@@ -253,8 +271,6 @@ const AppraisalPage = () => {
       <Header />
       <TabPills layoutId="appraisal-tab" active={activeTab} onChange={setTab} tabs={tabs} />
 
-      {activeTab === "my-targets" && <MyTargetsSection {...shared} />}
-      {activeTab === "my-reviews" && <MyReviewsSection {...shared} />}
       {activeTab === "team-reviews" && canReviewTeam && <TeamReviewsSection {...shared} />}
       {activeTab === "cycles" && canViewCycles && <CyclesSection {...shared} />}
       {activeTab === "indicators" && canManageIndicators && <IndicatorsSection {...shared} />}
@@ -268,378 +284,15 @@ const Header = () => (
     <div className="text-xs font-semibold uppercase tracking-wider text-brand">Performance</div>
     <h1 className="mt-1 text-2xl font-bold tracking-tight text-ink sm:text-3xl">Appraisals</h1>
     <p className="mt-1 text-sm text-ink-muted">
-      Set performance targets, run appraisal cycles, and complete reviews. Your available tabs depend on your role.
+      Run appraisal cycles, manage indicators and target locks, oversee team reviews, and report on results.
+      Employees set targets and rate themselves under Self-Service → Appraisals.
     </p>
   </div>
 );
 
-/* ============================================================ My Targets */
-
-function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentPeriod }) {
-  const toast = useToast();
-  const [indicators, setIndicators] = useState([]); // department indicator selections applicable to me
-  const [targets, setTargets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [editing, setEditing] = useState(null); // { selection, target|null }
-  const cycleId = currentCycle?.id || null;
-
-  const load = useCallback(async () => {
-    if (!cycleId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const mine = await appraisalTargetService.listMine(cycleId);
-      setTargets(Array.isArray(mine) ? mine : []);
-      // Department indicator selections that apply to me — the ones I can set
-      // targets against. department_id/job_role_id come from the auth profile.
-      if (myDeptId) {
-        try {
-          const sel = await appraisalCycleService.listDepartmentIndicators(cycleId, myDeptId, myJobRoleId);
-          setIndicators(Array.isArray(sel) ? sel : []);
-        } catch {
-          setIndicators([]);
-        }
-      } else {
-        setIndicators([]);
-      }
-    } catch (err) {
-      setError(errMsg(err, "Failed to load your targets."));
-    } finally {
-      setLoading(false);
-    }
-  }, [cycleId, myDeptId, myJobRoleId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const targetBySelection = useMemo(() => {
-    const m = {};
-    for (const t of targets) m[t.department_performance_indicator_id] = t;
-    return m;
-  }, [targets]);
-
-  const locked = !!currentCycle?.indicators_locked;
-  const periodActive = String(currentPeriod?.status || "").toLowerCase() === "active";
-  // The backend only accepts target create/edit/submit while the cycle is
-  // 'active'; once it advances to reviewing/closed/archived the target window
-  // is over even though indicators stay locked and the period may stay open.
-  const cycleActive = currentCycle?.status ? currentCycle.status === "active" : true;
-  const canSetTargets = locked && periodActive && cycleActive;
-
-  if (!currentCycle?.id) {
-    return (
-      <Card>
-        <EmptyState Icon={Target} title="No active appraisal cycle" hint="Once an administrator opens and locks an appraisal cycle for the current period, your performance indicators will appear here." />
-      </Card>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {!canSetTargets && (
-        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            {!locked
-              ? "Performance indicators for this cycle are not locked yet. Targets open once an administrator locks the indicators."
-              : !cycleActive
-                ? `The target window is closed — this appraisal cycle is now ${currentCycle.status}.`
-                : "Targets can only be set while the appraisal period is active."}
-          </span>
-        </div>
-      )}
-
-      <Card>
-        <div className="flex items-center justify-between border-b border-line-soft px-5 py-4">
-          <div>
-            <h2 className="text-sm font-bold text-ink">My Performance Targets</h2>
-            <p className="text-xs text-ink-muted">Cycle: {currentCycle.name || fmtDate(currentCycle.created_at)}</p>
-          </div>
-        </div>
-
-        {loading ? (
-          <Loading label="Loading your targets…" />
-        ) : error ? (
-          <ErrorState message={error} onRetry={load} />
-        ) : indicators.length === 0 && targets.length === 0 ? (
-          <EmptyState Icon={Target} title="No indicators assigned to you yet" hint="Your department head or an administrator selects the performance indicators that apply to your department and job role." />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
-                <tr>
-                  <th className="px-5 py-3 text-left font-semibold">Indicator</th>
-                  <th className="px-4 py-3 text-left font-semibold">Weight</th>
-                  <th className="px-4 py-3 text-left font-semibold">My Target</th>
-                  <th className="px-4 py-3 text-left font-semibold">Status</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {indicators.map((sel) => {
-                  const t = targetBySelection[sel.id];
-                  return (
-                    <tr key={sel.id} className="border-t border-line-soft">
-                      <td className="px-5 py-3">
-                        <div className="font-semibold text-ink">{sel.performance_indicator_name || "Indicator"}</div>
-                        {sel.performance_indicator_description ? (
-                          <div className="text-xs text-ink-muted">{sel.performance_indicator_description}</div>
-                        ) : null}
-                        {sel.measurement_unit ? <div className="text-[11px] text-ink-faint">Unit: {sel.measurement_unit}</div> : null}
-                      </td>
-                      <td className="px-4 py-3 text-ink-muted">{fmtNum(sel.weight)}</td>
-                      <td className="px-4 py-3">
-                        {t ? (
-                          <div>
-                            <div className="font-semibold text-ink">{fmtNum(t.target_value)}</div>
-                            {t.target_description ? <div className="text-xs text-ink-muted">{t.target_description}</div> : null}
-                          </div>
-                        ) : (
-                          <span className="text-ink-faint">Not set</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">{t ? <StatusChip status={t.status} /> : <span className="text-ink-faint">—</span>}</td>
-                      <td className="px-4 py-3 text-right">
-                        {t?.status === "submitted" ? (
-                          <span className="text-[11px] font-semibold text-emerald-600">Submitted</span>
-                        ) : canSetTargets ? (
-                          <GhostBtn onClick={() => setEditing({ selection: sel, target: t || null })}>
-                            {t ? <Pencil className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-                            {t ? "Edit" : "Set target"}
-                          </GhostBtn>
-                        ) : (
-                          <span className="text-[11px] text-ink-faint">Locked</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {/* Targets whose selection is no longer returned (e.g. role filter) still surface */}
-                {targets
-                  .filter((t) => !indicators.some((s) => s.id === t.department_performance_indicator_id))
-                  .map((t) => (
-                    <tr key={t.id} className="border-t border-line-soft">
-                      <td className="px-5 py-3 font-semibold text-ink">Indicator</td>
-                      <td className="px-4 py-3 text-ink-muted">—</td>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-ink">{fmtNum(t.target_value)}</div>
-                        {t.target_description ? <div className="text-xs text-ink-muted">{t.target_description}</div> : null}
-                      </td>
-                      <td className="px-4 py-3"><StatusChip status={t.status} /></td>
-                      <td className="px-4 py-3 text-right">
-                        {t.status === "draft" && canSetTargets ? (
-                          <GhostBtn onClick={() => setEditing({ selection: null, target: t })}>
-                            <Pencil className="h-3.5 w-3.5" /> Edit
-                          </GhostBtn>
-                        ) : (
-                          <StatusChip status={t.status} />
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      {editing && (
-        <TargetModal
-          cycleId={currentCycle.id}
-          selection={editing.selection}
-          target={editing.target}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            load();
-          }}
-          onToast={toast}
-        />
-      )}
-    </div>
-  );
-}
-
-function TargetModal({ cycleId, selection, target, onClose, onSaved, onToast }) {
-  const confirm = useConfirm();
-  const [value, setValue] = useState(target ? String(target.target_value) : "");
-  const [desc, setDesc] = useState(target?.target_description || "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const isEdit = !!target;
-
-  const save = async () => {
-    setError(null);
-    const num = Number(value);
-    if (!Number.isFinite(num) || num < 0) {
-      setError("Target value must be a non-negative number.");
-      return;
-    }
-    setBusy(true);
-    try {
-      if (isEdit) {
-        await appraisalTargetService.update(target.id, { target_value: num, target_description: desc || null });
-      } else {
-        await appraisalTargetService.create({
-          appraisal_cycle_id: cycleId,
-          department_performance_indicator_id: selection.id,
-          target_value: num,
-          target_description: desc || null,
-        });
-      }
-      onToast.success("Target saved.");
-      onSaved();
-    } catch (err) {
-      setError(errMsg(err, "Failed to save target."));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submit = async () => {
-    if (!isEdit) return;
-    const ok = await confirm({
-      title: "Submit target?",
-      message: "Once submitted, this target is locked and can no longer be edited. It becomes available for your performance review.",
-      confirmLabel: "Submit",
-      danger: false,
-    });
-    if (!ok) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await appraisalTargetService.submit(target.id);
-      onToast.success("Target submitted.");
-      onSaved();
-    } catch (err) {
-      setError(errMsg(err, "Failed to submit target."));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal
-      title={isEdit ? "Edit target" : "Set target"}
-      subtitle={selection?.performance_indicator_name || (isEdit ? "Update your draft target" : undefined)}
-      onClose={onClose}
-    >
-      {error ? <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div> : null}
-      <div className="space-y-3">
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-ink-muted">
-            Target value{selection?.measurement_unit ? ` (${selection.measurement_unit})` : ""}
-          </label>
-          <input className={inputCls} type="number" min="0" step="any" value={value} onChange={(e) => setValue(e.target.value)} placeholder="e.g. 100" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-ink-muted">Description (optional)</label>
-          <textarea className={inputCls} rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="How will this target be measured?" />
-        </div>
-      </div>
-      <div className="mt-5 flex items-center justify-between gap-2">
-        <div>
-          {isEdit && target.status === "draft" ? (
-            <GhostBtn onClick={submit} disabled={busy} className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
-              <Send className="h-3.5 w-3.5" /> Submit target
-            </GhostBtn>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <GhostBtn onClick={onClose} disabled={busy}>Cancel</GhostBtn>
-          <PrimaryBtn onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</PrimaryBtn>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-/* ============================================================ My Reviews */
-
-function MyReviewsSection({ myEmployeeId }) {
-  const [reviews, setReviews] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [openId, setOpenId] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const rows = await appraisalReviewService.list();
-      // Reviews where I am the reviewed employee (not the reviewer).
-      const mine = (Array.isArray(rows) ? rows : []).filter((r) => r.employee_id === myEmployeeId);
-      setReviews(mine);
-    } catch (err) {
-      setError(errMsg(err, "Failed to load your reviews."));
-    } finally {
-      setLoading(false);
-    }
-  }, [myEmployeeId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return (
-    <Card>
-      <div className="border-b border-line-soft px-5 py-4">
-        <h2 className="text-sm font-bold text-ink">My Performance Reviews</h2>
-        <p className="text-xs text-ink-muted">Reviews carried out on your submitted targets.</p>
-      </div>
-      {loading ? (
-        <Loading label="Loading your reviews…" />
-      ) : error ? (
-        <ErrorState message={error} onRetry={load} />
-      ) : reviews.length === 0 ? (
-        <EmptyState Icon={ClipboardCheck} title="No reviews yet" hint="When your manager or department head calls up a review of your submitted targets, it appears here." />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
-              <tr>
-                <th className="px-5 py-3 text-left font-semibold">Review</th>
-                <th className="px-4 py-3 text-left font-semibold">Status</th>
-                <th className="px-4 py-3 text-left font-semibold">Overall rating</th>
-                <th className="px-4 py-3 text-left font-semibold">Reviewed</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {reviews.map((r) => (
-                <tr key={r.id} className="border-t border-line-soft">
-                  <td className="px-5 py-3 text-ink">
-                    <div className="font-medium">{r.cycle_name || "Appraisal review"}</div>
-                    {r.reviewer_name && <div className="text-xs text-ink-faint">Reviewer: {r.reviewer_name}</div>}
-                  </td>
-                  <td className="px-4 py-3"><StatusChip status={r.status} /></td>
-                  <td className="px-4 py-3 font-semibold text-ink">{r.overall_rating != null ? pct(r.overall_rating) : "—"}</td>
-                  <td className="px-4 py-3 text-ink-muted">{fmtDate(r.reviewed_at)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <GhostBtn onClick={() => setOpenId(r.id)}>
-                      View <ChevronRight className="h-3.5 w-3.5" />
-                    </GhostBtn>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {openId && <ReviewDetailModal reviewId={openId} editable={false} asEmployee onClose={() => setOpenId(null)} onChanged={load} />}
-    </Card>
-  );
-}
-
 /* ============================================================ Team Reviews */
 
-function TeamReviewsSection({ myEmployeeId, isAdmin, headedDeptIds, managedEmployeeIds = [], directory = [], currentCycle }) {
+function TeamReviewsSection({ myEmployeeId, isAdmin, headedDeptIds, managedEmployeeIds = [], currentCycle }) {
   const toast = useToast();
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -703,8 +356,15 @@ function TeamReviewsSection({ myEmployeeId, isAdmin, headedDeptIds, managedEmplo
                 {reviews.map((r) => (
                   <tr key={r.id} className="border-t border-line-soft">
                     <td className="px-5 py-3 text-ink">
-                      <div className="font-medium">{r.employee_name || r.employee_id.slice(0, 8)}</div>
-                      {r.cycle_name && <div className="text-xs text-ink-faint">{r.cycle_name}</div>}
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{r.employee_name || r.employee_id.slice(0, 8)}</span>
+                        {r.session_type === "final" && (
+                          <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand">Final</span>
+                        )}
+                      </div>
+                      {(r.session_name || r.cycle_name) && (
+                        <div className="text-xs text-ink-faint">{[r.session_name, r.cycle_name].filter(Boolean).join(" · ")}</div>
+                      )}
                       {r.reviewer_name && <div className="text-xs text-ink-faint">Reviewer: {r.reviewer_name}</div>}
                     </td>
                     <td className="px-4 py-3"><StatusChip status={r.status} /></td>
@@ -867,382 +527,6 @@ function CallUpModal({ isAdmin, myEmployeeId, headedDeptIds, managedEmployeeIds 
   );
 }
 
-/* -------------------------------------------------- Review detail (shared) */
-
-function ReviewDetailModal({ reviewId, editable, asEmployee = false, onClose, onChanged }) {
-  const toast = useToast();
-  const confirm = useConfirm();
-  const [review, setReview] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [savingItem, setSavingItem] = useState(null);
-  const [completing, setCompleting] = useState(false);
-  const [busyAction, setBusyAction] = useState(false);
-  const [appealOpen, setAppealOpen] = useState(false);
-  const [appealReason, setAppealReason] = useState("");
-  const [appeals, setAppeals] = useState([]);
-  const [reviewerComments, setReviewerComments] = useState("");
-  const [drafts, setDrafts] = useState({}); // itemId -> { achieved_value, comments }
-
-  const loadAppeals = useCallback(async () => {
-    try {
-      const rows = await appraisalReviewService.listAppeals(reviewId);
-      setAppeals(Array.isArray(rows) ? rows : []);
-    } catch {
-      setAppeals([]);
-    }
-  }, [reviewId]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await appraisalReviewService.get(reviewId);
-      setReview(r);
-      setReviewerComments(r?.reviewer_comments || "");
-      const d = {};
-      (r?.items || []).forEach((it) => {
-        d[it.id] = {
-          achieved_value: it.achieved_value != null ? String(it.achieved_value) : "",
-          comments: it.comments || "",
-        };
-      });
-      setDrafts(d);
-      await loadAppeals();
-    } catch (err) {
-      setError(errMsg(err, "Failed to load review."));
-    } finally {
-      setLoading(false);
-    }
-  }, [reviewId, loadAppeals]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const isInProgress = review?.status === "in_progress";
-  const canEdit = editable && isInProgress;
-
-  const saveItem = async (item) => {
-    const draft = drafts[item.id] || {};
-    const num = Number(draft.achieved_value);
-    if (!Number.isFinite(num) || num < 0) {
-      toast.error("Achieved value must be a non-negative number.");
-      return;
-    }
-    setSavingItem(item.id);
-    try {
-      const updated = await appraisalReviewService.submitItem(reviewId, item.id, {
-        achieved_value: num,
-        comments: draft.comments || null,
-      });
-      setReview(updated);
-      toast.success("Result saved.");
-      onChanged?.();
-    } catch (err) {
-      toast.error(errMsg(err, "Failed to save result."));
-    } finally {
-      setSavingItem(null);
-    }
-  };
-
-  const complete = async () => {
-    const missing = (review?.items || []).some((it) => it.achieved_value == null);
-    if (missing) {
-      toast.error("Every indicator needs an achieved value before completing.");
-      return;
-    }
-    const ok = await confirm({
-      title: "Complete review?",
-      message: "This finalizes the review and computes the overall weighted rating. It cannot be reopened.",
-      confirmLabel: "Complete review",
-      danger: false,
-    });
-    if (!ok) return;
-    setCompleting(true);
-    try {
-      const updated = await appraisalReviewService.complete(reviewId, reviewerComments);
-      setReview(updated);
-      toast.success("Review completed.");
-      onChanged?.();
-    } catch (err) {
-      toast.error(errMsg(err, "Failed to complete review."));
-    } finally {
-      setCompleting(false);
-    }
-  };
-
-  const runAction = async (fn, successMsg, failMsg) => {
-    setBusyAction(true);
-    try {
-      const updated = await fn();
-      // Only a review-with-items payload may replace review state. publish/
-      // acknowledge return that shape; requestAppeal returns an APPEAL row
-      // (status:'open', no items) — feeding it to setReview would blank the
-      // review view, so fall through to a full reload for anything else.
-      if (updated && updated.status && Array.isArray(updated.items)) setReview(updated);
-      else await load();
-      toast.success(successMsg);
-      onChanged?.();
-    } catch (err) {
-      toast.error(errMsg(err, failMsg));
-    } finally {
-      setBusyAction(false);
-    }
-  };
-
-  const publish = () =>
-    runAction(() => appraisalReviewService.publish(reviewId), "Review published to the employee.", "Failed to publish review.");
-  const acknowledge = () =>
-    runAction(() => appraisalReviewService.acknowledge(reviewId), "Appraisal acknowledged.", "Failed to acknowledge.");
-  const submitAppeal = async () => {
-    if (!appealReason.trim()) {
-      toast.error("Please enter a reason for the appeal.");
-      return;
-    }
-    await runAction(
-      () => appraisalReviewService.requestAppeal(reviewId, appealReason.trim()),
-      "Appeal submitted.",
-      "Failed to submit appeal.",
-    );
-    setAppealOpen(false);
-    setAppealReason("");
-    await loadAppeals();
-  };
-  const resolveAppeal = async (appealId) => {
-    const resolution = window.prompt("Resolution note for this appeal:");
-    if (resolution == null || !resolution.trim()) return;
-    try {
-      await appraisalReviewService.resolveAppeal(appealId, resolution.trim());
-      toast.success("Appeal resolved.");
-      await loadAppeals();
-      onChanged?.();
-    } catch (err) {
-      toast.error(errMsg(err, "Failed to resolve appeal."));
-    }
-  };
-
-  const status = review?.status;
-  const hasOpenAppeal = appeals.some((a) => a.status === "open");
-  const canPublish = editable && status === "completed";
-  const canAcknowledge = asEmployee && status === "published";
-  // Backend allows at most one open appeal per review, so hide the affordance
-  // once one is pending (it's already visible in the appeals list below).
-  const canAppeal = asEmployee && (status === "published" || status === "acknowledged") && !hasOpenAppeal;
-  const canResolveAppeals = editable; // reviewer/admin context (backend enforces the real check)
-
-  return (
-    <Modal
-      title="Performance review"
-      subtitle={review ? (review.employee_name ? `${review.employee_name}${review.cycle_name ? ` · ${review.cycle_name}` : ""}` : `Status: ${String(review.status).replace(/_/g, " ")}`) : undefined}
-      onClose={onClose}
-      maxW="max-w-3xl"
-    >
-      {loading ? (
-        <Loading label="Loading review…" />
-      ) : error ? (
-        <ErrorState message={error} onRetry={load} />
-      ) : review ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-4 rounded-xl bg-sunken/50 px-4 py-3 text-sm">
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">Employee</div>
-              <div className="font-semibold text-ink">{review.employee_name || "—"}</div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">Reviewer</div>
-              <div className="text-ink-muted">{review.reviewer_name || "—"}</div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">Status</div>
-              <StatusChip status={review.status} />
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">Overall rating</div>
-              <div className="font-bold text-ink">{review.overall_rating != null ? pct(review.overall_rating) : "—"}</div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">Department</div>
-              <div className="text-ink-muted">{review.department_name || "—"}</div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">Job role</div>
-              <div className="text-ink-muted">{review.job_role_name || "—"}</div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">Reviewed</div>
-              <div className="text-ink-muted">{fmtDate(review.reviewed_at)}</div>
-            </div>
-            {review.published_at && (
-              <div>
-                <div className="text-[11px] uppercase tracking-wider text-ink-faint">Published</div>
-                <div className="text-ink-muted">{fmtDate(review.published_at)}</div>
-              </div>
-            )}
-            {review.acknowledged_at && (
-              <div>
-                <div className="text-[11px] uppercase tracking-wider text-ink-faint">Acknowledged</div>
-                <div className="text-emerald-600">{fmtDate(review.acknowledged_at)}</div>
-              </div>
-            )}
-          </div>
-
-          <div className="overflow-x-auto rounded-xl border border-line-soft">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
-                <tr>
-                  <th className="px-4 py-2.5 text-left font-semibold">Indicator</th>
-                  <th className="px-3 py-2.5 text-left font-semibold">Weight</th>
-                  <th className="px-3 py-2.5 text-left font-semibold">Target</th>
-                  <th className="px-3 py-2.5 text-left font-semibold">Achieved</th>
-                  <th className="px-3 py-2.5 text-left font-semibold">Rating</th>
-                  {canEdit ? <th className="px-3 py-2.5" /> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {(review.items || []).map((it) => {
-                  const draft = drafts[it.id] || {};
-                  return (
-                    <tr key={it.id} className="border-t border-line-soft align-top">
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-ink">{it.indicator_name}</div>
-                        {!canEdit && it.comments ? <div className="mt-0.5 text-xs text-ink-muted">{it.comments}</div> : null}
-                      </td>
-                      <td className="px-3 py-3 text-ink-muted">{fmtNum(it.weight)}</td>
-                      <td className="px-3 py-3 text-ink-muted">{fmtNum(it.target_value)}</td>
-                      <td className="px-3 py-3">
-                        {canEdit ? (
-                          <input
-                            className={`${inputCls} w-24`}
-                            type="number"
-                            min="0"
-                            step="any"
-                            value={draft.achieved_value}
-                            onChange={(e) => setDrafts((p) => ({ ...p, [it.id]: { ...p[it.id], achieved_value: e.target.value } }))}
-                          />
-                        ) : (
-                          <span className="font-semibold text-ink">{it.achieved_value != null ? fmtNum(it.achieved_value) : "—"}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-ink">{it.rating_percentage != null ? pct(it.rating_percentage) : "—"}</td>
-                      {canEdit ? (
-                        <td className="px-3 py-3">
-                          <div className="flex flex-col gap-1.5">
-                            <input
-                              className={`${inputCls} min-w-[160px]`}
-                              placeholder="Comment (optional)"
-                              value={draft.comments}
-                              onChange={(e) => setDrafts((p) => ({ ...p, [it.id]: { ...p[it.id], comments: e.target.value } }))}
-                            />
-                            <GhostBtn onClick={() => saveItem(it)} disabled={savingItem === it.id}>
-                              <Check className="h-3.5 w-3.5" /> {savingItem === it.id ? "Saving…" : "Save"}
-                            </GhostBtn>
-                          </div>
-                        </td>
-                      ) : null}
-                    </tr>
-                  );
-                })}
-                {(review.items || []).length === 0 ? (
-                  <tr>
-                    <td colSpan={canEdit ? 6 : 5} className="px-4 py-6 text-center text-xs text-ink-muted">
-                      This review has no indicators.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-
-          {review.reviewer_comments && !canEdit ? (
-            <div className="rounded-xl border border-line-soft bg-sunken/40 px-4 py-3">
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">Reviewer comments</div>
-              <div className="mt-1 text-sm text-ink">{review.reviewer_comments}</div>
-            </div>
-          ) : null}
-
-          {canEdit ? (
-            <div className="space-y-2 rounded-xl border border-line-soft px-4 py-3">
-              <label className="block text-xs font-semibold text-ink-muted">Reviewer comments (optional)</label>
-              <textarea className={inputCls} rows={2} value={reviewerComments} onChange={(e) => setReviewerComments(e.target.value)} placeholder="Overall feedback for this review" />
-              <div className="flex justify-end">
-                <PrimaryBtn onClick={complete} disabled={completing}>
-                  <Check className="h-4 w-4" /> {completing ? "Completing…" : "Complete review"}
-                </PrimaryBtn>
-              </div>
-            </div>
-          ) : null}
-
-          {appeals.length > 0 && (
-            <div className="rounded-xl border border-line-soft px-4 py-3">
-              <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-faint">Appeals</div>
-              <div className="space-y-2">
-                {appeals.map((a) => (
-                  <div key={a.id} className="rounded-lg bg-sunken/40 px-3 py-2 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <StatusChip status={a.status} label={a.status === "open" ? "Open" : "Resolved"} />
-                      <span className="text-[11px] text-ink-faint">{fmtDate(a.created_at)}</span>
-                    </div>
-                    <div className="mt-1 text-ink">{a.reason}</div>
-                    {a.resolution && (
-                      <div className="mt-1 text-xs text-ink-muted">
-                        Resolution: {a.resolution}{a.resolved_at ? ` · ${fmtDate(a.resolved_at)}` : ""}
-                      </div>
-                    )}
-                    {a.status === "open" && canResolveAppeals && (
-                      <div className="mt-2 flex justify-end">
-                        <GhostBtn onClick={() => resolveAppeal(a.id)}>Resolve appeal</GhostBtn>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {(canPublish || canAcknowledge || canAppeal) && (
-            <div className="flex flex-wrap items-center justify-end gap-2 rounded-xl border border-line-soft px-4 py-3">
-              {status === "acknowledged" && (
-                <span className="mr-auto text-xs text-emerald-600">
-                  Acknowledged{review.acknowledged_at ? ` on ${fmtDate(review.acknowledged_at)}` : ""}
-                </span>
-              )}
-              {canPublish && (
-                <PrimaryBtn onClick={publish} disabled={busyAction}>
-                  {busyAction ? "Publishing…" : "Publish to employee"}
-                </PrimaryBtn>
-              )}
-              {canAcknowledge && (
-                <PrimaryBtn onClick={acknowledge} disabled={busyAction}>
-                  {busyAction ? "…" : "Acknowledge"}
-                </PrimaryBtn>
-              )}
-              {canAppeal && !appealOpen && (
-                <GhostBtn onClick={() => setAppealOpen(true)} disabled={busyAction}>
-                  Appeal
-                </GhostBtn>
-              )}
-            </div>
-          )}
-
-          {canAppeal && appealOpen && (
-            <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 px-4 py-3">
-              <label className="block text-xs font-semibold text-ink-muted">Reason for appeal</label>
-              <textarea className={inputCls} rows={3} value={appealReason} onChange={(e) => setAppealReason(e.target.value)} placeholder="Explain why you're appealing this appraisal…" />
-              <div className="flex justify-end gap-2">
-                <GhostBtn onClick={() => { setAppealOpen(false); setAppealReason(""); }}>Cancel</GhostBtn>
-                <PrimaryBtn onClick={submitAppeal} disabled={busyAction || !appealReason.trim()}>
-                  {busyAction ? "Submitting…" : "Submit appeal"}
-                </PrimaryBtn>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : null}
-    </Modal>
-  );
-}
-
 /* ============================================================ Reports (admin) */
 
 function Metric({ label, value }) {
@@ -1270,12 +554,20 @@ function ReportsSection() {
     return () => { stale = true; };
   }, []);
 
+  const [results, setResults] = useState([]);
+
   const loadReport = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await appraisalReviewService.report(cycleId || undefined);
       setReport(res?.data || res);
+      if (cycleId) {
+        const rows = await appraisalSessionService.results(cycleId).catch(() => []);
+        setResults(Array.isArray(rows) ? rows : []);
+      } else {
+        setResults([]);
+      }
     } catch (err) {
       setError(errMsg(err, "Failed to load report."));
     } finally {
@@ -1328,6 +620,38 @@ function ReportsSection() {
               )}
             </div>
           </div>
+
+          {cycleId && results.length > 0 && (
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                Final appraisal results
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-line-soft">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-semibold">Employee</th>
+                      <th className="px-4 py-2 text-left font-semibold">Department</th>
+                      <th className="px-4 py-2 text-left font-semibold">Final review</th>
+                      <th className="px-4 py-2 text-left font-semibold">Overall (main)</th>
+                      <th className="px-4 py-2 text-left font-semibold">Reviews counted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results.map((r) => (
+                      <tr key={r.id || r.employee_id} className="border-t border-line-soft">
+                        <td className="px-4 py-2 font-medium text-ink">{r.employee_name || r.employee_id.slice(0, 8)}</td>
+                        <td className="px-4 py-2 text-ink-muted">{r.department_name || "—"}</td>
+                        <td className="px-4 py-2 text-ink-muted">{r.final_rating != null ? pct(r.final_rating) : "—"}</td>
+                        <td className="px-4 py-2 font-semibold text-ink">{r.overall_rating != null ? pct(r.overall_rating) : "—"}</td>
+                        <td className="px-4 py-2 text-ink-muted">{r.sessions_counted ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-faint">Department breakdown</div>
@@ -1401,8 +725,8 @@ function CyclesSection({ directory = [], isAdmin = false, headedDeptIds = [] }) 
             <h2 className="text-sm font-bold text-ink">Appraisal Cycles</h2>
             <p className="text-xs text-ink-muted">
               {isAdmin
-                ? "Open a cycle per administration period, select indicators, then lock."
-                : "Select and manage the performance indicators for your department in each cycle."}
+                ? "Start the appraisal for an administration period, call up reviews during it, and end it with the final review."
+                : "Select your department's performance indicators, follow your team's target progress, and lock in targets when everyone has submitted."}
             </p>
           </div>
           {/* Opening/locking a cycle is admin-only; a department head only manages its indicator selection. */}
@@ -1557,21 +881,28 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
   const [raType, setRaType] = useState("relationship");
   const [raReviewer, setRaReviewer] = useState("");
   const [error, setError] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [progressLoading, setProgressLoading] = useState(false);
+  const [lockBusy, setLockBusy] = useState(false);
 
   const loadCycle = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [c, depts, roles, cat] = await Promise.all([
+      const [c, depts, roles, cat, sess] = await Promise.all([
         appraisalCycleService.get(cycleId),
         setupService.getDepartments().then((r) => (Array.isArray(r) ? r : r?.departments || [])).catch(() => []),
         setupService.getJobRoles().then((r) => (Array.isArray(r) ? r : r?.jobRoles || r?.job_roles || [])).catch(() => []),
         performanceIndicatorService.list().catch(() => []),
+        appraisalSessionService.list(cycleId).catch(() => []),
       ]);
       setCycle(c);
       setDepartments(Array.isArray(depts) ? depts : []);
       setJobRoles(Array.isArray(roles) ? roles : []);
       setCatalog(Array.isArray(cat) ? cat : []);
+      setSessions(Array.isArray(sess) ? sess : []);
     } catch (err) {
       setError(errMsg(err, "Failed to load cycle."));
     } finally {
@@ -1582,6 +913,37 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
   useEffect(() => {
     loadCycle();
   }, [loadCycle]);
+
+  const reloadSessionsAndCycle = useCallback(async () => {
+    const [c, sess] = await Promise.all([
+      appraisalCycleService.get(cycleId).catch(() => null),
+      appraisalSessionService.list(cycleId).catch(() => []),
+    ]);
+    if (c) setCycle(c);
+    setSessions(Array.isArray(sess) ? sess : []);
+  }, [cycleId]);
+
+  // Target progress for the selected department (dept head or admin view).
+  const canSeeProgress = isAdmin || headedDeptIds.includes(deptId);
+  const loadProgress = useCallback(async () => {
+    if (!deptId || !canSeeProgress) {
+      setProgress(null);
+      return;
+    }
+    setProgressLoading(true);
+    try {
+      const res = await appraisalCycleService.targetProgress(cycleId, deptId);
+      setProgress(res?.data || res || null);
+    } catch {
+      setProgress(null);
+    } finally {
+      setProgressLoading(false);
+    }
+  }, [cycleId, deptId, canSeeProgress]);
+
+  useEffect(() => {
+    loadProgress();
+  }, [loadProgress]);
 
   const loadSelections = useCallback(async () => {
     if (!deptId) {
@@ -1675,6 +1037,105 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
       toast.error(errMsg(err, "Failed to update reviewer assignment."));
     } finally {
       setSavingRa(false);
+    }
+  };
+
+  const openSession = sessions.find((s) => s.status === "open") || null;
+  const hasFinal = sessions.some((s) => s.session_type === "final");
+
+  const callUpSession = async (type) => {
+    const isFinal = type === "final";
+    const ok = await confirm({
+      title: isFinal ? "Call up the final review?" : "Call up a performance review?",
+      message: isFinal
+        ? "Every employee with locked-in targets gets a final self-assessment against their targets. Closing this final review computes each employee's final and overall rating and closes the appraisal for this period."
+        : "Every employee with locked-in targets gets a review to record what they have achieved so far against their targets. Targets stay frozen while the review is open.",
+      confirmLabel: isFinal ? "Call up final review" : "Call up review",
+      danger: isFinal,
+    });
+    if (!ok) return;
+    setSessionBusy(true);
+    try {
+      const res = await appraisalSessionService.open({ appraisal_cycle_id: cycleId, session_type: type });
+      const created = res?.reviews_created ?? res?.data?.reviews_created;
+      toast.success(
+        created != null
+          ? `Review called up — ${created} employee review${created === 1 ? "" : "s"} generated.`
+          : "Review called up."
+      );
+      await reloadSessionsAndCycle();
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to call up the review."));
+    } finally {
+      setSessionBusy(false);
+    }
+  };
+
+  const closeSessionAction = async (session) => {
+    const isFinal = session.session_type === "final";
+    const ok = await confirm({
+      title: isFinal ? "Close the final review?" : "Close this review session?",
+      message: isFinal
+        ? "This finalizes the appraisal for the administration period: every fully-entered review is completed, each employee's final and overall (main) rating is computed, and the cycle is closed. This cannot be undone."
+        : "Employees will no longer be able to enter or change results for this review. The cycle returns to active so targets and future reviews can continue.",
+      confirmLabel: isFinal ? "Close final review" : "Close session",
+      danger: isFinal,
+    });
+    if (!ok) return;
+    setSessionBusy(true);
+    try {
+      await appraisalSessionService.close(session.id);
+      toast.success(isFinal ? "Final review closed — appraisal results computed." : "Review session closed.");
+      await reloadSessionsAndCycle();
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to close the review session."));
+    } finally {
+      setSessionBusy(false);
+    }
+  };
+
+  const lockTargets = async () => {
+    const notReady = (progress?.employees || []).filter((e) => !e.ready);
+    const ok = await confirm({
+      title: "Lock in department targets?",
+      message:
+        (notReady.length > 0
+          ? `${notReady.length} employee${notReady.length === 1 ? " has" : "s have"} not submitted all their targets yet. `
+          : "") +
+        "Locking freezes every target in this department for the cycle and makes the department eligible for performance reviews. Only an administrator can unlock.",
+      confirmLabel: "Lock targets",
+      danger: true,
+    });
+    if (!ok) return;
+    setLockBusy(true);
+    try {
+      await appraisalCycleService.lockDepartmentTargets(cycleId, deptId);
+      toast.success("Department targets locked in.");
+      await loadProgress();
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to lock department targets."));
+    } finally {
+      setLockBusy(false);
+    }
+  };
+
+  const unlockTargets = async () => {
+    const ok = await confirm({
+      title: "Unlock department targets?",
+      message: "Employees in this department will be able to add and change targets again. Not possible while a review session is open.",
+      confirmLabel: "Unlock",
+      danger: true,
+    });
+    if (!ok) return;
+    setLockBusy(true);
+    try {
+      await appraisalCycleService.unlockDepartmentTargets(cycleId, deptId);
+      toast.success("Department targets unlocked.");
+      await loadProgress();
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to unlock department targets."));
+    } finally {
+      setLockBusy(false);
     }
   };
 
@@ -1818,7 +1279,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
                 ))}
               </select>
             </div>
-            {deptId && !locked ? (
+            {deptId && !locked && !progress?.locked ? (
               <PrimaryBtn onClick={() => setAddOpen(true)}>
                 <Plus className="h-4 w-4" /> Add indicator
               </PrimaryBtn>
@@ -1840,7 +1301,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
                       <th className="px-4 py-2.5 text-left font-semibold">Indicator</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Job role</th>
                       <th className="px-3 py-2.5 text-left font-semibold">Weight</th>
-                      {!locked ? <th className="px-3 py-2.5" /> : null}
+                      {!locked && !progress?.locked ? <th className="px-3 py-2.5" /> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -1854,7 +1315,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
                           {s.job_role_id ? jobRoles.find((r) => r.id === s.job_role_id)?.title || "Role" : "All roles"}
                         </td>
                         <td className="px-3 py-3 text-ink-muted">{fmtNum(s.weight)}</td>
-                        {!locked ? (
+                        {!locked && !progress?.locked ? (
                           <td className="px-3 py-3 text-right">
                             <GhostBtn onClick={() => removeSelection(s)} className="border-red-200 text-red-600 hover:bg-red-50">
                               <Trash2 className="h-3.5 w-3.5" /> Remove
@@ -1868,7 +1329,149 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
               </div>
             )}
           </div>
+
+          {deptId && canSeeProgress && (
+            <div className="mt-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-ink">Target progress</h3>
+                  <p className="text-xs text-ink-muted">
+                    Each employee's submitted targets against the indicators that apply to their job role.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {progress?.locked ? (
+                    <>
+                      <StatusChip status="locked" label={`Targets locked ${progress.lock?.locked_at ? fmtDate(progress.lock.locked_at) : ""}`} />
+                      {isAdmin && (
+                        <GhostBtn onClick={unlockTargets} disabled={lockBusy} className="border-amber-300 text-amber-700 hover:bg-amber-50">
+                          Unlock
+                        </GhostBtn>
+                      )}
+                    </>
+                  ) : (
+                    <PrimaryBtn onClick={lockTargets} disabled={lockBusy || progressLoading}>
+                      <Lock className="h-4 w-4" /> {lockBusy ? "Locking…" : "Lock in targets"}
+                    </PrimaryBtn>
+                  )}
+                </div>
+              </div>
+
+              {progressLoading ? (
+                <Loading label="Loading target progress…" />
+              ) : !progress ? (
+                <p className="py-6 text-center text-xs text-ink-muted">Target progress is unavailable for this department.</p>
+              ) : (progress.employees || []).length === 0 ? (
+                <p className="py-6 text-center text-xs text-ink-muted">No employees found in this department.</p>
+              ) : (
+                <div className="mt-3 overflow-x-auto rounded-xl border border-line-soft">
+                  <table className="w-full min-w-[640px] text-sm">
+                    <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left font-semibold">Employee</th>
+                        <th className="px-3 py-2.5 text-left font-semibold">Applicable indicators</th>
+                        <th className="px-3 py-2.5 text-left font-semibold">Targets set</th>
+                        <th className="px-3 py-2.5 text-left font-semibold">Submitted</th>
+                        <th className="px-3 py-2.5 text-left font-semibold">Ready</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {progress.employees.map((e) => (
+                        <tr key={e.employee_id} className="border-t border-line-soft">
+                          <td className="px-4 py-2.5 font-medium text-ink">{e.employee_name || e.employee_id.slice(0, 8)}</td>
+                          <td className="px-3 py-2.5 text-ink-muted">{e.indicators_applicable}</td>
+                          <td className="px-3 py-2.5 text-ink-muted">{e.targets_set}</td>
+                          <td className="px-3 py-2.5 text-ink-muted">{e.targets_submitted}</td>
+                          <td className="px-3 py-2.5">
+                            <StatusChip status={e.ready ? "submitted" : "draft"} label={e.ready ? "Ready" : "Pending"} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+      </Card>
+
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-4">
+          <div>
+            <h2 className="text-sm font-bold text-ink">Performance reviews</h2>
+            <p className="text-xs text-ink-muted">
+              {isAdmin
+                ? "Call up a review at any time during the period; the final review ends the appraisal and computes the main ratings."
+                : "Reviews the administrator has called up for this cycle."}
+            </p>
+          </div>
+          {isAdmin && !openSession && cycle.status !== "closed" && cycle.status !== "archived" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <PrimaryBtn onClick={() => callUpSession("interim")} disabled={sessionBusy}>
+                <Plus className="h-4 w-4" /> Call up review
+              </PrimaryBtn>
+              {!hasFinal && (
+                <GhostBtn onClick={() => callUpSession("final")} disabled={sessionBusy} className="border-brand/40 text-brand hover:bg-brand/5">
+                  <ClipboardCheck className="h-3.5 w-3.5" /> Call up final review
+                </GhostBtn>
+              )}
+            </div>
+          )}
+        </div>
+
+        {sessions.length === 0 ? (
+          <EmptyState
+            Icon={ClipboardCheck}
+            title="No reviews called up yet"
+            hint="Once department heads lock in targets, call up a performance review so employees can record their achievements. The final review closes the appraisal for the period."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-sm">
+              <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
+                <tr>
+                  <th className="px-5 py-3 text-left font-semibold">Review</th>
+                  <th className="px-4 py-3 text-left font-semibold">Type</th>
+                  <th className="px-4 py-3 text-left font-semibold">Status</th>
+                  <th className="px-4 py-3 text-left font-semibold">Progress</th>
+                  <th className="px-4 py-3 text-left font-semibold">Opened</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map((s) => (
+                  <tr key={s.id} className="border-t border-line-soft">
+                    <td className="px-5 py-3 font-semibold text-ink">{s.name || "Performance review"}</td>
+                    <td className="px-4 py-3">
+                      {s.session_type === "final" ? (
+                        <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand">Final</span>
+                      ) : (
+                        <span className="text-xs text-ink-muted">Interim</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusChip status={s.status === "open" ? "in_progress" : "completed"} label={s.status} />
+                    </td>
+                    <td className="px-4 py-3 text-ink-muted">
+                      {s.reviews_total != null ? `${s.reviews_completed ?? 0}/${s.reviews_total} submitted` : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-ink-muted">{fmtDate(s.opened_at)}</td>
+                    <td className="px-4 py-3 text-right">
+                      {isAdmin && s.status === "open" ? (
+                        <GhostBtn onClick={() => closeSessionAction(s)} disabled={sessionBusy} className="border-red-200 text-red-600 hover:bg-red-50">
+                          {s.session_type === "final" ? "Close final review" : "Close session"}
+                        </GhostBtn>
+                      ) : (
+                        <span className="text-[11px] text-ink-faint">{s.closed_at ? `Closed ${fmtDate(s.closed_at)}` : ""}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
       {addOpen && (

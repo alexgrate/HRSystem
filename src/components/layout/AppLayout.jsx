@@ -183,11 +183,12 @@ const AppLayout = () => {
     return () => { stale = true; clearInterval(timer); };
   }, [can, isAdmin, approverFlows, user, location.pathname]);
 
-  const items = RESOURCES.filter((r) =>
-    Array.isArray(r.checks) && r.checks.length
+  const items = RESOURCES.filter((r) => {
+    if (r.adminOnly && !isAdmin) return false;
+    return Array.isArray(r.checks) && r.checks.length
       ? canAccess(r.checks, "any")
-      : can(r.resource, r.action || "read")
-  );
+      : can(r.resource, r.action || "read");
+  });
 
   const name = displayName(user);
 

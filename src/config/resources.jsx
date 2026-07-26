@@ -6,6 +6,7 @@ import {
   GitBranch,
   Wallet,
   CalendarDays,
+  CalendarClock,
   HandCoins,
   ShieldCheck,
   Building2,
@@ -29,6 +30,7 @@ const PayrollPage = lazy(() => import("../pages/admin/PayrollPage"));
 const DashboardPage = lazy(() => import("../pages/DashboardPage"));
 const AuditTrailPage = lazy(() => import("../pages/admin/AuditTrailPage"));
 const LeaveAdminPage = lazy(() => import("../pages/admin/LeaveAdminPage"));
+const AdministrationPeriodsPage = lazy(() => import("../pages/admin/AdministrationPeriodsPage"));
 const LoanAdminPage = lazy(() => import("../pages/admin/LoanAdminPage"));
 const AppraisalPage = lazy(() => import("../pages/admin/AppraisalPage"));
 
@@ -171,6 +173,18 @@ export const RESOURCES = [
     // employee can read and would make this appear for the whole company.
     checks: checksFromRoutes(["/approvals/leave-requests"]),
     component: LeaveAdminPage,
+  },
+  {
+    key: "administration-periods",
+    label: "Administration Periods",
+    segment: "administration-periods",
+    Icon: CalendarClock,
+    // Periods gate leave requests and appraisal cycles org-wide. The backend
+    // endpoints (list/open/schedule) are admin-only and carry no resource
+    // code, so the page is gated on the admin flag instead of an RBAC check.
+    resource: null,
+    adminOnly: true,
+    component: AdministrationPeriodsPage,
   },
   {
     key: "loans",

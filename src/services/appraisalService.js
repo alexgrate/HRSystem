@@ -56,6 +56,48 @@ export const appraisalCycleService = {
     }),
   removeDepartmentIndicator: (cycleId, departmentId, selectionId) =>
     api.delete(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/indicators/${selectionId}`, { data: {} }),
+
+  // Department target locks — the department head locks in employee targets
+  // once everyone has submitted; unlock is an admin-only safety valve.
+  lockDepartmentTargets: (cycleId, departmentId) =>
+    api.post(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/lock-targets`, {}),
+  unlockDepartmentTargets: (cycleId, departmentId) =>
+    api.post(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/unlock-targets`, {}),
+  listTargetLocks: (cycleId) =>
+    api.get(`/api/appraisal-cycles/${cycleId}/target-locks`).then((res) => unwrapList(res, ['locks'])),
+  // Per-employee target readiness for a department (dept head or admin).
+  targetProgress: (cycleId, departmentId) =>
+    api.get(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/target-progress`),
+};
+
+// ---------------------------------------------------------------------------
+// Review Sessions (/api/appraisal-review-sessions) — the admin "calls up" a
+// performance review for the whole cycle. Every employee in a target-locked
+// department with submitted targets gets a self-assessment review to record
+// achievements against; ratings are computed automatically. A session of
+// type 'final' ends the appraisal: closing it computes each employee's final
+// + overall (main) rating and closes the cycle.
+// ---------------------------------------------------------------------------
+export const appraisalSessionService = {
+  list: (cycleId) =>
+    api
+      .get('/api/appraisal-review-sessions/', cycleId ? { params: { cycle_id: cycleId } } : undefined)
+      .then((res) => unwrapList(res, ['sessions'])),
+  get: (id) => api.get(`/api/appraisal-review-sessions/${id}`),
+  open: ({ appraisal_cycle_id, name, session_type }) =>
+    api.post('/api/appraisal-review-sessions/', {
+      appraisal_cycle_id,
+      name: name || undefined,
+      session_type: session_type || 'interim',
+    }),
+  close: (id) => api.post(`/api/appraisal-review-sessions/${id}/close`, {}),
+  reviews: (id) =>
+    api.get(`/api/appraisal-review-sessions/${id}/reviews`).then((res) => unwrapList(res, ['reviews'])),
+  // End-of-cycle consolidated ratings (admin: everyone; employee: own row).
+  results: (cycleId) =>
+    api
+      .get('/api/appraisal-review-sessions/results', { params: { cycle_id: cycleId } })
+      .then((res) => unwrapList(res, ['results'])),
 };
 
 // ---------------------------------------------------------------------------
@@ -98,6 +140,7 @@ export const appraisalReviewService = {
     const params = {};
     if (filters.employee_id) params.employee_id = filters.employee_id;
     if (filters.appraisal_cycle_id) params.appraisal_cycle_id = filters.appraisal_cycle_id;
+    if (filters.review_session_id) params.review_session_id = filters.review_session_id;
     if (filters.status) params.status = filters.status;
     return api
       .get('/api/appraisal-reviews/', Object.keys(params).length ? { params } : undefined)
