@@ -17,7 +17,6 @@ import { loanService } from "../services/loanService";
 import { leaveService } from "../services/leaveService";
 import { orgService } from "../services/orgService";
 import { appraisalCycleService, appraisalReviewService } from "../services/appraisalService";
-import { RESOURCE_CODES } from "../config/resourceCodes";
 import { getEmployeeName } from "../utils/employee";
 import { fmtMoney, runStatusMeta } from "../utils/payroll";
 import { useNotifications } from "../context/NotificationContext";
@@ -843,23 +842,23 @@ function QuickActions({ can, isAdmin }) {
   const groups = useMemo(() => {
     const g = [
       { name: "People", actions: [
-        { label: "Onboard employee", to: "/app/directory", show: can(RESOURCE_CODES.EMPLOYEES, "create") },
-        { label: "Directory", to: "/app/directory", show: isAdmin || can(RESOURCE_CODES.EMPLOYEES, "read") },
+        { label: "Onboard employee", to: "/app/directory", show: can("EMPLOYEE", "create") },
+        { label: "Directory", to: "/app/directory", show: can("EMPLOYEE", "read") },
       ] },
       { name: "Self-service", actions: [
         { label: "Apply for leave", to: "/app/self-service", show: true },
         { label: "Apply for loan", to: "/app/self-service", show: true },
       ] },
       { name: "Approvals", actions: [
-        { label: "Review approvals", to: "/app/approvals", show: can([RESOURCE_CODES.LEAVE_REQUESTS, RESOURCE_CODES.DOCUMENTS, RESOURCE_CODES.PROFILE_UPDATE], "read") },
+        { label: "Review approvals", to: "/app/approvals", show: can(["LEAVE_REQUEST", "DOCUMENT", "PROFILE_UPDATE_REQUEST"], "read") },
       ] },
       { name: "Payroll", actions: [
-        { label: "Run payroll", to: "/app/payroll", show: can(RESOURCE_CODES.PAYROLL, "create") },
-        { label: "Payroll runs", to: "/app/payroll", show: can(RESOURCE_CODES.PAYROLL, "read") },
+        { label: "Run payroll", to: "/app/payroll", show: can("PAYROLL_RUN", "create") },
+        { label: "Payroll runs", to: "/app/payroll", show: can("PAYROLL_RUN", "read") },
       ] },
       { name: "Settings", actions: [
-        { label: "Manage access", to: "/app/settings", show: can(RESOURCE_CODES.ROLE_PERMISSIONS, "read") },
-        { label: "Getting started", to: "/app/setup", show: can(RESOURCE_CODES.SETUP, "create") },
+        { label: "Manage access", to: "/app/settings", show: isAdmin },
+        { label: "Getting started", to: "/app/setup", show: can("SETUP_INITIALIZATION", "manage") },
       ] },
     ];
     return g.map((grp) => ({ ...grp, actions: grp.actions.filter((a) => a.show) })).filter((grp) => grp.actions.length);
@@ -902,11 +901,11 @@ const DashboardPage = () => {
   const myEmployeeId = user?.id || null;
 
   // Capability flags (stable primitives — used as fetch gates).
-  const isHR = isAdmin || can(RESOURCE_CODES.EMPLOYEES, "read");
-  const canPayroll = can(RESOURCE_CODES.PAYROLL, "read");
-  const canLoansAll = can(RESOURCE_CODES.LOANS, "read");
-  const canAudit = isAdmin || can(RESOURCE_CODES.AUDIT_LOGS, "read");
-  const canApprovals = can([RESOURCE_CODES.LEAVE_REQUESTS, RESOURCE_CODES.DOCUMENTS, RESOURCE_CODES.PROFILE_UPDATE], "read");
+  const isHR = can("EMPLOYEE", "read");
+  const canPayroll = can("PAYROLL_RUN", "read");
+  const canLoansAll = can("STAFF_LOAN", "read");
+  const canAudit = can("AUDIT_LOG", "read");
+  const canApprovals = can(["LEAVE_REQUEST", "DOCUMENT", "PROFILE_UPDATE_REQUEST"], "read");
 
   // Shared lookups (all employee-readable) — fetched ONCE, reused everywhere.
   const [shared, setShared] = useState({ loading: true, profile: null, directory: [], departments: [], jobRoles: [] });
@@ -933,12 +932,13 @@ const DashboardPage = () => {
   const cycle = useDomain(() => appraisalCycleService.current(), true, []);
   const orgStats = useDomain(() => orgService.getOrgStats().then((r) => r?.data || r), isHR, [isHR]);
 
-  const report = useDomain(() => appraisalReviewService.report().then((r) => r?.data || r), isAdmin, [isAdmin]);
+  const canAppraisalReport = can("APPRAISAL_REVIEW", "manage");
+  const report = useDomain(() => appraisalReviewService.report().then((r) => r?.data || r), canAppraisalReport, [canAppraisalReport]);
   const approvals = useDomain(async () => {
     const [lv, dc, pf] = await Promise.all([
-      can(RESOURCE_CODES.LEAVE_REQUESTS, "read") ? approvalService.getPendingLeave().catch(() => []) : [],
-      can(RESOURCE_CODES.DOCUMENTS, "read") ? approvalService.getPendingDocuments().catch(() => []) : [],
-      can(RESOURCE_CODES.PROFILE_UPDATE, "read") ? approvalService.getPendingProfileUpdates().catch(() => []) : [],
+      can("LEAVE_REQUEST", "read") ? approvalService.getPendingLeave().catch(() => []) : [],
+      can("DOCUMENT", "read") ? approvalService.getPendingDocuments().catch(() => []) : [],
+      can("PROFILE_UPDATE_REQUEST", "read") ? approvalService.getPendingProfileUpdates().catch(() => []) : [],
     ]);
     return { leave: lv.length, docs: dc.length, profile: pf.length };
   }, canApprovals, [canApprovals]);
@@ -1067,7 +1067,7 @@ const DashboardPage = () => {
             {isHR && <OrgHealth orgStats={orgStats} configGaps={configGaps} cycle={cycle} payroll={payroll} canPayroll={canPayroll} />}
             {isHR && <OrgStats orgStats={orgStats} />}
             {canApprovals && <PendingApprovals approvals={approvals} />}
-            {isAdmin && <AppraisalOverview report={report} />}
+            {canAppraisalReport && <AppraisalOverview report={report} />}
             {canPayroll && <PayrollOverview payroll={payroll} />}
             {canLoansAll && <LoanPortfolio portfolio={portfolio} />}
           </div>

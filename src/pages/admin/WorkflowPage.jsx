@@ -8,7 +8,6 @@ import { setupService } from "../../services/setupService";
 import { auditService } from "../../services/auditService";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
-import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { formatAuditLog } from "../../utils/notifications";
 
 /* ------------------------------------------------------------------ helpers */
@@ -118,9 +117,9 @@ const WorkflowPage = () => {
   const [filterStatus, setFilterStatus] = useState("all");
   const [sort, setSort] = useState("updated");
 
-  const canCreate = can(RESOURCE_CODES.APPROVAL_WORKFLOWS, "create");
-  const canUpdate = can(RESOURCE_CODES.APPROVAL_WORKFLOWS, "update");
-  const canDelete = can(RESOURCE_CODES.APPROVAL_WORKFLOWS, "delete");
+  const canCreate = can("APPROVAL_WORKFLOW_DEFINITION", "create");
+  const canUpdate = can("APPROVAL_WORKFLOW_DEFINITION", "update");
+  const canDelete = can("APPROVAL_WORKFLOW_DEFINITION", "delete");
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);

@@ -6,10 +6,9 @@ import {
   Wallet, GitBranch, Users, ShieldCheck, Sparkles,
 } from "lucide-react";
 import { setupService } from "../../services/setupService";
-import { rolePermissionService } from "../../services/rolePermissionService";
+import { accessControlService } from "../../services/accessControlService";
 import { useCan } from "../../context/PermissionContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
-import { RESOURCE_CODES } from "../../config/resourceCodes";
 import api from "../../services/api";
 import bootstrapConfig from "../../assets/bootstrap-config.json";
 
@@ -19,7 +18,7 @@ const OnboardingPage = () => {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
-  const canBootstrap = useCan(RESOURCE_CODES.SETUP, "create");
+  const canBootstrap = useCan("SETUP_INITIALIZATION", "manage");
 
   const [counts, setCounts] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -40,7 +39,7 @@ const OnboardingPage = () => {
         setupService.getBenefitLevels().catch(() => null),
         setupService.getWorkflows().catch(() => null),
         api.get("/api/users/?limit=1").catch(() => null),
-        rolePermissionService.getSystemRoles().catch(() => null),
+        accessControlService.listRoles().catch(() => null),
       ]);
       if (results.every((r) => r === null)) {
         // Everything failed — show an error, not a lying "0% configured".

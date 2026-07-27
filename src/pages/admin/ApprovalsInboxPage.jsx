@@ -14,7 +14,6 @@ import { useConfig } from "../../context/ConfigContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { useAuth } from "../../context/AuthContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
-import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { resolvePersonName } from "../../utils/employee";
 import { isDesignatedApprover } from "../../utils/approvers";
 import { TabPills } from "../../components/ui/TabPills";
@@ -43,7 +42,7 @@ const rowDate = (r) =>
 const TABS = [
   {
     key: "leave", label: "Leave Requests", Icon: CalendarDays,
-    resource: RESOURCE_CODES.LEAVE_REQUESTS, noun: "leave request", workflowType: "LEAVE_REQUEST",
+    resource: "LEAVE_REQUEST", noun: "leave request", workflowType: "LEAVE_REQUEST",
     supportsNotes: true,
     list: () => approvalService.getPendingLeave(),
     approvalRequestId: (item) => item.approval_request_id || null,
@@ -52,7 +51,7 @@ const TABS = [
   },
   {
     key: "documents", label: "Documents", Icon: FileText,
-    resource: RESOURCE_CODES.DOCUMENTS, noun: "document", workflowType: "DOCUMENT_UPLOAD",
+    resource: "DOCUMENT", noun: "document", workflowType: "DOCUMENT_UPLOAD",
     supportsNotes: true,
     list: () => approvalService.getPendingDocuments(),
     approvalRequestId: (item) => item.approval_request_id || null,
@@ -61,7 +60,7 @@ const TABS = [
   },
   {
     key: "profile", label: "Profile Updates", Icon: UserCog,
-    resource: RESOURCE_CODES.PROFILE_UPDATE, noun: "profile update", workflowType: "EMPLOYEE_UPDATE",
+    resource: "PROFILE_UPDATE_REQUEST", noun: "profile update", workflowType: "EMPLOYEE_UPDATE",
     // Profile updates are reviewed directly (approve-all / reject-all) and are NOT
     // routed through the multi-stage approval engine, so there is no workflow
     // timeline to show and the backend does not persist a reviewer comment.
@@ -75,7 +74,7 @@ const TABS = [
   },
   {
     key: "loans", label: "Loans", Icon: HandCoins,
-    resource: RESOURCE_CODES.LOANS, noun: "loan request", workflowType: "LOAN_REQUEST",
+    resource: "STAFF_LOAN", noun: "loan request", workflowType: "LOAN_REQUEST",
     supportsNotes: true,
     // GET /all is admin-gated server-side: designated approvers who aren't
     // admins land in the catch and see an empty queue here — they still act
@@ -496,7 +495,7 @@ const ApprovalsInboxPage = () => {
   // designated approver (job role) ALONE — no RBAC 'manage'. Other tabs
   // genuinely require the RBAC review/manage permission, so keep the conjunct.
   const canManage = activeTab
-    ? activeTab.resource === RESOURCE_CODES.LEAVE_REQUESTS
+    ? activeTab.resource === "LEAVE_REQUEST"
       ? isDesignatedApprover(workflows, activeTab.workflowType, user, isAdmin)
       : can(activeTab.resource, "manage") && isDesignatedApprover(workflows, activeTab.workflowType, user, isAdmin)
     : false;

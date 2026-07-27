@@ -2,14 +2,11 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../context/PermissionContext';
 
-
-const ProtectedRoute = ({ children, resource = null, action = 'read', checks = null, adminOnly = false }) => {
+const ProtectedRoute = ({ children, resource = null, action = 'read', adminOnly = false }) => {
   const { user, loading } = useAuth();
-  const { can, canAccess, ready, isAdmin } = usePermissions();
+  const { can, isAdmin, ready } = usePermissions();
   const location = useLocation();
-  const allowed = Array.isArray(checks) && checks.length
-    ? canAccess(checks, 'any')
-    : can(resource, action);
+  const allowed = adminOnly ? isAdmin : can(resource, action);
 
   if (loading || (user && !ready)) {
     return (
@@ -23,15 +20,7 @@ const ProtectedRoute = ({ children, resource = null, action = 'read', checks = n
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (adminOnly && !isAdmin) {
-    return (
-      <div className="p-8 text-center text-ink-muted border border-dashed border-line rounded-2xl bg-card">
-        This module is limited to organization administrators.
-      </div>
-    );
-  }
-
-  if (resource && !allowed) {
+  if ((resource || adminOnly) && !allowed) {
     return (
       <div className="p-8 text-center text-ink-muted border border-dashed border-line rounded-2xl bg-card">
         You don’t have access to this module. Ask an administrator to grant the

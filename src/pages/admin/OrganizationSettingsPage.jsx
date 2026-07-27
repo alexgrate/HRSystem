@@ -5,7 +5,6 @@ import { configService } from "../../services/configService";
 import { useConfig } from "../../context/ConfigContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
-import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getInitials } from "../../utils/employee";
 
 const THEME_MODES = [
@@ -226,7 +225,7 @@ const OrganizationSettingsPage = () => {
   const toast = useToast();
   const confirm = useConfirm();
   const reduce = useReducedMotion();
-  const canEdit = can(RESOURCE_CODES.SYSTEM_CONFIG, "update") || can(RESOURCE_CODES.SYSTEM_CONFIG, "manage");
+  const canEdit = can("SYSTEM_CONFIG", "update") || can("SYSTEM_CONFIG", "manage");
 
   const [form, setForm] = useState(DEFAULTS);
   const [baseline, setBaseline] = useState(DEFAULTS);

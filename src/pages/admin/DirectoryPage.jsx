@@ -4,7 +4,6 @@ import { Search, X, Plus, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, 
 import { usePermissions } from "../../context/PermissionContext";
 import { useAuth } from "../../context/AuthContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
-import { RESOURCE_CODES } from "../../config/resourceCodes";
 import {
   EMPLOYEE_STATUS,
   EMPLOYEE_STATUS_ORDER,
@@ -178,12 +177,12 @@ const DirectoryPage = () => {
   const [setupModal, setSetupModal] = useState(null); // { mode: 'create'|'edit', record }
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
 
-  const canUpdateEmployee = can(RESOURCE_CODES.EMPLOYEES, "update");
-  const canReadEmployee = can(RESOURCE_CODES.EMPLOYEES, "read");
+  const canUpdateEmployee = can("EMPLOYEE", "update");
+  const canReadEmployee = can("EMPLOYEE", "read");
 
   const SETUPS = useMemo(() => ({
     Offices: {
-      resource: RESOURCE_CODES.OFFICE_LOCATIONS,
+      resource: "OFFICE_LOCATION",
       singular: "Office Location",
       list: () => setupService.getOffices(),
       create: (d) => setupService.createOffice(d),
@@ -208,7 +207,7 @@ const DirectoryPage = () => {
       ],
     },
     Departments: {
-      resource: RESOURCE_CODES.DEPARTMENTS,
+      resource: "DEPARTMENT",
       singular: "Department",
       list: () => setupService.getDepartments(),
       create: (d) => setupService.createDepartment(d),
@@ -235,7 +234,7 @@ const DirectoryPage = () => {
       ],
     },
     "Job Titles": {
-      resource: RESOURCE_CODES.JOB_ROLES,
+      resource: "JOB_ROLE",
       singular: "Job Title",
       list: () => setupService.getJobRoles(),
       create: (d) => setupService.createJobRole(d),
@@ -258,7 +257,7 @@ const DirectoryPage = () => {
       ],
     },
     "Pay Grades": {
-      resource: RESOURCE_CODES.PAY_GRADES,
+      resource: "PAY_GRADE",
       singular: "Pay Grade",
       list: () => setupService.getPayGrades(),
       create: (d) => setupService.createPayGrade(d),
@@ -289,7 +288,7 @@ const DirectoryPage = () => {
       ],
     },
     "Benefit Levels": {
-      resource: RESOURCE_CODES.BENEFIT_LEVELS,
+      resource: "BENEFIT_LEVEL",
       singular: "Benefit Level",
       list: () => setupService.getBenefitLevels(),
       create: (d) => setupService.createBenefitLevel(d),
@@ -308,7 +307,7 @@ const DirectoryPage = () => {
       ],
     },
     Grades: {
-      resource: RESOURCE_CODES.GRADES,
+      resource: "GRADE",
       singular: "Grade",
       list: () => setupService.getGrades(),
       create: (d) => setupService.createGrade(d),
@@ -333,7 +332,7 @@ const DirectoryPage = () => {
       ],
     },
     "Pay Groups": {
-      resource: RESOURCE_CODES.PAY_GROUPS,
+      resource: "PAY_GROUP",
       singular: "Pay Group",
       list: () => setupService.getPayGroups(),
       create: (d) => setupService.createPayGroup(d),
@@ -352,7 +351,7 @@ const DirectoryPage = () => {
       ],
     },
     Allowances: {
-      resource: RESOURCE_CODES.BENEFIT_LEVELS, 
+      resource: "BENEFIT_LEVEL",
       singular: "Allowance",
       list: () => setupService.getBenefitLevelAllowances(),
       create: (d) => setupService.createBenefitLevelAllowance(d),
@@ -374,7 +373,7 @@ const DirectoryPage = () => {
       ],
     },
     "Leave Types": {
-      resource: RESOURCE_CODES.LEAVE_REQUESTS, // no dedicated LEAVE_TYPE resource gate by leave
+      resource: "LEAVE_TYPE",
       singular: "Leave Type",
       list: () => setupService.getLeaveTypes(),
       create: (d) => setupService.createLeaveType(d),
@@ -908,7 +907,7 @@ const DirectoryPage = () => {
           >
             <Download className="h-4 w-4" /> Template
           </button>
-          {((tab === "Employees" && can(RESOURCE_CODES.EMPLOYEES, "create")) ||
+          {((tab === "Employees" && can("EMPLOYEE", "create")) ||
             (tab !== "Employees" && can(activeSetup.resource, "create"))) && (
             <button
               onClick={() => setBulkModalOpen(true)}
@@ -918,7 +917,7 @@ const DirectoryPage = () => {
             </button>
           )}
           {tab === "Employees"
-            ? can(RESOURCE_CODES.EMPLOYEES, "create") && (
+            ? can("EMPLOYEE", "create") && (
                 <button onClick={() => setShowAddEmployee(true)} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95">
                   <Plus className="h-4 w-4" /> New employee
                 </button>

@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 import { X, Pencil, Mail, Phone, Building2, BadgeCheck, FileText } from "lucide-react";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast } from "../../components/ui/Notifications";
-import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { employeeStatusMeta } from "../../config/employeeStatus";
 import { previewDocument } from "../../utils/documentPreview";
 import { orgService } from "../../services/orgService";
@@ -77,18 +76,18 @@ function RecordList({ rows, render, empty }) {
 }
 
 export default function EmployeeDetailsDrawer({ employee, jobRoles = [], departments = [], onClose, onEdit }) {
-  const { can, isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const toast = useToast();
   const empId = employee?.id;
 
   // Backend returns financial fields (base_salary, estimated_gross, bank) to any
   // EMPLOYEE 'read' holder (includeFinancial = isSelf || EMPLOYEE.read), and the
   // Directory grid shows salary on 'read' too — so gate on read, not update.
-  const canFinancial = isAdmin || can(RESOURCE_CODES.EMPLOYEES, "read");
-  const canLeave = isAdmin || can(RESOURCE_CODES.LEAVE_REQUESTS, "read");
-  const canLoans = isAdmin || can(RESOURCE_CODES.LOANS, "read");
-  const canDocs = isAdmin || can(RESOURCE_CODES.DOCUMENTS, "read");
-  const canProfileReqs = isAdmin || can(RESOURCE_CODES.PROFILE_UPDATE, "read");
+  const canFinancial = can("EMPLOYEE", "read");
+  const canLeave = can("LEAVE_REQUEST", "read");
+  const canLoans = can("STAFF_LOAN", "read");
+  const canDocs = can("DOCUMENT", "read");
+  const canProfileReqs = can("PROFILE_UPDATE_REQUEST", "read");
 
   const [writableKeys, setWritableKeys] = useState(new Set());
   const [state, setState] = useState({ loading: true, error: false, full: null, records: null });

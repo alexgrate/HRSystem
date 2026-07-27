@@ -23,7 +23,6 @@ import { useConfig } from "../../context/ConfigContext";
 import { useAuth } from "../../context/AuthContext";
 import { isDesignatedApprover } from "../../utils/approvers";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
-import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { resolvePersonName, getInitials } from "../../utils/employee";
 import { fmtMoney } from "../../utils/payroll";
 import { TabPills } from "../../components/ui/TabPills";
@@ -119,9 +118,9 @@ const LoanAdminPage = () => {
   const [busy, setBusy] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
 
-  const canAdminister = isAdmin;
+  const canAdminister = can("STAFF_LOAN", "manage");
   const canReview =
-    can(RESOURCE_CODES.LOANS, "review") &&
+    can("STAFF_LOAN", "approve") &&
     isDesignatedApprover(workflows, "LOAN_REQUEST", user, isAdmin);
 
   const selectedIdRef = useRef(selectedId);
@@ -184,7 +183,7 @@ const LoanAdminPage = () => {
           loanService.getRepaymentConfig().catch(() => null),
           loanService.getPolicy().catch(() => null),
           setupService.getWorkflows().catch(() => null),
-          can(RESOURCE_CODES.EMPLOYEES, "read")
+          can("EMPLOYEE", "read")
             ? orgService.listAllUsers().catch(() => [])
             : Promise.resolve([]),
         ]);

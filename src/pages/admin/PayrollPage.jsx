@@ -8,7 +8,6 @@ import { useConfig } from "../../context/ConfigContext";
 import { useAuth } from "../../context/AuthContext";
 import { isDesignatedApprover } from "../../utils/approvers";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
-import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getEmployeeName } from "../../utils/employee";
 import { MONTHS, fmtMoney, extractRunLines, runStatusMeta } from "../../utils/payroll";
 import { orgService } from "../../services/orgService";
@@ -26,27 +25,28 @@ const actionsForStatus = (status) => {
   switch (status) {
     case "draft":
     case "preview_generated":
-      return [{ key: "submit", label: "Submit for approval", perm: "update", confirmMsg: "Submit this payroll run for approval?", exec: (id) => payrollService.submitRun(id) }];
+      return [{ key: "submit", label: "Submit for approval", perm: "submit", confirmMsg: "Submit this payroll run for approval?", exec: (id) => payrollService.submitRun(id) }];
     case "submitted_pending_approval":
-      // Backend approve/reject routes require PAYROLL_RUN 'update' (not 'manage');
-      // the isDesignatedApprover check below is what restricts sign-off eligibility.
+      // Each lifecycle action is its own backend permission (PAYROLL_RUN:approve,
+      // :reject, etc.) — the isDesignatedApprover check below additionally
+      // restricts sign-off to the workflow's designated approver.
       return [
-        { key: "approve", label: "Approve payroll", perm: "update", approve: true, exec: (id, aid, c) => payrollService.approveRun(id, aid, c) },
-        { key: "reject", label: "Reject payroll", perm: "update", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectRun(id, aid, c) },
+        { key: "approve", label: "Approve payroll", perm: "approve", approve: true, exec: (id, aid, c) => payrollService.approveRun(id, aid, c) },
+        { key: "reject", label: "Reject payroll", perm: "reject", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectRun(id, aid, c) },
       ];
     case "approved":
-      return [{ key: "lock", label: "Request lock-in", perm: "update", confirmMsg: "Request lock-in? A locked run can no longer be adjusted.", exec: (id) => payrollService.requestLockIn(id) }];
+      return [{ key: "lock", label: "Request lock-in", perm: "request-lock-in", confirmMsg: "Request lock-in? A locked run can no longer be adjusted.", exec: (id) => payrollService.requestLockIn(id) }];
     case "lock_in_pending_approval":
       return [
-        { key: "approve-lock", label: "Approve lock-in", perm: "update", approve: true, exec: (id, aid, c) => payrollService.approveLockIn(id, aid, c) },
-        { key: "reject-lock", label: "Reject lock-in", perm: "update", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectLockIn(id, aid, c) },
+        { key: "approve-lock", label: "Approve lock-in", perm: "approve-lock-in", approve: true, exec: (id, aid, c) => payrollService.approveLockIn(id, aid, c) },
+        { key: "reject-lock", label: "Reject lock-in", perm: "reject-lock-in", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectLockIn(id, aid, c) },
       ];
     case "locked_in":
-      return [{ key: "distribute", label: "Request distribution", perm: "update", confirmMsg: "Request distribution? Employees will be notified of their payslips once approved.", exec: (id) => payrollService.requestDistribution(id) }];
+      return [{ key: "distribute", label: "Request distribution", perm: "request-distribution", confirmMsg: "Request distribution? Employees will be notified of their payslips once approved.", exec: (id) => payrollService.requestDistribution(id) }];
     case "distribution_pending_approval":
       return [
-        { key: "approve-dist", label: "Approve distribution", perm: "update", approve: true, exec: (id, aid, c) => payrollService.approveDistribution(id, aid, c) },
-        { key: "reject-dist", label: "Reject distribution", perm: "update", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectDistribution(id, aid, c) },
+        { key: "approve-dist", label: "Approve distribution", perm: "approve-distribution", approve: true, exec: (id, aid, c) => payrollService.approveDistribution(id, aid, c) },
+        { key: "reject-dist", label: "Reject distribution", perm: "reject-distribution", approve: true, danger: true, exec: (id, aid, c) => payrollService.rejectDistribution(id, aid, c) },
       ];
     default:
       return [];
@@ -75,13 +75,14 @@ const PayrollPage = () => {
   const [showAdjustment, setShowAdjustment] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const canCreate = can(RESOURCE_CODES.PAYROLL, "create");
-  const canUpdate = can(RESOURCE_CODES.PAYROLL, "update");
-  const canManage = can(RESOURCE_CODES.PAYROLL, "manage");
+  const canCreate = can("PAYROLL_RUN", "create");
+  const canUpdate = can("PAYROLL_RUN", "update");
+  const canManage = can("PAYROLL_RUN", "manage");
   // Adjustments are a SEPARATE backend RBAC resource (PAYROLL_ADJUSTMENT), not
-  // PAYROLL_RUN. Backend routes: create -> create, submit/approve/reject -> update.
-  const canAdjCreate = can(RESOURCE_CODES.PAYROLL_ADJUSTMENT, "create");
-  const canAdjUpdate = can(RESOURCE_CODES.PAYROLL_ADJUSTMENT, "update");
+  // PAYROLL_RUN, with its own create/submit/approve/reject actions.
+  const canAdjCreate = can("PAYROLL_ADJUSTMENT", "create");
+  const canAdjSubmit = can("PAYROLL_ADJUSTMENT", "submit");
+  const canAdjReview = can("PAYROLL_ADJUSTMENT", "approve") || can("PAYROLL_ADJUSTMENT", "reject");
 
   // Mirror of selectedId readable inside async callbacks, so a detail write
   // can check the selection hasn't moved on since the fetch started.
@@ -125,7 +126,7 @@ const PayrollPage = () => {
     (async () => {
       // The users list is admin-gated — non-admin payroll approvers get names
       // from the run items' snapshots instead, so don't even ask.
-      if (!can(RESOURCE_CODES.EMPLOYEES, "read")) return;
+      if (!can("EMPLOYEE", "read")) return;
       try {
         const res = await orgService.listAllUsers();
         if (!stale) setStaff(res);
@@ -250,7 +251,7 @@ const PayrollPage = () => {
   const actions = selectedRun
     ? actionsForStatus(selectedRun.status).filter(
         (a) =>
-          can(RESOURCE_CODES.PAYROLL, a.perm) &&
+          can("PAYROLL_RUN", a.perm) &&
           (!a.approve || isDesignatedApprover(workflows, STAGE_WORKFLOW_TYPE[selectedRun.status], user, isAdmin))
       )
     : [];
@@ -471,7 +472,7 @@ const PayrollPage = () => {
                               </div>
                             </div>
                             <div className="flex shrink-0 gap-1.5">
-                              {canAdjUpdate && (st === "draft" || st === "created") && (
+                              {canAdjSubmit && (st === "draft" || st === "created") && (
                                 <button
                                   disabled={busy}
                                   onClick={async () => {
@@ -489,7 +490,7 @@ const PayrollPage = () => {
                                   Submit
                                 </button>
                               )}
-                              {canAdjUpdate && st.includes("pend") && (
+                              {canAdjReview && st.includes("pend") && (
                                 <>
                                   <button
                                     disabled={busy}

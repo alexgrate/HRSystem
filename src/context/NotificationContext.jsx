@@ -5,7 +5,6 @@ import { auditService } from "../services/auditService";
 import { leaveService } from "../services/leaveService";
 import { loanService } from "../services/loanService";
 import { appraisalReviewService } from "../services/appraisalService";
-import { RESOURCE_CODES } from "../config/resourceCodes";
 import { formatAuditLog, buildPersonalNotifications, loadReadSet, persistReadSet } from "../utils/notifications";
 
 const NotificationContext = createContext({
@@ -17,9 +16,9 @@ const READ_EVENT = "dash:notif-read"; // cross-widget/tab read-state sync
 
 export function NotificationProvider({ children }) {
   const { user } = useAuth();
-  const { can, isAdmin, ready } = usePermissions();
+  const { can, ready } = usePermissions();
   const myEmployeeId = user?.id || null;
-  const canAudit = isAdmin || can(RESOURCE_CODES.AUDIT_LOGS, "read");
+  const canAudit = can("AUDIT_LOG", "read");
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);

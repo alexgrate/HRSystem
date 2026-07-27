@@ -7,7 +7,6 @@ import { usePermissions } from "../../context/PermissionContext";
 import { useConfig } from "../../context/ConfigContext";
 import { useNotifications } from "../../context/NotificationContext";
 import { RESOURCES, pathFor } from "../../config/resources";
-import { RESOURCE_CODES } from "../../config/resourceCodes";
 import { getEmployeeName, getInitials } from "../../utils/employee";
 import { isDesignatedApprover } from "../../utils/approvers";
 import { approvalService } from "../../services/approvalService";
@@ -129,7 +128,7 @@ const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMo
 
 const AppLayout = () => {
   const { user, logout } = useAuth();
-  const { can, canAccess, isAdmin } = usePermissions();
+  const { can, isAdmin } = usePermissions();
   const { config } = useConfig();
   const navigate = useNavigate();
   const location = useLocation();
@@ -159,13 +158,13 @@ const AppLayout = () => {
     let stale = false;
     const load = async () => {
       const jobs = [];
-      if (can(RESOURCE_CODES.LEAVE_REQUESTS, "manage") && isDesignatedApprover(approverFlows, "LEAVE_REQUEST", user, isAdmin))
+      if (can("LEAVE_REQUEST", "manage") && isDesignatedApprover(approverFlows, "LEAVE_REQUEST", user, isAdmin))
         jobs.push(approvalService.getPendingLeave().catch(() => []));
-      if (can(RESOURCE_CODES.DOCUMENTS, "manage") && isDesignatedApprover(approverFlows, "DOCUMENT_UPLOAD", user, isAdmin))
+      if (can("DOCUMENT", "manage") && isDesignatedApprover(approverFlows, "DOCUMENT_UPLOAD", user, isAdmin))
         jobs.push(approvalService.getPendingDocuments().catch(() => []));
-      if (can(RESOURCE_CODES.PROFILE_UPDATE, "manage") && isDesignatedApprover(approverFlows, "EMPLOYEE_UPDATE", user, isAdmin))
+      if (can("PROFILE_UPDATE_REQUEST", "manage") && isDesignatedApprover(approverFlows, "EMPLOYEE_UPDATE", user, isAdmin))
         jobs.push(approvalService.getPendingProfileUpdates().catch(() => []));
-      if (can(RESOURCE_CODES.LOANS, "manage") && isDesignatedApprover(approverFlows, "LOAN_REQUEST", user, isAdmin))
+      if (can("STAFF_LOAN", "manage") && isDesignatedApprover(approverFlows, "LOAN_REQUEST", user, isAdmin))
         jobs.push(
           loanService.listAll()
             .then((rows) => (Array.isArray(rows) ? rows : []).filter((r) => String(r.status).toLowerCase() === "pending_approval"))
@@ -183,12 +182,7 @@ const AppLayout = () => {
     return () => { stale = true; clearInterval(timer); };
   }, [can, isAdmin, approverFlows, user, location.pathname]);
 
-  const items = RESOURCES.filter((r) => {
-    if (r.adminOnly && !isAdmin) return false;
-    return Array.isArray(r.checks) && r.checks.length
-      ? canAccess(r.checks, "any")
-      : can(r.resource, r.action || "read");
-  });
+  const items = RESOURCES.filter((r) => (r.adminOnly ? isAdmin : can(r.resource, r.action || "read")));
 
   const name = displayName(user);
 

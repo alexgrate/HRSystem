@@ -15,7 +15,6 @@ import {
   ClipboardCheck,
 } from "lucide-react";
 import { lazy } from "react";
-import frontendResourceCatalog from "./frontend-resource-catalog.json";
 
 // Every page is lazy-loaded so each route becomes its own chunk — eager
 // imports here previously bundled the whole app into one 660 kB file.
@@ -34,58 +33,20 @@ const AdministrationPeriodsPage = lazy(() => import("../pages/admin/Administrati
 const LoanAdminPage = lazy(() => import("../pages/admin/LoanAdminPage"));
 const AppraisalPage = lazy(() => import("../pages/admin/AppraisalPage"));
 
-import { RESOURCE_CODES } from "./resourceCodes";
-export { RESOURCE_CODES };
-
-const CATALOG_ROUTE_RESOURCE = {
-  "/setup": RESOURCE_CODES.SETUP,
-  "/setup/workflows": RESOURCE_CODES.APPROVAL_WORKFLOWS,
-  "/users": RESOURCE_CODES.EMPLOYEES,
-  "/departments": RESOURCE_CODES.DEPARTMENTS,
-  "/office-locations": RESOURCE_CODES.OFFICE_LOCATIONS,
-  "/job-roles": RESOURCE_CODES.JOB_ROLES,
-  "/grades": RESOURCE_CODES.GRADES,
-  "/benefit-levels": RESOURCE_CODES.BENEFIT_LEVELS,
-  "/pay-grades": RESOURCE_CODES.PAY_GRADES,
-  "/pay-groups": RESOURCE_CODES.PAY_GROUPS,
-  "/payroll": RESOURCE_CODES.PAYROLL,
-  "/leave-requests": RESOURCE_CODES.LEAVE_REQUESTS,
-  "/approvals/leave-requests": RESOURCE_CODES.LEAVE_REQUESTS,
-  "/approvals/documents": RESOURCE_CODES.DOCUMENTS,
-  "/approvals/profile-updates": RESOURCE_CODES.PROFILE_UPDATE,
-  "/approvals/loans": RESOURCE_CODES.LOANS,
-  "/access/roles": RESOURCE_CODES.ROLE_PERMISSIONS,
-  "/access/resources": RESOURCE_CODES.ROLE_PERMISSIONS,
-  "/access/assignments": RESOURCE_CODES.ROLE_MAPPING,
-  "/settings/system": RESOURCE_CODES.SYSTEM_CONFIG,
-};
-
-const PAGE_PERMISSIONS_BY_ROUTE = new Map(
-  (frontendResourceCatalog?.modules || []).flatMap((moduleDef) =>
-    (moduleDef.pages || []).map((page) => [page.frontend_route, page.permissions || []])
-  )
-);
-
-function checkFromCatalogRoute(route) {
-  const resource = CATALOG_ROUTE_RESOURCE[route];
-  if (!resource) return null;
-  return {
-    resource,
-    permissions: PAGE_PERMISSIONS_BY_ROUTE.get(route) || [],
-  };
-}
-
-function checksFromRoutes(routes = []) {
-  return routes.map((route) => checkFromCatalogRoute(route)).filter(Boolean);
-}
-
+// Single source of truth for the app shell: sidebar nav, route table, and the
+// default-landing redirect all iterate this array. `resource`/`action` are
+// plain codes from the backend's dynamic resource+action catalog
+// (GET /api/access-control/catalog) — the only place a route's permission
+// requirement is declared; nothing to hand-sync elsewhere. `resource: null`
+// means "visible to any authenticated user" (the page gates its own content,
+// e.g. by relationship rather than a single resource code).
 export const RESOURCES = [
   {
     key: "dashboard",
     label: "Dashboard",
     segment: "dashboard",
     Icon: LayoutDashboard,
-    resource: null, // visible to all authenticated users
+    resource: null,
     component: DashboardPage,
   },
   {
@@ -93,9 +54,8 @@ export const RESOURCES = [
     label: "Getting Started",
     segment: "setup",
     Icon: Rocket,
-    resource: RESOURCE_CODES.SETUP,
-    action: "create",
-    checks: checksFromRoutes(["/setup"]),
+    resource: "SETUP_INITIALIZATION",
+    action: "manage",
     component: OnboardingPage,
   },
   {
@@ -103,18 +63,8 @@ export const RESOURCES = [
     label: "Directory & Setups",
     segment: "directory",
     Icon: Users,
-    resource: RESOURCE_CODES.EMPLOYEES,
+    resource: "EMPLOYEE",
     action: "read",
-    checks: checksFromRoutes([
-      "/users",
-      "/departments",
-      "/office-locations",
-      "/job-roles",
-      "/grades",
-      "/benefit-levels",
-      "/pay-grades",
-      "/pay-groups",
-    ]),
     component: DirectoryPage,
   },
   {
@@ -122,7 +72,7 @@ export const RESOURCES = [
     label: "Self-Service Portal",
     segment: "self-service",
     Icon: UserCircle,
-    resource: null, 
+    resource: null,
     component: ESSPage,
   },
   {
@@ -130,9 +80,8 @@ export const RESOURCES = [
     label: "Approval Workflows",
     segment: "workflows",
     Icon: GitBranch,
-    resource: RESOURCE_CODES.APPROVAL_WORKFLOWS,
+    resource: "APPROVAL_WORKFLOW_DEFINITION",
     action: "read",
-    checks: checksFromRoutes(["/setup/workflows"]),
     component: WorkflowPage,
   },
   {
@@ -141,14 +90,8 @@ export const RESOURCES = [
     segment: "approvals",
     Icon: Inbox,
     // The inbox multiplexes four approval types — access with any of them.
-    resource: [RESOURCE_CODES.LEAVE_REQUESTS, RESOURCE_CODES.DOCUMENTS, RESOURCE_CODES.PROFILE_UPDATE, RESOURCE_CODES.LOANS],
-    action: "read",
-    checks: checksFromRoutes([
-      "/approvals/leave-requests",
-      "/approvals/documents",
-      "/approvals/profile-updates",
-      "/approvals/loans",
-    ]),
+    resource: ["LEAVE_REQUEST", "DOCUMENT", "PROFILE_UPDATE_REQUEST", "STAFF_LOAN"],
+    action: "approve",
     component: ApprovalsInboxPage,
   },
   {
@@ -156,9 +99,8 @@ export const RESOURCES = [
     label: "Payroll Processing",
     segment: "payroll",
     Icon: Wallet,
-    resource: RESOURCE_CODES.PAYROLL,
-    action: "read",
-    checks: checksFromRoutes(["/payroll"]),
+    resource: "PAYROLL_RUN",
+    action: "manage",
     component: PayrollPage,
   },
   {
@@ -166,12 +108,11 @@ export const RESOURCES = [
     label: "Leave Administration",
     segment: "leave",
     Icon: CalendarDays,
-    resource: RESOURCE_CODES.LEAVE_REQUESTS,
-    action: "review",
-    // The org-wide admin console — gate on the review-level approvals page,
-    // not "/leave-requests" (the ESS "My Leave Requests" page), which every
-    // employee can read and would make this appear for the whole company.
-    checks: checksFromRoutes(["/approvals/leave-requests"]),
+    // The org-wide admin console — gate on the elevated "manage" (see
+    // everyone's requests) capability, not plain "read" which every
+    // employee holds for their own leave requests.
+    resource: "LEAVE_REQUEST",
+    action: "manage",
     component: LeaveAdminPage,
   },
   {
@@ -179,11 +120,8 @@ export const RESOURCES = [
     label: "Administration Periods",
     segment: "administration-periods",
     Icon: CalendarClock,
-    // Periods gate leave requests and appraisal cycles org-wide. The backend
-    // endpoints (list/open/schedule) are admin-only and carry no resource
-    // code, so the page is gated on the admin flag instead of an RBAC check.
-    resource: null,
-    adminOnly: true,
+    resource: "ADMINISTRATION_PERIOD",
+    action: "manage",
     component: AdministrationPeriodsPage,
   },
   {
@@ -191,8 +129,8 @@ export const RESOURCES = [
     label: "Loans",
     segment: "loans",
     Icon: HandCoins,
-    resource: RESOURCE_CODES.LOANS,
-    action: "read",
+    resource: "STAFF_LOAN",
+    action: "manage",
     component: LoanAdminPage,
   },
   {
@@ -200,28 +138,25 @@ export const RESOURCES = [
     label: "Appraisals",
     segment: "appraisals",
     Icon: ClipboardCheck,
-    // Visible to every authenticated user: the page itself adapts its tabs to
-    // the viewer (all employees get My Targets / My Reviews; managers & dept
-    // heads additionally get Team Reviews; admins get Cycles; admins/dept heads
-    // get Indicators). The appraisal backend authorizes by relationship
-    // (admin / department head / owner / reviewer), not by a single resource
-    // code, so a code-based route gate would mismatch — hence resource: null
-    // with per-action gating inside the page.
+    // Visible to every authenticated user: the page adapts its tabs to the
+    // viewer (all employees get their own appraisal; managers & dept heads
+    // additionally get Team Reviews; admins get Cycles/Indicators/Reports).
+    // The appraisal domain authorizes largely by relationship (department
+    // head / manager / designated reviewer), not a single resource code, so
+    // per-action gating happens inside the page instead of at the route.
     resource: null,
     component: AppraisalPage,
   },
   {
     key: "settings",
-    label: "Users & Permissions",
+    label: "Access Management",
     segment: "settings",
     Icon: ShieldCheck,
-    resource: RESOURCE_CODES.ROLE_PERMISSIONS,
-    action: "manage",
-    // Gate on the roles/resources pages (real create/update/delete grants).
-    // "/access/assignments" is excluded: its resource:assign key can't gate
-    // anything — the backend reports canAssign as a resource capability, so
-    // it's true for every employee.
-    checks: checksFromRoutes(["/access/roles", "/access/resources"]),
+    // Roles, permission grants, and user↔role assignments are an
+    // Administrator-only capability — fixed, not a grantable resource/action
+    // — so no role can ever be configured to see or touch this page.
+    resource: null,
+    adminOnly: true,
     component: SettingsPage,
   },
   {
@@ -229,8 +164,7 @@ export const RESOURCES = [
     label: "Audit Trail",
     segment: "audit",
     Icon: ScrollText,
-    // Confirm the seeded catalog uses this code — until granted, admins only.
-    resource: RESOURCE_CODES.AUDIT_LOGS,
+    resource: "AUDIT_LOG",
     action: "read",
     component: AuditTrailPage,
   },
@@ -239,9 +173,8 @@ export const RESOURCES = [
     label: "Company Settings",
     segment: "organization",
     Icon: Building2,
-    resource: RESOURCE_CODES.SYSTEM_CONFIG,
+    resource: "SYSTEM_CONFIG",
     action: "read",
-    checks: checksFromRoutes(["/settings/system"]),
     component: OrganizationSettingsPage,
   },
 ];
