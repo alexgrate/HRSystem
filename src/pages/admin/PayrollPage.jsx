@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { Plus, X, AlertCircle, Check, CheckCircle2 } from "lucide-react";
+import { Plus, X, AlertCircle, Check, CheckCircle2, Settings2 } from "lucide-react";
 import { payrollService, findApprovalRequestId } from "../../services/payrollService";
 import { setupService } from "../../services/setupService";
 import { usePermissions } from "../../context/PermissionContext";
@@ -20,6 +20,15 @@ const MILESTONES = [
 ];
 
 const CURRENCIES = ["NGN", "USD", "GBP", "EUR", "GHS", "KES", "ZAR"];
+
+// Builds a hover tooltip listing each configured line item of the given type
+// (and its computed amount for this employee) — same idea as the existing
+// loan-deduction tooltip, just generalized to named, admin-configured items.
+const lineItemsTooltip = (lineItems, itemType, currency) => {
+  const matches = (Array.isArray(lineItems) ? lineItems : []).filter((li) => li.item_type === itemType);
+  if (matches.length === 0) return undefined;
+  return matches.map((li) => `${li.name}: ${fmtMoney(li.amount, currency)}`).join("\n");
+};
 
 const actionsForStatus = (status) => {
   switch (status) {
@@ -73,6 +82,7 @@ const PayrollPage = () => {
   const [showNewRun, setShowNewRun] = useState(false);
   const [approveModal, setApproveModal] = useState(null);
   const [showAdjustment, setShowAdjustment] = useState(false);
+  const [showLineItems, setShowLineItems] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const canCreate = can("PAYROLL_RUN", "create");
@@ -83,6 +93,7 @@ const PayrollPage = () => {
   const canAdjCreate = can("PAYROLL_ADJUSTMENT", "create");
   const canAdjSubmit = can("PAYROLL_ADJUSTMENT", "submit");
   const canAdjReview = can("PAYROLL_ADJUSTMENT", "approve") || can("PAYROLL_ADJUSTMENT", "reject");
+  const canLineItemRead = can("PAYROLL_LINE_ITEM", "read");
 
   // Mirror of selectedId readable inside async callbacks, so a detail write
   // can check the selection hasn't moved on since the fetch started.
@@ -269,14 +280,24 @@ const PayrollPage = () => {
           <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-ink">Payroll Processing</h1>
           <p className="mt-1 text-sm text-ink-muted">Preview, approve, lock in and distribute monthly payroll per pay group.</p>
         </div>
-        {canCreate && (
-          <button
-            onClick={() => setShowNewRun(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
-          >
-            <Plus className="h-4 w-4" /> Run payroll
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {canLineItemRead && (
+            <button
+              onClick={() => setShowLineItems(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-ink-muted hover:bg-sunken"
+            >
+              <Settings2 className="h-4 w-4" /> Line items
+            </button>
+          )}
+          {canCreate && (
+            <button
+              onClick={() => setShowNewRun(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+            >
+              <Plus className="h-4 w-4" /> Run payroll
+            </button>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -420,10 +441,18 @@ const PayrollPage = () => {
                               {l.snapshot?.employee_name || l.employee_name || getEmployeeName(l.employee, null) || staffName(l.employee_id)}
                             </td>
                             <td className="px-3 py-2 text-right">{fmtMoney(l.base_salary ?? l.base, selectedRun.currency)}</td>
-                            <td className="px-3 py-2 text-right text-emerald-600">{fmtMoney(l.allowances_total ?? l.allowances, selectedRun.currency)}</td>
+                            <td
+                              className="px-3 py-2 text-right text-emerald-600"
+                              title={lineItemsTooltip(l.snapshot?.line_items, "remuneration", selectedRun.currency)}
+                            >
+                              {fmtMoney(l.allowances_total ?? l.allowances, selectedRun.currency)}
+                            </td>
                             <td
                               className="px-3 py-2 text-right text-red-600"
-                              title={Number(l.snapshot?.loan_deductions) > 0 ? `Includes ${fmtMoney(l.snapshot.loan_deductions, selectedRun.currency)} loan repayment` : undefined}
+                              title={[
+                                Number(l.snapshot?.loan_deductions) > 0 ? `Loan repayment: ${fmtMoney(l.snapshot.loan_deductions, selectedRun.currency)}` : null,
+                                lineItemsTooltip(l.snapshot?.line_items, "deduction", selectedRun.currency),
+                              ].filter(Boolean).join("\n") || undefined}
                             >
                               {fmtMoney(l.deductions_total ?? l.total_deductions ?? l.deductions, selectedRun.currency)}
                               {Number(l.snapshot?.loan_deductions) > 0 && <span className="ml-1 align-middle text-[9px] font-bold uppercase text-ink-faint">incl. loan</span>}
@@ -543,6 +572,10 @@ const PayrollPage = () => {
               toast.success("Payroll preview generated.");
             }}
           />
+        )}
+
+        {showLineItems && (
+          <LineItemsModal payGroups={payGroups} onClose={() => setShowLineItems(false)} />
         )}
 
         {approveModal && (
@@ -783,6 +816,273 @@ function AdjustmentModal({ run, employees = [], busy, onClose, onSubmit }) {
         </form>
       </div>
     </div>
+  );
+}
+
+function LineItemsModal({ payGroups = [], onClose }) {
+  const { can } = usePermissions();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const canCreate = can("PAYROLL_LINE_ITEM", "create");
+  const canUpdate = can("PAYROLL_LINE_ITEM", "update");
+  const canDelete = can("PAYROLL_LINE_ITEM", "delete");
+
+  const [payGroupId, setPayGroupId] = useState(payGroups[0]?.id || "");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(null); // null | "new" | item
+  const [busy, setBusy] = useState(false);
+
+  const load = async (pgId) => {
+    if (!pgId) { setItems([]); return; }
+    setLoading(true);
+    try {
+      setItems(await payrollService.listLineItems(pgId));
+    } catch (err) {
+      console.error("[Payroll] Failed to load line items:", err);
+      toast.error(err?.message || "Couldn't load line items.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load(payGroupId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payGroupId]);
+
+  const describeCalc = (item) =>
+    item.calculation_method === "percentage"
+      ? `${Number(item.value).toLocaleString()}% of base`
+      : `₦${Number(item.value).toLocaleString()} fixed`;
+
+  const handleDelete = async (item) => {
+    const ok = await confirm({
+      title: "Delete line item",
+      message: `Remove "${item.name}"? Future payroll runs for this pay group will no longer include it.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await payrollService.deleteLineItem(item.id);
+      toast.success("Line item deleted.");
+      await load(payGroupId);
+    } catch (err) {
+      toast.error(err?.message || "Couldn't delete the line item.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
+        <div className="flex items-center justify-between border-b pb-3">
+          <div>
+            <h3 className="text-lg font-bold text-ink">Payroll line items</h3>
+            <p className="text-xs text-ink-muted">Recurring remuneration/deduction rules, applied automatically per pay group.</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="mt-4 flex items-end justify-between gap-3 flex-wrap">
+          <div className="min-w-[220px]">
+            <label className={labelCls}>Pay group</label>
+            <select value={payGroupId} onChange={(e) => { setEditing(null); setPayGroupId(e.target.value); }} className={inputCls}>
+              <option value="">— Select pay group —</option>
+              {payGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </div>
+          {canCreate && payGroupId && (
+            <button
+              onClick={() => setEditing("new")}
+              className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-sunken"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add item
+            </button>
+          )}
+        </div>
+
+        {editing && (
+          <LineItemForm
+            payGroups={payGroups}
+            defaultPayGroupId={payGroupId}
+            item={editing === "new" ? null : editing}
+            busy={busy}
+            onCancel={() => setEditing(null)}
+            onSubmit={async (payload) => {
+              setBusy(true);
+              try {
+                if (editing === "new") {
+                  await payrollService.createLineItem(payload);
+                  toast.success("Line item added.");
+                } else {
+                  await payrollService.updateLineItem(editing.id, payload);
+                  toast.success("Line item updated.");
+                }
+                setEditing(null);
+                await load(payGroupId);
+              } catch (err) {
+                toast.error(err?.message || "Couldn't save the line item.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+        )}
+
+        <div className="mt-4 overflow-x-auto rounded-xl border border-line">
+          {loading ? (
+            <div className="p-6 text-center text-xs text-ink-faint">Loading line items…</div>
+          ) : !payGroupId ? (
+            <div className="p-6 text-center text-xs text-ink-faint">Pick a pay group to see its configured line items.</div>
+          ) : items.length === 0 ? (
+            <div className="p-6 text-center text-xs text-ink-faint">No line items configured for this pay group yet.</div>
+          ) : (
+            <table className="w-full min-w-[560px] text-sm">
+              <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold">Name</th>
+                  <th className="px-3 py-2 text-left font-semibold">Type</th>
+                  <th className="px-3 py-2 text-left font-semibold">Calculation</th>
+                  <th className="px-3 py-2 text-left font-semibold">Status</th>
+                  <th className="px-3 py-2 text-right font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.id} className="border-t border-line-soft">
+                    <td className="px-3 py-2 font-medium text-ink-2">{item.name}</td>
+                    <td className="px-3 py-2">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${item.item_type === "deduction" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+                        {item.item_type}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-ink-muted">{describeCalc(item)}</td>
+                    <td className="px-3 py-2">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${item.is_active !== false ? "bg-emerald-50 text-emerald-700" : "bg-sunken text-ink-muted"}`}>
+                        {item.is_active !== false ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="flex justify-end gap-1.5">
+                        {canUpdate && (
+                          <button onClick={() => setEditing(item)} className="rounded-lg border border-line px-2 py-1 text-xs font-semibold text-ink-muted hover:bg-sunken">
+                            Edit
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button disabled={busy} onClick={() => handleDelete(item)} className="rounded-lg border border-line px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LineItemForm({ payGroups = [], defaultPayGroupId, item, busy, onCancel, onSubmit }) {
+  const [name, setName] = useState(item?.name || "");
+  const [payGroupId, setPayGroupId] = useState(item?.pay_group_id || defaultPayGroupId || "");
+  const [itemType, setItemType] = useState(item?.item_type || "remuneration");
+  const [calcMethod, setCalcMethod] = useState(item?.calculation_method || "fixed");
+  const [value, setValue] = useState(item?.value != null ? String(item.value) : "");
+  const [description, setDescription] = useState(item?.description || "");
+  const [isActive, setIsActive] = useState(item?.is_active !== false);
+  const [error, setError] = useState("");
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return setError("Name is required.");
+    if (!payGroupId) return setError("Pick a pay group.");
+    const numeric = Number(value);
+    if (!value || !Number.isFinite(numeric) || numeric <= 0) return setError("Enter a value greater than zero.");
+    if (calcMethod === "percentage" && numeric > 100) return setError("Percentage must be 100 or less.");
+    setError("");
+    onSubmit({
+      name: name.trim(),
+      pay_group_id: payGroupId,
+      item_type: itemType,
+      calculation_method: calcMethod,
+      value: numeric,
+      description: description.trim() || null,
+      is_active: isActive,
+    });
+  };
+
+  return (
+    <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl border border-line p-4">
+      {error && (
+        <div className="flex items-center gap-2.5 rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
+          <AlertCircle className="h-4 w-4 shrink-0 text-red-600" /> <span>{error}</span>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Housing Allowance" />
+        </div>
+        <div>
+          <label className={labelCls}>Pay group</label>
+          <select value={payGroupId} onChange={(e) => setPayGroupId(e.target.value)} className={inputCls}>
+            <option value="">— Select —</option>
+            {payGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className={labelCls}>Type</label>
+          <select value={itemType} onChange={(e) => setItemType(e.target.value)} className={inputCls}>
+            <option value="remuneration">Remuneration (adds)</option>
+            <option value="deduction">Deduction (removes)</option>
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Calculation</label>
+          <select value={calcMethod} onChange={(e) => setCalcMethod(e.target.value)} className={inputCls}>
+            <option value="fixed">Fixed amount</option>
+            <option value="percentage">Percentage of base</option>
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>{calcMethod === "percentage" ? "Percentage (%)" : "Amount (₦)"}</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className={inputCls}
+            placeholder={calcMethod === "percentage" ? "10" : "50000"}
+          />
+        </div>
+      </div>
+      <div>
+        <label className={labelCls}>Description (optional)</label>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} className={`${inputCls} h-16 py-2 resize-none`} />
+      </div>
+      <label className="flex items-center gap-2 text-xs font-semibold text-ink-muted">
+        <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+        Active
+      </label>
+      <div className="flex gap-2 justify-end pt-1">
+        <button type="button" onClick={onCancel} className="h-9 border border-line rounded-xl px-3 text-xs font-semibold text-ink-muted">Cancel</button>
+        <button type="submit" disabled={busy} className="h-9 bg-brand text-white rounded-xl px-3 text-xs font-semibold disabled:opacity-70">
+          {busy ? "Saving…" : item ? "Save changes" : "Add item"}
+        </button>
+      </div>
+    </form>
   );
 }
 

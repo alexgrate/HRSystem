@@ -11,7 +11,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { resolvePersonName } from "../../utils/employee";
 import { statusBadgeCls } from "../../utils/status";
-import { inclusiveDays } from "../../utils/leave";
+import { workingDays } from "../../utils/leave";
 import { isDesignatedApprover } from "../../utils/approvers";
 import { orgService } from "../../services/orgService";
 
@@ -265,7 +265,7 @@ const LeaveAdminPage = () => {
                   <th className="px-4 py-3 text-left font-semibold">Employee</th>
                   <th className="px-4 py-3 text-left font-semibold">Type</th>
                   <th className="px-4 py-3 text-left font-semibold">Dates</th>
-                  <th className="px-4 py-3 text-left font-semibold">Days</th>
+                  <th className="px-4 py-3 text-left font-semibold">Working Days</th>
                   <th className="px-4 py-3 text-left font-semibold">Reason</th>
                   <th className="px-4 py-3 text-left font-semibold">Status</th>
                   <th className="px-4 py-3" />
@@ -280,7 +280,7 @@ const LeaveAdminPage = () => {
                       <td className="px-4 py-3 font-semibold text-ink">{requesterName(r)}</td>
                       <td className="px-4 py-3 text-ink-2">{typeName(r)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-ink-muted">{fmtDate(r.start_date)} → {fmtDate(r.end_date)}</td>
-                      <td className="px-4 py-3 text-ink-2">{inclusiveDays(r.start_date, r.end_date) || "—"}</td>
+                      <td className="px-4 py-3 text-ink-2">{r.start_date && r.end_date ? workingDays(r.start_date, r.end_date) : "—"}</td>
                       <td className="max-w-[260px] truncate px-4 py-3 text-ink-muted">{r.reason || "—"}</td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusBadgeCls(s)}`}>

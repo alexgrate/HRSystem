@@ -18,6 +18,7 @@ import { leaveService } from "../services/leaveService";
 import { orgService } from "../services/orgService";
 import { appraisalCycleService, appraisalReviewService } from "../services/appraisalService";
 import { getEmployeeName } from "../utils/employee";
+import { workingDays } from "../utils/leave";
 import { fmtMoney, runStatusMeta } from "../utils/payroll";
 import { useNotifications } from "../context/NotificationContext";
 import { groupByRecency } from "../utils/notifications";
@@ -45,7 +46,10 @@ const fmtWhen = (v) => {
   return fmtDate(v);
 };
 const titleCase = (s) => String(s || "").replace(/[_.-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase()).trim();
-const inclusiveDays = (start, end) => {
+// Calendar-day distance between two ISO dates — used for the "starts in N
+// days" countdown, which is a calendar-date distance, not a leave duration
+// (see workingDays from ../utils/leave for actual leave-day counts).
+const daysUntil = (start, end) => {
   const a = new Date(start), b = new Date(end);
   if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 0;
   return Math.floor((b.getTime() - a.getTime()) / 86400000) + 1;
@@ -273,7 +277,7 @@ function MyLeave({ leave, types }) {
     for (const r of mine) {
       const st = String(r.status || "").toLowerCase();
       if (st !== "approved" && st !== "pending_approval") continue;
-      m[r.leave_type_id] = (m[r.leave_type_id] || 0) + inclusiveDays(r.start_date, r.end_date);
+      m[r.leave_type_id] = (m[r.leave_type_id] || 0) + workingDays(r.start_date, r.end_date);
     }
     return m;
   }, [mine]);
@@ -559,7 +563,7 @@ function UpcomingEvents({ leave, orgStats, isHR }) {
     for (const l of (leave.data || [])) {
       if (String(l.status || "").toLowerCase() !== "approved") continue;
       if (String(l.start_date) < today) continue;
-      const days = inclusiveDays(today, l.start_date) - 1;
+      const days = daysUntil(today, l.start_date) - 1;
       if (days <= 45) out.push({ key: `lv-${l.id}`, Icon: CalendarDays, title: `${l.leave_type_name || "Leave"} starts`, date: l.start_date, days });
     }
     // Upcoming birthdays (HR only, from the aggregate).

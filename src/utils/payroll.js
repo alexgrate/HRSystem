@@ -43,4 +43,7 @@ export const lineAmounts = (l) => ({
   // preview stamps the loan portion on the item snapshot so it can be itemized.
   loanDeductions: Number(l.snapshot?.loan_deductions ?? l.loan_deductions ?? 0) || 0,
   loanCount: Number(l.snapshot?.loan_deduction_count ?? l.loan_deduction_count ?? 0) || 0,
+  // Configured per-pay-group remuneration/deduction rules, itemized on the
+  // snapshot alongside their computed amount for this employee's base salary.
+  lineItems: Array.isArray(l.snapshot?.line_items) ? l.snapshot.line_items : [],
 });

@@ -34,6 +34,16 @@ export const payrollService = {
     api.post(`/api/payroll/adjustments/${adjustmentId}/approve`, { approval_request_id: approvalRequestId, comment: comment || null }),
   rejectAdjustment: (adjustmentId, approvalRequestId, comment) =>
     api.post(`/api/payroll/adjustments/${adjustmentId}/reject`, { approval_request_id: approvalRequestId, comment: comment || null }),
+
+  // Recurring per-pay-group pay components (remuneration/deduction, fixed/percentage
+  // of base salary), applied automatically every time a run is previewed.
+  listLineItems: (payGroupId) =>
+    api
+      .get('/api/payroll-line-items', { params: payGroupId ? { pay_group_id: payGroupId } : {} })
+      .then((res) => unwrapList(res, ['line_items'])),
+  createLineItem: (data) => api.post('/api/payroll-line-items', data),
+  updateLineItem: (id, data) => api.put(`/api/payroll-line-items/${id}`, data),
+  deleteLineItem: (id) => api.delete(`/api/payroll-line-items/${id}`, { data: {} }),
 };
 
 export const findApprovalRequestId = (obj) => {

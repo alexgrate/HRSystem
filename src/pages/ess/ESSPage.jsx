@@ -12,7 +12,7 @@ import { loanService } from "../../services/loanService";
 import { administrationPeriodService, periodDate, rangeInsidePeriod } from "../../services/administrationPeriodService";
 import { orgService } from "../../services/orgService";
 import { getEmployeeName, getInitials } from "../../utils/employee";
-import { inclusiveDays } from "../../utils/leave";
+import { workingDays } from "../../utils/leave";
 import { MONTHS, fmtMoney, lineAmounts } from "../../utils/payroll";
 import { statusBadgeCls } from "../../utils/status";
 import { previewDocument } from "../../utils/documentPreview";
@@ -654,7 +654,7 @@ function LeaveTracker({ onRequestLeave, refreshKey = 0 }) {
             .filter((r) => (r.leave_type_id || r.leave_type?.id) === typeId)
             .filter(inCurrentPeriod)
             .filter((r) => String(r.status || "").toLowerCase().startsWith(statusPrefix))
-            .reduce((sum, r) => sum + inclusiveDays(r.start_date, r.end_date), 0);
+            .reduce((sum, r) => sum + workingDays(r.start_date, r.end_date), 0);
 
     const usedDays = (typeId) => daysFor(typeId, "approv");
     const pendingDays = (typeId) => daysFor(typeId, "pend");
@@ -676,7 +676,7 @@ function LeaveTracker({ onRequestLeave, refreshKey = 0 }) {
             return;
         }
         const daysAllowed = Number(type.days_allowed) || 0;
-        const remaining = daysAllowed - usedDays(typeId) - pendingDays(typeId) + inclusiveDays(r.start_date, r.end_date);
+        const remaining = daysAllowed - usedDays(typeId) - pendingDays(typeId) + workingDays(r.start_date, r.end_date);
         onRequestLeave({ type, remaining, requests: myRequests, period: currentPeriod, editRequest: r });
     };
 
@@ -770,7 +770,7 @@ function LeaveTracker({ onRequestLeave, refreshKey = 0 }) {
                                         <div className="text-sm font-semibold text-ink">
                                             {typeNameOf(r)}
                                             <span className="ml-2 text-xs font-normal text-ink-muted">
-                                                {String(r.start_date).slice(0, 10)} → {String(r.end_date).slice(0, 10)} · {inclusiveDays(r.start_date, r.end_date)} day{inclusiveDays(r.start_date, r.end_date) === 1 ? "" : "s"}
+                                                {String(r.start_date).slice(0, 10)} → {String(r.end_date).slice(0, 10)} · {workingDays(r.start_date, r.end_date)} working day{workingDays(r.start_date, r.end_date) === 1 ? "" : "s"}
                                             </span>
                                         </div>
                                         {r.reason && <div className="truncate text-xs text-ink-faint">“{r.reason}”</div>}
@@ -824,7 +824,7 @@ function LeaveRequestModal({ leaveType, remaining = null, existingRequests = [],
   const [reason, setReason] = useState(editing ? editRequest.reason || "" : "");
   const [loading, setLoading] = useState(false);
 
-  const requestedDays = startDate && endDate && endDate >= startDate ? inclusiveDays(startDate, endDate) : 0;
+  const requestedDays = startDate && endDate && endDate >= startDate ? workingDays(startDate, endDate) : 0;
 
   const outsideWindow =
     !!(startDate && endDate && endDate >= startDate) &&
@@ -858,7 +858,7 @@ function LeaveRequestModal({ leaveType, remaining = null, existingRequests = [],
     if (remaining != null && requestedDays > remaining) {
       const ok = await confirm({
         title: "Exceed your remaining balance?",
-        message: `This request is ${requestedDays} calendar days, but you have ${Math.max(remaining, 0)} day${remaining === 1 ? "" : "s"} of ${leaveType.name} left (pending requests included). HR can still reject it.`,
+        message: `This request is ${requestedDays} working days, but you have ${Math.max(remaining, 0)} day${remaining === 1 ? "" : "s"} of ${leaveType.name} left (pending requests included). HR can still reject it.`,
         confirmLabel: "Submit anyway",
         danger: true,
       });
@@ -919,7 +919,7 @@ function LeaveRequestModal({ leaveType, remaining = null, existingRequests = [],
           )}
           {requestedDays > 0 && (
             <div className={`text-xs ${remaining != null && requestedDays > remaining ? "font-semibold text-red-600" : "text-ink-muted"}`}>
-              {requestedDays} calendar day{requestedDays === 1 ? "" : "s"}
+              {requestedDays} working day{requestedDays === 1 ? "" : "s"}
               {remaining != null && ` · ${Math.max(remaining, 0)} remaining for ${leaveType.name}`}
             </div>
           )}
@@ -1812,22 +1812,29 @@ function PayslipDrawer({ run, jobTitle = "", onClose }) {
                                 <div className="text-xs font-semibold uppercase tracking-wider text-brand">Earnings</div>
                                 <Line label="Basic Salary" value={fmtMoney(amounts.base, run.currency)} />
                                 <Line label="Allowances" value={fmtMoney(amounts.allowances, run.currency)} />
+                                {amounts.lineItems.filter((li) => li.item_type === "remuneration").map((li) => (
+                                    <Line key={li.id} label={li.name} value={fmtMoney(li.amount, run.currency)} />
+                                ))}
                                 {amounts.gross != null && <Line label="Gross Pay" value={fmtMoney(amounts.gross, run.currency)} bold />}
 
                                 <div className="text-xs font-semibold uppercase tracking-wider text-brand pt-2">Deductions</div>
                                 {amounts.loanDeductions > 0 && (
-                                    <>
-                                        <Line
-                                            label={`Loan repayment${amounts.loanCount > 1 ? ` (${amounts.loanCount} loans)` : ""}`}
-                                            value={fmtMoney(amounts.loanDeductions, run.currency)}
-                                        />
-                                        <Line
-                                            label="Other deductions"
-                                            value={fmtMoney(Math.max(0, Number(amounts.deductions || 0) - amounts.loanDeductions), run.currency)}
-                                        />
-                                    </>
+                                    <Line
+                                        label={`Loan repayment${amounts.loanCount > 1 ? ` (${amounts.loanCount} loans)` : ""}`}
+                                        value={fmtMoney(amounts.loanDeductions, run.currency)}
+                                    />
                                 )}
-                                <Line label="Total Deductions" value={fmtMoney(amounts.deductions, run.currency)} bold={amounts.loanDeductions > 0} />
+                                {amounts.lineItems.filter((li) => li.item_type === "deduction").map((li) => (
+                                    <Line key={li.id} label={li.name} value={fmtMoney(li.amount, run.currency)} />
+                                ))}
+                                {(() => {
+                                    const itemizedDeductions = amounts.lineItems
+                                        .filter((li) => li.item_type === "deduction")
+                                        .reduce((sum, li) => sum + (Number(li.amount) || 0), 0);
+                                    const otherDeductions = Math.max(0, Number(amounts.deductions || 0) - amounts.loanDeductions - itemizedDeductions);
+                                    return otherDeductions > 0 ? <Line label="Other deductions" value={fmtMoney(otherDeductions, run.currency)} /> : null;
+                                })()}
+                                <Line label="Total Deductions" value={fmtMoney(amounts.deductions, run.currency)} bold={amounts.loanDeductions > 0 || amounts.lineItems.length > 0} />
 
                                 <div className="mt-5 flex items-center justify-between rounded-xl bg-gradient-to-r from-brand/10 to-brand-2/5 p-4">
                                     <div className="text-sm font-semibold text-ink-2">Net Pay</div>
