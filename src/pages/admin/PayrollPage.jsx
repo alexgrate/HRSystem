@@ -63,7 +63,7 @@ const actionsForStatus = (status) => {
 };
 
 const PayrollPage = () => {
-  const { can, isAdmin } = usePermissions();
+  const { can, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead } = usePermissions();
   const { user } = useAuth();
   const { config } = useConfig();
   const toast = useToast();
@@ -75,6 +75,7 @@ const PayrollPage = () => {
 
   const [detailState, setDetailState] = useState({ forId: null, data: null });
   const [adjustments, setAdjustments] = useState([]);
+  const [customColumns, setCustomColumns] = useState([]);
   const [staff, setStaff] = useState([]);
   const [payGroups, setPayGroups] = useState([]);
   const [workflows, setWorkflows] = useState(null); // null = unknown (approve buttons stay hidden for non-admins)
@@ -83,6 +84,8 @@ const PayrollPage = () => {
   const [approveModal, setApproveModal] = useState(null);
   const [showAdjustment, setShowAdjustment] = useState(false);
   const [showLineItems, setShowLineItems] = useState(false);
+  const [showColumnModal, setShowColumnModal] = useState(false);
+  const [colValueBusyKey, setColValueBusyKey] = useState(null); // `${columnId}:${employeeId}` while saving
   const [busy, setBusy] = useState(false);
 
   const canCreate = can("PAYROLL_RUN", "create");
@@ -94,6 +97,10 @@ const PayrollPage = () => {
   const canAdjSubmit = can("PAYROLL_ADJUSTMENT", "submit");
   const canAdjReview = can("PAYROLL_ADJUSTMENT", "approve") || can("PAYROLL_ADJUSTMENT", "reject");
   const canLineItemRead = can("PAYROLL_LINE_ITEM", "read");
+  // Custom columns are their own backend RBAC resource (PAYROLL_CUSTOM_COLUMN).
+  const canColCreate = can("PAYROLL_CUSTOM_COLUMN", "create");
+  const canColUpdate = can("PAYROLL_CUSTOM_COLUMN", "update");
+  const canColDelete = can("PAYROLL_CUSTOM_COLUMN", "delete");
 
   // Mirror of selectedId readable inside async callbacks, so a detail write
   // can check the selection hasn't moved on since the fetch started.
@@ -127,6 +134,15 @@ const PayrollPage = () => {
       setAdjustments(await payrollService.listAdjustments());
     } catch (err) {
       console.error("[Payroll] Failed to load adjustments:", err);
+    }
+  };
+
+  const loadCustomColumns = async (runId) => {
+    if (!runId) { setCustomColumns([]); return; }
+    try {
+      setCustomColumns(await payrollService.listCustomColumns(runId));
+    } catch (err) {
+      console.error("[Payroll] Failed to load custom columns:", err);
     }
   };
 
@@ -175,6 +191,7 @@ const PayrollPage = () => {
         console.error("[Payroll] Failed to load run detail:", err);
         if (!stale) setDetailState({ forId: selectedId, data: null });
       });
+    loadCustomColumns(selectedId);
     return () => { stale = true; };
   }, [selectedId]);
 
@@ -184,7 +201,7 @@ const PayrollPage = () => {
     // and wedge the detail panel on "Loading…" permanently — so re-check the
     // selection before every write.
     const runId = selectedIdRef.current;
-    await Promise.all([loadRuns(), loadAdjustments()]);
+    await Promise.all([loadRuns(), loadAdjustments(), loadCustomColumns(runId)]);
     if (runId && selectedIdRef.current === runId) {
       try {
         const data = await payrollService.getRun(runId);
@@ -251,6 +268,42 @@ const PayrollPage = () => {
   // Runs may carry the pay group as a uuid — show the human name.
   const payGroupName = (v) => payGroups.find((g) => g.id === v || g.name === v)?.name || v;
 
+  const saveColumnValue = async (columnId, employeeId, amount) => {
+    const key = `${columnId}:${employeeId}`;
+    setColValueBusyKey(key);
+    try {
+      await payrollService.setCustomColumnValue(columnId, { employee_id: employeeId, amount });
+      toast.success("Value saved.");
+      await refreshAfterAction();
+    } catch (err) {
+      console.error("[Payroll] Failed to save custom column value:", err);
+      toast.error(err?.message || "Couldn't save the value.");
+    } finally {
+      setColValueBusyKey(null);
+    }
+  };
+
+  const removeColumn = async (column) => {
+    const ok = await confirm({
+      title: "Remove this column?",
+      message: `Remove "${column.name}" from this payroll? This reverses its amount for every employee who has one.`,
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await payrollService.deleteCustomColumn(column.id);
+      toast.success("Column removed.");
+      await refreshAfterAction();
+    } catch (err) {
+      console.error("[Payroll] Failed to remove custom column:", err);
+      toast.error(err?.message || "Couldn't remove the column.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const meta = selectedRun ? runStatusMeta(selectedRun.status) : null;
   // Approve/reject only shows for the workflow's designated approver job
   // role (plus admins) — permission alone isn't the right to sign off.
@@ -263,7 +316,7 @@ const PayrollPage = () => {
     ? actionsForStatus(selectedRun.status).filter(
         (a) =>
           can("PAYROLL_RUN", a.perm) &&
-          (!a.approve || isDesignatedApprover(workflows, STAGE_WORKFLOW_TYPE[selectedRun.status], user, isAdmin))
+          (!a.approve || isDesignatedApprover(workflows, STAGE_WORKFLOW_TYPE[selectedRun.status], user, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead))
       )
     : [];
   // Backend createPayrollAdjustment only accepts these run statuses (adjustments
@@ -423,45 +476,87 @@ const PayrollPage = () => {
                 {detailLoading ? (
                   <div className="p-6 text-center text-xs text-ink-faint">Loading run details…</div>
                 ) : runLines.length > 0 ? (
-                  <div className="overflow-x-auto rounded-xl border border-line">
-                    <table className="w-full min-w-[560px] text-sm">
-                      <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-semibold">Employee</th>
-                          <th className="px-3 py-2 text-right font-semibold">Base</th>
-                          <th className="px-3 py-2 text-right font-semibold">Allowances</th>
-                          <th className="px-3 py-2 text-right font-semibold">Deductions</th>
-                          <th className="px-3 py-2 text-right font-semibold">Net</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {runLines.map((l, i) => (
-                          <tr key={l.id || i} className="border-t border-line-soft">
-                            <td className="px-3 py-2 font-medium text-ink-2">
-                              {l.snapshot?.employee_name || l.employee_name || getEmployeeName(l.employee, null) || staffName(l.employee_id)}
-                            </td>
-                            <td className="px-3 py-2 text-right">{fmtMoney(l.base_salary ?? l.base, selectedRun.currency)}</td>
-                            <td
-                              className="px-3 py-2 text-right text-emerald-600"
-                              title={lineItemsTooltip(l.snapshot?.line_items, "remuneration", selectedRun.currency)}
-                            >
-                              {fmtMoney(l.allowances_total ?? l.allowances, selectedRun.currency)}
-                            </td>
-                            <td
-                              className="px-3 py-2 text-right text-red-600"
-                              title={[
-                                Number(l.snapshot?.loan_deductions) > 0 ? `Loan repayment: ${fmtMoney(l.snapshot.loan_deductions, selectedRun.currency)}` : null,
-                                lineItemsTooltip(l.snapshot?.line_items, "deduction", selectedRun.currency),
-                              ].filter(Boolean).join("\n") || undefined}
-                            >
-                              {fmtMoney(l.deductions_total ?? l.total_deductions ?? l.deductions, selectedRun.currency)}
-                              {Number(l.snapshot?.loan_deductions) > 0 && <span className="ml-1 align-middle text-[9px] font-bold uppercase text-ink-faint">incl. loan</span>}
-                            </td>
-                            <td className="px-3 py-2 text-right font-semibold">{fmtMoney(l.net_salary ?? l.net_pay ?? l.net ?? l.total_net, selectedRun.currency)}</td>
+                  <div className="space-y-2">
+                    {canColCreate && adjustable && (
+                      <div className="flex justify-end">
+                        <button
+                          onClick={() => setShowColumnModal(true)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-sunken"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Add column
+                        </button>
+                      </div>
+                    )}
+                    <div className="overflow-x-auto rounded-xl border border-line">
+                      <table className="w-full min-w-[560px] text-sm">
+                        <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold">Employee</th>
+                            <th className="px-3 py-2 text-right font-semibold">Base</th>
+                            <th className="px-3 py-2 text-right font-semibold">Allowances</th>
+                            <th className="px-3 py-2 text-right font-semibold">Deductions</th>
+                            <th className="px-3 py-2 text-right font-semibold">Net</th>
+                            {customColumns.map((col) => (
+                              <th key={col.id} className="px-3 py-2 text-right font-semibold">
+                                <span className={col.item_type === "deduction" ? "text-red-500" : "text-emerald-600"}>{col.name}</span>
+                                {!col.is_global && <span className="ml-1 normal-case text-[9px] text-ink-faint">(1 staff)</span>}
+                                {canColDelete && adjustable && (
+                                  <button
+                                    onClick={() => removeColumn(col)}
+                                    title={`Remove "${col.name}"`}
+                                    className="ml-1 align-middle text-ink-faint hover:text-red-600"
+                                  >
+                                    <X className="inline h-3 w-3" />
+                                  </button>
+                                )}
+                              </th>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {runLines.map((l, i) => (
+                            <tr key={l.id || i} className="border-t border-line-soft">
+                              <td className="px-3 py-2 font-medium text-ink-2">
+                                {l.snapshot?.employee_name || l.employee_name || getEmployeeName(l.employee, null) || staffName(l.employee_id)}
+                              </td>
+                              <td className="px-3 py-2 text-right">{fmtMoney(l.base_salary ?? l.base, selectedRun.currency)}</td>
+                              <td
+                                className="px-3 py-2 text-right text-emerald-600"
+                                title={lineItemsTooltip(l.snapshot?.line_items, "remuneration", selectedRun.currency)}
+                              >
+                                {fmtMoney(l.allowances_total ?? l.allowances, selectedRun.currency)}
+                              </td>
+                              <td
+                                className="px-3 py-2 text-right text-red-600"
+                                title={[
+                                  Number(l.snapshot?.loan_deductions) > 0 ? `Loan repayment: ${fmtMoney(l.snapshot.loan_deductions, selectedRun.currency)}` : null,
+                                  lineItemsTooltip(l.snapshot?.line_items, "deduction", selectedRun.currency),
+                                ].filter(Boolean).join("\n") || undefined}
+                              >
+                                {fmtMoney(l.deductions_total ?? l.total_deductions ?? l.deductions, selectedRun.currency)}
+                                {Number(l.snapshot?.loan_deductions) > 0 && <span className="ml-1 align-middle text-[9px] font-bold uppercase text-ink-faint">incl. loan</span>}
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold">{fmtMoney(l.net_salary ?? l.net_pay ?? l.net ?? l.total_net, selectedRun.currency)}</td>
+                              {customColumns.map((col) => {
+                                const owner = col.values?.[0]?.employee_id;
+                                const editable = canColUpdate && adjustable && (col.is_global || owner === l.employee_id);
+                                return (
+                                  <CustomColumnCell
+                                    key={col.id}
+                                    column={col}
+                                    employeeId={l.employee_id}
+                                    currency={selectedRun.currency}
+                                    editable={editable}
+                                    busy={colValueBusyKey === `${col.id}:${l.employee_id}`}
+                                    onSave={(amount) => saveColumnValue(col.id, l.employee_id, amount)}
+                                  />
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 ) : null}
 
@@ -576,6 +671,34 @@ const PayrollPage = () => {
 
         {showLineItems && (
           <LineItemsModal payGroups={payGroups} onClose={() => setShowLineItems(false)} />
+        )}
+
+        {showColumnModal && selectedRun && (
+          <CustomColumnModal
+            run={selectedRun}
+            employees={
+              runLines.length
+                ? runLines.map((l) => ({ id: l.employee_id, name: l.snapshot?.employee_name || staffName(l.employee_id) }))
+                : staff.map((s) => ({ id: s.id, name: getEmployeeName(s, s.email) }))
+            }
+            existingNames={customColumns.map((c) => c.name.toLowerCase())}
+            busy={busy}
+            onClose={() => setShowColumnModal(false)}
+            onSubmit={async (payload) => {
+              setBusy(true);
+              try {
+                await payrollService.createCustomColumn(payload);
+                toast.success("Column added.");
+                setShowColumnModal(false);
+                await refreshAfterAction();
+              } catch (err) {
+                console.error("[Payroll] Custom column create failed:", err);
+                toast.error(err?.message || "Couldn't add the column.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
         )}
 
         {approveModal && (
@@ -811,6 +934,156 @@ function AdjustmentModal({ run, employees = [], busy, onClose, onSubmit }) {
             <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
             <button type="submit" disabled={busy} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">
               {busy ? "Saving…" : "Add adjustment"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// One cell in the run-detail table for a dynamic custom column. Read-only
+// display when not editable (locked run, no permission, or — for a column
+// peculiar to one employee — a different employee's row); click-to-edit
+// inline number input otherwise.
+function CustomColumnCell({ column, employeeId, currency, editable, busy, onSave }) {
+  const value = (column.values || []).find((v) => v.employee_id === employeeId);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  if (!editable) {
+    return <td className="px-3 py-2 text-right text-ink-muted">{value ? fmtMoney(value.amount, currency) : "—"}</td>;
+  }
+
+  if (editing) {
+    return (
+      <td className="px-3 py-2 text-right">
+        <div className="flex items-center justify-end gap-1">
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="h-7 w-24 rounded border border-line px-1.5 text-right text-xs outline-none focus:border-brand"
+          />
+          <button
+            disabled={busy}
+            onClick={async () => {
+              const amount = Number(draft);
+              if (!Number.isFinite(amount) || amount < 0) return;
+              await onSave(amount);
+              setEditing(false);
+            }}
+            className="text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+          >
+            <Check className="h-3.5 w-3.5" />
+          </button>
+          <button disabled={busy} onClick={() => setEditing(false)} className="text-ink-faint hover:text-ink disabled:opacity-50">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </td>
+    );
+  }
+
+  return (
+    <td className="px-3 py-2 text-right">
+      <button
+        onClick={() => { setDraft(value ? String(value.amount) : ""); setEditing(true); }}
+        className="text-ink-muted hover:text-brand hover:underline"
+      >
+        {value ? fmtMoney(value.amount, currency) : "—"}
+      </button>
+    </td>
+  );
+}
+
+function CustomColumnModal({ run, employees = [], existingNames = [], busy, onClose, onSubmit }) {
+  const [name, setName] = useState("");
+  const [itemType, setItemType] = useState("remuneration");
+  const [scope, setScope] = useState("all"); // "all" | "one"
+  const [employeeId, setEmployeeId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = (e) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) return setError("Enter a column name.");
+    if (existingNames.includes(trimmed.toLowerCase())) return setError("A column with this name already exists on this payroll.");
+    const isGlobal = scope === "all";
+    if (!isGlobal) {
+      if (!employeeId) return setError("Pick the staff member this column applies to.");
+      if (!amount || Number(amount) <= 0) return setError("Enter an amount greater than zero.");
+    }
+    setError("");
+    onSubmit({
+      payroll_run_id: run.id,
+      name: trimmed,
+      item_type: itemType,
+      is_global: isGlobal,
+      ...(isGlobal ? {} : { employee_id: employeeId, amount: Number(amount) }),
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="text-lg font-bold text-ink">Add payroll column</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
+        </div>
+        <form onSubmit={submit} className="mt-4 space-y-4">
+          {error && (
+            <div className="flex items-center gap-2.5 rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-600" /> <span>{error}</span>
+            </div>
+          )}
+          <div>
+            <label className={labelCls}>Column name</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Transport Reimbursement" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Type</label>
+              <select value={itemType} onChange={(e) => setItemType(e.target.value)} className={inputCls}>
+                <option value="remuneration">Remuneration (adds)</option>
+                <option value="deduction">Deduction (removes)</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Applies to</label>
+              <select value={scope} onChange={(e) => setScope(e.target.value)} className={inputCls}>
+                <option value="all">All staff on this payroll</option>
+                <option value="one">One specific staff member</option>
+              </select>
+            </div>
+          </div>
+          {scope === "all" ? (
+            <p className="text-[11px] text-ink-faint">
+              The column starts blank for every employee — set individual amounts afterwards directly in the table.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Staff member</label>
+                <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={inputCls}>
+                  <option value="">— Select —</option>
+                  {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Amount</label>
+                <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} placeholder="20000" />
+              </div>
+            </div>
+          )}
+          <div className="flex gap-2 justify-end pt-1">
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+            <button type="submit" disabled={busy} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">
+              {busy ? "Saving…" : "Add column"}
             </button>
           </div>
         </form>

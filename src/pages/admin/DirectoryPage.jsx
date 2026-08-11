@@ -16,7 +16,7 @@ import {
 import { setupService } from "../../services/setupService";
 import { orgService } from "../../services/orgService";
 import { getEmployeeName } from "../../utils/employee";
-import { getValueByAliases, parseBulkFile, parseDocList, toBoolean, toCsv, toNumber } from "../../utils/bulkUpload";
+import { getValueByAliases, normalizeHeader, parseBulkFile, parseDocList, toBoolean, toCsv, toNumber } from "../../utils/bulkUpload";
 import api from "../../services/api";
 import EmployeeDetailsDrawer from "./EmployeeDetailsDrawer";
 
@@ -47,6 +47,15 @@ const resolvePayGroupId = (value, groups) => {
   return match ? match.id : "";
 };
 
+// Offices have no name/code field, only address/state/country — resolve by
+// id or a case-insensitive match on the street address.
+const resolveOfficeId = (value, offices) => {
+  if (!value) return "";
+  const needle = String(value).trim().toLowerCase();
+  const match = offices.find((o) => o.id === value || String(o.address || "").trim().toLowerCase() === needle);
+  return match ? match.id : "";
+};
+
 const genThrowawayPassword = () => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   const bytes = new Uint8Array(24);
@@ -55,6 +64,14 @@ const genThrowawayPassword = () => {
 };
 
 const findNewEmployeeId = async (email, registerResponse) => {
+  // Fast path: /api/auth/register now returns the employee row it just
+  // created directly — skips a full paginated roster re-fetch on every
+  // single imported row (previously the only way to learn the new id).
+  const directId = registerResponse?.employee?.id;
+  if (directId) return directId;
+
+  // Fallback only: an older/cached response shape without `employee`, or the
+  // "account already existed" retry path in registerAndPopulateEmployee.
   const authId = registerResponse?.authUser?.id || registerResponse?.user?.id || registerResponse?.id || null;
   const roster = await orgService.listAllUsers().catch(() => []);
   const lower = String(email || "").toLowerCase();
@@ -110,15 +127,40 @@ const BULK_SETUP_ALIASES = {
   },
 };
 
+// Single source of truth for every header alias registerAndPopulateEmployee
+// reads — also used to detect/warn about columns the file has that don't map
+// to anything, so an import never silently drops a column the admin filled in.
+const EMPLOYEE_FIELD_ALIASES = {
+  first_name: ["first_name", "firstname", "firstName"],
+  last_name: ["last_name", "lastname", "lastName"],
+  email: ["email", "work_email"],
+  id: ["id", "user_id"],
+  contract_type: ["contract_type", "contract"],
+  phone: ["phone", "phone_number"],
+  staff_id: ["staff_id", "staff id", "employee_id"],
+  start_date: ["start_date", "start date", "hire_date", "date_started"],
+  department_id: ["department_id", "department", "department_name", "department_code"],
+  job_role_id: ["job_role_id", "job_title", "job_role", "title"],
+  manager_id: ["manager_id", "manager", "manager_email"],
+  report_location: ["report_location", "office", "office_location", "branch"],
+  pay_grade: ["pay_grade", "pay_grade_id", "pay_grade_code", "pay_grade_name"],
+  pay_group: ["pay_group", "pay_group_id", "pay_group_code", "pay_group_name"],
+  base_salary: ["base_salary", "salary"],
+  employment_status: ["employment_status", "status"],
+};
+
 const EMPLOYEE_BULK_TEMPLATE = {
   headers: [
     "first_name",
     "last_name",
     "email",
     "phone",
+    "staff_id",
     "department",
     "job_title",
     "manager_email",
+    "office",
+    "start_date",
     "pay_grade",
     "pay_group",
     "base_salary",
@@ -130,9 +172,14 @@ const EMPLOYEE_BULK_TEMPLATE = {
     last_name: "Doe",
     email: "jane.doe@company.com",
     phone: "+2348012345678",
+    staff_id: "EMP-00123",
     department: "Human Resources",
     job_title: "HR Lead",
     manager_email: "hr.head@company.com",
+    // Matched against an existing office's street address — see the
+    // "Offices" tab. Leave blank to skip assigning one.
+    office: "1 Marina Road, Lagos",
+    start_date: "2026-01-06",
     pay_grade: "PG_G1",
     pay_group: "Monthly Staff",
     base_salary: "450000",
@@ -176,6 +223,9 @@ const DirectoryPage = () => {
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [setupModal, setSetupModal] = useState(null); // { mode: 'create'|'edit', record }
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  // Full results of the last bulk import ({ tab, total, successCount, failures, warnings })
+  // — every failed/warned row, not just the first couple previewed in a toast.
+  const [bulkResults, setBulkResults] = useState(null);
 
   const canUpdateEmployee = can("EMPLOYEE", "update");
   const canReadEmployee = can("EMPLOYEE", "read");
@@ -245,6 +295,7 @@ const DirectoryPage = () => {
         { header: "Title", render: (r) => <span className="font-medium text-ink">{r.title}</span> },
         { header: "Department", render: (r) => allDepartments.find((d) => d.id === r.department_id)?.name || "—" },
         { header: "Required Docs", render: (r) => (r.required_documents?.length ? `${r.required_documents.length} doc${r.required_documents.length > 1 ? "s" : ""}` : "—") },
+        { header: "Final Approval Alerts", render: (r) => (r.notify_on_final_approval ? <span className="text-emerald-700 font-medium">On</span> : <span className="text-ink-muted">Off</span>) },
         { header: "Status", render: (r) => <StatusBadge active={r.is_active !== false} /> },
       ],
       fields: [
@@ -253,6 +304,10 @@ const DirectoryPage = () => {
         { key: "department_id", label: "Department", type: "select", required: true, options: allDepartments.map((d) => ({ value: d.id, label: d.name })) },
         { key: "description", label: "Description", type: "textarea" },
         { key: "required_documents", label: "Required Documents", type: "doclist", addLabel: "Add document", placeholder: "e.g. National ID" },
+        // When on, every operational employee holding this job role gets an
+        // email + in-app notification whenever any approval process (leave,
+        // payroll, loans, documents, profile updates, etc.) reaches its final approval.
+        { key: "notify_on_final_approval", label: "Notify on final approval of any process", type: "checkbox", default: false },
         { key: "is_active", label: "Active", type: "checkbox", default: true },
       ],
     },
@@ -508,10 +563,12 @@ const DirectoryPage = () => {
     return entry?.id || "";
   };
 
+  const EMAIL_RE = /^\S+@\S+\.\S+$/;
+
   const registerAndPopulateEmployee = async (record) => {
-    const firstName = (getValueByAliases(record, ["first_name", "firstname", "firstName"]) || "").trim();
-    const lastName = (getValueByAliases(record, ["last_name", "lastname", "lastName"]) || "").trim();
-    const email = (getValueByAliases(record, ["email", "work_email"]) || "").trim();
+    const firstName = (getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.first_name) || "").trim();
+    const lastName = (getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.last_name) || "").trim();
+    const email = (getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.email) || "").trim();
     if (!firstName || !lastName || !email) {
       throw new Error("first_name, last_name and email are required.");
     }
@@ -523,18 +580,42 @@ const DirectoryPage = () => {
     if (lastName.length < 2 || lastName.length > 50) {
       throw new Error("Last name must be 2-50 characters.");
     }
+    // Same checks AddEmployeeDrawer applies to a single-created employee —
+    // catch obviously bad input before spending an API call on it.
+    if (!EMAIL_RE.test(email)) {
+      throw new Error(`"${email}" is not a valid email address.`);
+    }
 
-    const contract = resolveContractType(getValueByAliases(record, ["contract_type", "contract"]));
+    const contract = resolveContractType(getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.contract_type));
     const contractType = contract.value;
-    const reg = await api.post("/api/auth/register", {
-      firstName,
-      lastName,
-      email,
-      password: genThrowawayPassword(),
-      contract: contractType,
-    });
 
-    let userId = getValueByAliases(record, ["id", "user_id"]);
+    // Collect a warning for any value that was PROVIDED but couldn't be
+    // resolved, so the import never silently drops a column the admin filled in.
+    const warnings = [];
+    if (contract.warning) warnings.push(contract.warning);
+
+    let reg = null;
+    try {
+      reg = await api.post("/api/auth/register", {
+        firstName,
+        lastName,
+        email,
+        password: genThrowawayPassword(),
+        contract: contractType,
+      });
+    } catch (registerErr) {
+      // A prior run of this same file may have already created the account
+      // and then failed on a later step (e.g. the PUT below). Re-registering
+      // would otherwise permanently mask that original failure behind
+      // "already exists" on every retry — instead, heal: find the existing
+      // employee and continue populating it, exactly as if register had
+      // just succeeded.
+      const msg = registerErr?.error?.message || registerErr?.message || "";
+      if (!/already exists/i.test(msg)) throw registerErr;
+      warnings.push("Account already existed — updated its profile instead of creating a new one.");
+    }
+
+    let userId = getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.id);
     if (!userId) userId = await findNewEmployeeId(email, reg);
     if (!userId) {
       // The account exists but we can't link its profile record — fail the row
@@ -542,17 +623,16 @@ const DirectoryPage = () => {
       throw new Error(`Account created, but its profile record couldn't be linked. Set department, salary and role from the employee's row.`);
     }
 
-    const dept = getValueByAliases(record, ["department_id", "department", "department_name", "department_code"]);
-    const role = getValueByAliases(record, ["job_role_id", "job_title", "job_role", "title"]);
-    const manager = getValueByAliases(record, ["manager_id", "manager", "manager_email"]);
-    const payGrade = getValueByAliases(record, ["pay_grade", "pay_grade_id", "pay_grade_code", "pay_grade_name"]);
-    const payGroup = getValueByAliases(record, ["pay_group", "pay_group_id", "pay_group_code", "pay_group_name"]);
-    const baseSalaryRaw = getValueByAliases(record, ["base_salary", "salary"]);
+    const dept = getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.department_id);
+    const role = getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.job_role_id);
+    const manager = getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.manager_id);
+    const office = getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.report_location);
+    const payGrade = getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.pay_grade);
+    const payGroup = getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.pay_group);
+    const baseSalaryRaw = getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.base_salary);
+    const staffId = (getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.staff_id) || "").trim();
+    const startDate = (getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.start_date) || "").trim();
 
-    // Collect a warning for any value that was PROVIDED but couldn't be
-    // resolved, so the import never silently drops a column the admin filled in.
-    const warnings = [];
-    if (contract.warning) warnings.push(contract.warning);
     const resolveWithWarn = (raw, resolver, label) => {
       const v = raw == null ? "" : String(raw).trim();
       if (!v) return "";
@@ -582,17 +662,24 @@ const DirectoryPage = () => {
     if (rawSalary) {
       baseSalary = toNumber(rawSalary);
       if (baseSalary === "") warnings.push(`Base salary "${rawSalary}" isn't a valid number — left unset`);
+      else if (baseSalary < 0) {
+        baseSalary = "";
+        warnings.push(`Base salary "${rawSalary}" can't be negative — left unset`);
+      }
     }
 
     const details = pruneEmpty({
-      phone: (getValueByAliases(record, ["phone", "phone_number"]) || "").trim(),
+      phone: (getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.phone) || "").trim(),
+      staff_id: staffId,
+      start_date: startDate,
+      report_location: resolveWithWarn(office, (v) => resolveOfficeId(v, allOffices), "Office"),
       department_id: resolveWithWarn(dept, (v) => resolveByNameCodeOrId(allDepartments, v, ["id", "name", "code"]), "Department"),
       job_role_id: resolveWithWarn(role, (v) => resolveByNameCodeOrId(allJobRoles, v, ["id", "title", "code"]), "Job title"),
       manager_id: resolveManager(manager),
       pay_grade: resolveWithWarn(payGrade, (v) => resolvePayGradeId(v, allPayGrades), "Pay grade"),
       pay_group: resolveWithWarn(payGroup, (v) => resolvePayGroupId(v, allPayGroups), "Pay group"),
       base_salary: baseSalary,
-      employment_status: (getValueByAliases(record, ["employment_status", "status"]) || "probation").trim(),
+      employment_status: (getValueByAliases(record, EMPLOYEE_FIELD_ALIASES.employment_status) || "probation").trim(),
       contract_type: contractType,
     });
 
@@ -604,6 +691,7 @@ const DirectoryPage = () => {
       await orgService.sendOnboardingLink(email);
     } catch (inviteErr) {
       console.error("[BulkUpload] Onboarding email failed:", inviteErr);
+      warnings.push("Onboarding email could not be sent — invite this employee manually.");
     }
 
     return { warnings };
@@ -639,6 +727,15 @@ const DirectoryPage = () => {
     return pruneEmpty(payload);
   };
 
+  // Every alias this tab's importer actually reads — used only to flag file
+  // columns that don't map to anything, so nothing is dropped without a trace.
+  const knownAliasesForTab = () => {
+    const raw = tab === "Employees"
+      ? Object.values(EMPLOYEE_FIELD_ALIASES).flat()
+      : (activeSetup?.fields || []).flatMap((f) => [f.key, ...((BULK_SETUP_ALIASES[tab] || {})[f.key] || [])]);
+    return new Set(raw.map(normalizeHeader));
+  };
+
   const processBulkUpload = async (file) => {
     const records = await parseBulkFile(file);
     if (!records.length) {
@@ -648,6 +745,15 @@ const DirectoryPage = () => {
     const failures = [];
     const warnings = [];
     let successCount = 0;
+
+    // Flag file columns that don't map to any known field — once per import,
+    // not per row, since it's the same header set every row shares.
+    const known = knownAliasesForTab();
+    const fileHeaders = Array.from(new Set(records.flatMap((r) => Object.keys(r || {}))));
+    const unknownHeaders = fileHeaders.filter((h) => !known.has(normalizeHeader(h)));
+    if (unknownHeaders.length) {
+      warnings.push({ where: "file", messages: [`${unknownHeaders.length} column(s) not recognized and ignored: ${unknownHeaders.join(", ")}`] });
+    }
 
     // CSV data starts on file line 2 (line 1 is the header); a JSON array has
     // no header, so record N is simply index N+1. Label each accordingly.
@@ -672,29 +778,22 @@ const DirectoryPage = () => {
 
     refreshAll();
 
-    // Full detail to the console for large imports; the toast carries counts
-    // and a short preview so nothing is silently dropped.
+    // Full detail also goes to the console for anyone debugging with devtools
+    // open, but the source of truth for the admin is the results panel below —
+    // every failure/warning, not just a couple previewed in a toast.
     if (warnings.length) {
       console.warn("[BulkUpload] Rows imported with unset fields:",
         warnings.map((w) => `${w.where}: ${w.messages.join("; ")}`));
     }
 
+    setBulkResults({ tab, total: records.length, successCount, failures, warnings });
+
     if (failures.length === 0 && warnings.length === 0) {
       toast.success(`Bulk upload complete: ${successCount} ${tab.toLowerCase()} record(s) created.`);
-      return;
+    } else {
+      const msg = `Imported ${successCount}/${records.length} — see the results panel for details.`;
+      if (failures.length) toast.error(msg); else toast.info(msg);
     }
-
-    const bits = [`Imported ${successCount}/${records.length}.`];
-    if (failures.length) {
-      const failPreview = failures.slice(0, 2).map((f) => `${f.where}: ${f.message}`).join(" | ");
-      bits.push(`${failures.length} failed${failPreview ? ` (${failPreview})` : ""}.`);
-    }
-    if (warnings.length) {
-      const warnPreview = warnings.slice(0, 2).map((w) => `${w.where}: ${w.messages.join("; ")}`).join(" | ");
-      bits.push(`${warnings.length} imported with unset fields${warnPreview ? ` (${warnPreview})` : ""} — see console.`);
-    }
-    const msg = bits.join(" ");
-    if (failures.length) toast.error(msg); else toast.info(msg);
   };
 
   useEffect(() => {
@@ -1124,6 +1223,10 @@ const DirectoryPage = () => {
           />
         )}
 
+        {bulkResults && (
+          <BulkResultsModal results={bulkResults} onClose={() => setBulkResults(null)} />
+        )}
+
         {selectedEmployee && (
           <EmployeeEditModal
             employee={selectedEmployee}
@@ -1269,7 +1372,16 @@ function BulkUploadModal({ tab, onClose, onSubmit }) {
 
           <div className="rounded-xl border border-line bg-sunken/60 p-4 text-sm text-ink-muted">
             <p className="font-semibold text-ink-2">Supported formats</p>
-            <p className="mt-1">Upload either a CSV or JSON array file. CSV headers should match the template column names.</p>
+            <p className="mt-1">Upload either a CSV or JSON array file. Column headers are matched flexibly (e.g. "Department", "department_name" and "department_code" all work) — download the template below for the full list.</p>
+            {tab === "Employees" ? (
+              <p className="mt-2">
+                Only <span className="font-semibold text-ink-2">first_name</span>, <span className="font-semibold text-ink-2">last_name</span> and{" "}
+                <span className="font-semibold text-ink-2">email</span> are required; everything else (including staff ID, start date and office) is optional.
+                Any column that isn't recognized is ignored and called out in the results after upload.
+              </p>
+            ) : (
+              <p className="mt-2">Any column that isn't recognized is ignored and called out in the results after upload.</p>
+            )}
           </div>
 
           <label className="block">
@@ -1295,6 +1407,70 @@ function BulkUploadModal({ tab, onClose, onSubmit }) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// Full detail of the last bulk import — every failed/warned row, not just the
+// first couple previewed in the toast. Stays open until the admin dismisses it.
+function BulkResultsModal({ results, onClose }) {
+  const { tab, total, successCount, failures, warnings } = results;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+      <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl bg-card shadow-xl">
+        <div className="flex items-center justify-between border-b px-6 py-4">
+          <div>
+            <h3 className="text-lg font-bold text-ink">Bulk Upload Results · {tab}</h3>
+            <p className="text-xs text-ink-muted mt-0.5">
+              Imported {successCount}/{total}
+              {failures.length ? ` · ${failures.length} failed` : ""}
+              {warnings.length ? ` · ${warnings.length} with warnings` : ""}
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+          {!failures.length && !warnings.length && (
+            <div className="flex items-center gap-2.5 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800 border border-emerald-200">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              Every record imported cleanly — nothing to review.
+            </div>
+          )}
+
+          {failures.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-red-700 mb-2">Failed ({failures.length})</p>
+              <ul className="space-y-2">
+                {failures.map((f, i) => (
+                  <li key={i} className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    <span className="font-semibold">{f.where}:</span> {f.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {warnings.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 mb-2">Imported with warnings ({warnings.length})</p>
+              <ul className="space-y-2">
+                {warnings.map((w, i) => (
+                  <li key={i} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    <span className="font-semibold">{w.where}:</span> {w.messages.join("; ")}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end border-t px-6 py-4">
+          <button onClick={onClose} className="h-11 bg-brand text-white rounded-xl px-5 text-sm font-semibold">Done</button>
+        </div>
       </div>
     </div>
   );

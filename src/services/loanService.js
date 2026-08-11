@@ -16,6 +16,12 @@ export const loanService = {
   // Server-computed preview: exact installment, total, total_interest, end_date,
   // amortization and the 33.3% affordability decision. Replaces all client math.
   quote: (payload) => api.post('/api/loan-request/quote', payload),
+  // Which loan source(s) (internal / Dash) the org currently allows —
+  // employee-readable (unlike getPolicy below, which needs STAFF_LOAN manage).
+  getLoanSources: () => api.get('/api/loan-request/loan-sources'),
+  // Loan-agreement terms + figures for a Dash-sourced application, shown
+  // before the employee signs. Same underlying numbers as quote().
+  previewAgreement: (payload) => api.post('/api/loan-request/agreement-preview', payload),
   create: (data) => api.post('/api/loan-request/', data),
   update: (id, data) => api.put(`/api/loan-request/${id}`, data),
   cancel: (id) => api.delete(`/api/loan-request/${id}`, { data: {} }),

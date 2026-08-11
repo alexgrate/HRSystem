@@ -48,8 +48,9 @@ const fmtDate = (d) => (d ? String(d).slice(0, 10) : "—");
 // Appraisal-specific status chips: 'submitted'/'completed' are the positive states.
 const apStatusCls = (status) => {
   const s = String(status || "").toLowerCase();
-  if (s === "completed" || s === "submitted" || s === "locked") return "bg-emerald-50 text-emerald-700";
-  if (s === "in_progress" || s === "draft" || s === "unlocked") return "bg-amber-50 text-amber-700";
+  if (s === "completed" || s === "submitted" || s === "locked" || s === "accepted") return "bg-emerald-50 text-emerald-700";
+  if (s === "in_progress" || s === "draft" || s === "unlocked" || s === "proposed") return "bg-amber-50 text-amber-700";
+  if (s === "rejected") return "bg-red-50 text-red-700";
   return "bg-sunken text-ink-muted";
 };
 
@@ -130,9 +131,9 @@ const GhostBtn = ({ children, className = "", ...props }) => (
 
 /* ============================================================ My Targets */
 
-export function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentPeriod, targetLocks = [] }) {
+export function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentPeriod, targetLocks = [], indicatorLocks = [] }) {
   const toast = useToast();
-  const [indicators, setIndicators] = useState([]); // department indicator selections applicable to me
+  const [indicators, setIndicators] = useState([]); // department indicator selections applicable to me (bottom-up: includes my own proposals, every status)
   const [targets, setTargets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -185,7 +186,15 @@ export function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentP
   // Once the department head locks in the department's targets they freeze,
   // and the department becomes eligible for admin-called review sessions.
   const deptLocked = !!myDeptId && targetLocks.some((l) => l.department_id === myDeptId);
-  const canSetTargets = periodActive && cycleActive && !deptLocked;
+  // Bottom-up cycles: I propose my own indicators first; my department head
+  // has to lock them in before I can set targets against the accepted ones.
+  const isBottomUp = currentCycle?.workflow_type === "bottom_up";
+  const deptIndicatorsLocked = !!myDeptId && indicatorLocks.some((l) => l.department_id === myDeptId);
+  const canSetTargets = periodActive && cycleActive && !deptLocked && (!isBottomUp || deptIndicatorsLocked);
+  const acceptedIndicators = useMemo(
+    () => indicators.filter((s) => !s.status || s.status === "accepted"),
+    [indicators],
+  );
 
   if (!currentCycle?.id) {
     return (
@@ -195,9 +204,16 @@ export function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentP
     );
   }
 
+  // Waiting on my department head to lock in reviewed indicators is its own,
+  // contextual state (explained by the propose panel below) — distinct from
+  // the generic "targets are frozen" banner, which would otherwise say
+  // something misleading ("period is closed") while everything is actually
+  // still open, just earlier in the bottom-up sequence.
+  const waitingForIndicatorLock = isBottomUp && !deptIndicatorsLocked && periodActive && cycleActive && !deptLocked;
+
   return (
     <div className="space-y-4">
-      {!canSetTargets && (
+      {!canSetTargets && !waitingForIndicatorLock && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
           <Lock className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
@@ -212,99 +228,112 @@ export function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentP
         </div>
       )}
 
-      <Card>
-        <div className="flex items-center justify-between border-b border-line-soft px-5 py-4">
-          <div>
-            <h2 className="text-sm font-bold text-ink">My Performance Targets</h2>
-            <p className="text-xs text-ink-muted">Cycle: {currentCycle.name || fmtDate(currentCycle.created_at)}</p>
-          </div>
-        </div>
+      {waitingForIndicatorLock && (
+        <ProposeIndicatorsPanel
+          cycleId={cycleId}
+          myDeptId={myDeptId}
+          proposals={indicators}
+          loading={loading}
+          error={error}
+          onReload={load}
+        />
+      )}
 
-        {loading ? (
-          <Loading label="Loading your targets…" />
-        ) : error ? (
-          <ErrorState message={error} onRetry={load} />
-        ) : indicators.length === 0 && targets.length === 0 ? (
-          <EmptyState Icon={Target} title="No indicators assigned to you yet" hint="Your department head or an administrator selects the performance indicators that apply to your department and job role." />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
-                <tr>
-                  <th className="px-5 py-3 text-left font-semibold">Indicator</th>
-                  <th className="px-4 py-3 text-left font-semibold">Weight</th>
-                  <th className="px-4 py-3 text-left font-semibold">My Target</th>
-                  <th className="px-4 py-3 text-left font-semibold">Status</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {indicators.map((sel) => {
-                  const t = targetBySelection[sel.id];
-                  return (
-                    <tr key={sel.id} className="border-t border-line-soft">
-                      <td className="px-5 py-3">
-                        <div className="font-semibold text-ink">{sel.performance_indicator_name || "Indicator"}</div>
-                        {sel.performance_indicator_description ? (
-                          <div className="text-xs text-ink-muted">{sel.performance_indicator_description}</div>
-                        ) : null}
-                        {sel.measurement_unit ? <div className="text-[11px] text-ink-faint">Unit: {sel.measurement_unit}</div> : null}
-                      </td>
-                      <td className="px-4 py-3 text-ink-muted">{fmtNum(sel.weight)}</td>
-                      <td className="px-4 py-3">
-                        {t ? (
-                          <div>
-                            <div className="font-semibold text-ink">{fmtNum(t.target_value)}</div>
-                            {t.target_description ? <div className="text-xs text-ink-muted">{t.target_description}</div> : null}
-                          </div>
-                        ) : (
-                          <span className="text-ink-faint">Not set</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">{t ? <StatusChip status={t.status} /> : <span className="text-ink-faint">—</span>}</td>
-                      <td className="px-4 py-3 text-right">
-                        {t?.status === "submitted" ? (
-                          <span className="text-[11px] font-semibold text-emerald-600">Submitted</span>
-                        ) : canSetTargets ? (
-                          <GhostBtn onClick={() => setEditing({ selection: sel, target: t || null })}>
-                            {t ? <Pencil className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-                            {t ? "Edit" : "Set target"}
-                          </GhostBtn>
-                        ) : (
-                          <span className="text-[11px] text-ink-faint">Locked</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {/* Targets whose selection is no longer returned (e.g. role filter) still surface */}
-                {targets
-                  .filter((t) => !indicators.some((s) => s.id === t.department_performance_indicator_id))
-                  .map((t) => (
-                    <tr key={t.id} className="border-t border-line-soft">
-                      <td className="px-5 py-3 font-semibold text-ink">Indicator</td>
-                      <td className="px-4 py-3 text-ink-muted">—</td>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-ink">{fmtNum(t.target_value)}</div>
-                        {t.target_description ? <div className="text-xs text-ink-muted">{t.target_description}</div> : null}
-                      </td>
-                      <td className="px-4 py-3"><StatusChip status={t.status} /></td>
-                      <td className="px-4 py-3 text-right">
-                        {t.status === "draft" && canSetTargets ? (
-                          <GhostBtn onClick={() => setEditing({ selection: null, target: t })}>
-                            <Pencil className="h-3.5 w-3.5" /> Edit
-                          </GhostBtn>
-                        ) : (
-                          <StatusChip status={t.status} />
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+      {!waitingForIndicatorLock && (
+        <Card>
+          <div className="flex items-center justify-between border-b border-line-soft px-5 py-4">
+            <div>
+              <h2 className="text-sm font-bold text-ink">My Performance Targets</h2>
+              <p className="text-xs text-ink-muted">Cycle: {currentCycle.name || fmtDate(currentCycle.created_at)}</p>
+            </div>
           </div>
-        )}
-      </Card>
+
+          {loading ? (
+            <Loading label="Loading your targets…" />
+          ) : error ? (
+            <ErrorState message={error} onRetry={load} />
+          ) : acceptedIndicators.length === 0 && targets.length === 0 ? (
+            <EmptyState Icon={Target} title="No indicators assigned to you yet" hint="Your department head or an administrator selects the performance indicators that apply to your department and job role." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
+                  <tr>
+                    <th className="px-5 py-3 text-left font-semibold">Indicator</th>
+                    <th className="px-4 py-3 text-left font-semibold">Weight</th>
+                    <th className="px-4 py-3 text-left font-semibold">My Target</th>
+                    <th className="px-4 py-3 text-left font-semibold">Status</th>
+                    <th className="px-4 py-3" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {acceptedIndicators.map((sel) => {
+                    const t = targetBySelection[sel.id];
+                    return (
+                      <tr key={sel.id} className="border-t border-line-soft">
+                        <td className="px-5 py-3">
+                          <div className="font-semibold text-ink">{sel.performance_indicator_name || "Indicator"}</div>
+                          {sel.performance_indicator_description ? (
+                            <div className="text-xs text-ink-muted">{sel.performance_indicator_description}</div>
+                          ) : null}
+                          {sel.measurement_unit ? <div className="text-[11px] text-ink-faint">Unit: {sel.measurement_unit}</div> : null}
+                        </td>
+                        <td className="px-4 py-3 text-ink-muted">{fmtNum(sel.weight)}</td>
+                        <td className="px-4 py-3">
+                          {t ? (
+                            <div>
+                              <div className="font-semibold text-ink">{fmtNum(t.target_value)}</div>
+                              {t.target_description ? <div className="text-xs text-ink-muted">{t.target_description}</div> : null}
+                            </div>
+                          ) : (
+                            <span className="text-ink-faint">Not set</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">{t ? <StatusChip status={t.status} /> : <span className="text-ink-faint">—</span>}</td>
+                        <td className="px-4 py-3 text-right">
+                          {t?.status === "submitted" ? (
+                            <span className="text-[11px] font-semibold text-emerald-600">Submitted</span>
+                          ) : canSetTargets ? (
+                            <GhostBtn onClick={() => setEditing({ selection: sel, target: t || null })}>
+                              {t ? <Pencil className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                              {t ? "Edit" : "Set target"}
+                            </GhostBtn>
+                          ) : (
+                            <span className="text-[11px] text-ink-faint">Locked</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {/* Targets whose selection is no longer returned (e.g. role filter) still surface */}
+                  {targets
+                    .filter((t) => !acceptedIndicators.some((s) => s.id === t.department_performance_indicator_id))
+                    .map((t) => (
+                      <tr key={t.id} className="border-t border-line-soft">
+                        <td className="px-5 py-3 font-semibold text-ink">Indicator</td>
+                        <td className="px-4 py-3 text-ink-muted">—</td>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-ink">{fmtNum(t.target_value)}</div>
+                          {t.target_description ? <div className="text-xs text-ink-muted">{t.target_description}</div> : null}
+                        </td>
+                        <td className="px-4 py-3"><StatusChip status={t.status} /></td>
+                        <td className="px-4 py-3 text-right">
+                          {t.status === "draft" && canSetTargets ? (
+                            <GhostBtn onClick={() => setEditing({ selection: null, target: t })}>
+                              <Pencil className="h-3.5 w-3.5" /> Edit
+                            </GhostBtn>
+                          ) : (
+                            <StatusChip status={t.status} />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
 
       {editing && (
         <TargetModal
@@ -320,6 +349,154 @@ export function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentP
         />
       )}
     </div>
+  );
+}
+
+// Bottom-up cycles only: shown in place of the target table until my
+// department head locks in the department's reviewed indicators. `proposals`
+// is the same self-scoped list MyTargetsSection already loads (my own rows,
+// every status) — no separate fetch needed.
+function ProposeIndicatorsPanel({ cycleId, myDeptId, proposals = [], loading, error, onReload }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [showForm, setShowForm] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [measurementUnit, setMeasurementUnit] = useState("");
+  const [weight, setWeight] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [withdrawingId, setWithdrawingId] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      toast.error("Name is required.");
+      return;
+    }
+    const w = Number(weight);
+    if (!Number.isFinite(w) || w < 0) {
+      toast.error("Enter a weight of 0 or more.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await appraisalCycleService.proposeIndicator(cycleId, myDeptId, {
+        name: name.trim(),
+        description: description.trim() || null,
+        measurement_unit: measurementUnit.trim() || null,
+        weight: w,
+      });
+      toast.success("Indicator proposed — your department head will review it.");
+      setName("");
+      setDescription("");
+      setMeasurementUnit("");
+      setWeight("");
+      setShowForm(false);
+      onReload();
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to propose the indicator."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const withdraw = async (sel) => {
+    const ok = await confirm({
+      title: "Withdraw proposal?",
+      message: `Remove "${sel.performance_indicator_name || "this indicator"}" before it's reviewed?`,
+      confirmLabel: "Withdraw",
+      danger: true,
+    });
+    if (!ok) return;
+    setWithdrawingId(sel.id);
+    try {
+      await appraisalCycleService.removeDepartmentIndicator(cycleId, myDeptId, sel.id);
+      toast.success("Proposal withdrawn.");
+      onReload();
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to withdraw the proposal."));
+    } finally {
+      setWithdrawingId(null);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-4">
+        <div>
+          <h2 className="text-sm font-bold text-ink">Propose Your Indicators</h2>
+          <p className="text-xs text-ink-muted">
+            Suggest the performance indicators you'll be measured against this cycle. Your department head will
+            accept, edit, or reject each one, then lock them in before you can set targets.
+          </p>
+        </div>
+        {!showForm && (
+          <PrimaryBtn onClick={() => setShowForm(true)}>
+            <Plus className="h-4 w-4" /> Propose indicator
+          </PrimaryBtn>
+        )}
+      </div>
+
+      {showForm && (
+        <form onSubmit={submit} className="space-y-3 border-b border-line-soft px-5 py-4">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-ink-muted">Indicator name</label>
+            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Client response time" />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-ink-muted">Measurement unit (optional)</label>
+              <input className={inputCls} value={measurementUnit} onChange={(e) => setMeasurementUnit(e.target.value)} placeholder="e.g. hours, %, count" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-ink-muted">Proposed weight</label>
+              <input type="number" min="0" step="0.1" className={inputCls} value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="e.g. 20" />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-ink-muted">Description (optional)</label>
+            <textarea className={`${inputCls} h-20 resize-none`} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <div className="flex justify-end gap-2">
+            <GhostBtn type="button" onClick={() => setShowForm(false)} disabled={busy}>Cancel</GhostBtn>
+            <PrimaryBtn type="submit" disabled={busy}>{busy ? "Submitting…" : "Submit proposal"}</PrimaryBtn>
+          </div>
+        </form>
+      )}
+
+      {loading ? (
+        <Loading label="Loading your proposals…" />
+      ) : error ? (
+        <ErrorState message={error} onRetry={onReload} />
+      ) : proposals.length === 0 ? (
+        <EmptyState Icon={Target} title="No indicators proposed yet" hint="Propose at least one performance indicator for this cycle." />
+      ) : (
+        <ul className="divide-y divide-line-soft">
+          {proposals.map((sel) => (
+            <li key={sel.id} className="flex items-center justify-between gap-3 px-5 py-3">
+              <div className="min-w-0">
+                <div className="font-semibold text-ink">{sel.performance_indicator_name}</div>
+                <div className="text-xs text-ink-muted">
+                  Weight {fmtNum(sel.weight)}
+                  {sel.measurement_unit ? ` · Unit: ${sel.measurement_unit}` : ""}
+                </div>
+                {sel.performance_indicator_description ? (
+                  <div className="text-xs text-ink-faint">{sel.performance_indicator_description}</div>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <StatusChip status={sel.status} label={(sel.status || "proposed").replace(/^\w/, (m) => m.toUpperCase())} />
+                {sel.status === "proposed" && (
+                  <GhostBtn onClick={() => withdraw(sel)} disabled={withdrawingId === sel.id} className="border-red-200 text-red-600 hover:bg-red-50">
+                    {withdrawingId === sel.id ? "Withdrawing…" : "Withdraw"}
+                  </GhostBtn>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -990,6 +1167,7 @@ export default function EmployeeAppraisalTab() {
   const [currentCycle, setCurrentCycle] = useState(null);
   const [currentPeriod, setCurrentPeriod] = useState(null);
   const [targetLocks, setTargetLocks] = useState([]);
+  const [indicatorLocks, setIndicatorLocks] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [booting, setBooting] = useState(true);
   const [inner, setInner] = useState("targets");
@@ -1003,10 +1181,12 @@ export default function EmployeeAppraisalTab() {
           administrationPeriodService.current().catch(() => null),
         ]);
         let locks = [];
+        let indLocks = [];
         let sess = [];
         if (cycle?.id) {
-          [locks, sess] = await Promise.all([
+          [locks, indLocks, sess] = await Promise.all([
             appraisalCycleService.listTargetLocks(cycle.id).catch(() => []),
+            appraisalCycleService.listIndicatorLocks(cycle.id).catch(() => []),
             appraisalSessionService.list(cycle.id).catch(() => []),
           ]);
         }
@@ -1014,6 +1194,7 @@ export default function EmployeeAppraisalTab() {
         setCurrentCycle(cycle || null);
         setCurrentPeriod(period || null);
         setTargetLocks(Array.isArray(locks) ? locks : []);
+        setIndicatorLocks(Array.isArray(indLocks) ? indLocks : []);
         setSessions(Array.isArray(sess) ? sess : []);
       } finally {
         if (!stale) setBooting(false);
@@ -1050,6 +1231,7 @@ export default function EmployeeAppraisalTab() {
           currentCycle={currentCycle}
           currentPeriod={currentPeriod}
           targetLocks={targetLocks}
+          indicatorLocks={indicatorLocks}
         />
       )}
       {inner === "reviews" && (

@@ -44,7 +44,7 @@ export function PermissionProvider({ children }) {
   const mock = readMockPerms();
 
   const [tick, setTick] = useState(0);
-  const [loaded, setLoaded] = useState({ key: null, isSuper: false, resources: [] });
+  const [loaded, setLoaded] = useState({ key: null, isSuper: false, resources: [], reliefCoveringJobRoleIds: [], isManager: false, isDepartmentHead: false });
   const [catalog, setCatalog] = useState([]);
   const reqKey = user ? `${user.id || user.auth_id || user.email || "user"}:${tick}` : null;
 
@@ -71,11 +71,14 @@ export function PermissionProvider({ children }) {
             key: reqKey,
             isSuper: Boolean(res?.is_super),
             resources: Array.isArray(res?.resources) ? res.resources : [],
+            reliefCoveringJobRoleIds: Array.isArray(res?.relief_covering_job_role_ids) ? res.relief_covering_job_role_ids : [],
+            isManager: Boolean(res?.is_manager),
+            isDepartmentHead: Boolean(res?.is_department_head),
           });
         }
       } catch (err) {
         console.error("[Permissions] Failed to load effective permissions:", err);
-        if (!stale) setLoaded({ key: reqKey, isSuper: false, resources: [] });
+        if (!stale) setLoaded({ key: reqKey, isSuper: false, resources: [], reliefCoveringJobRoleIds: [], isManager: false, isDepartmentHead: false });
       }
     })();
     return () => {
@@ -111,8 +114,13 @@ export function PermissionProvider({ children }) {
 
     const refreshPermissions = () => setTick((t) => t + 1);
 
-    return { can, isAdmin, catalog, ready, refreshPermissions };
-  }, [user, isAdmin, permissionMap, catalog, ready]);
+    return {
+      can, isAdmin, catalog, ready, refreshPermissions,
+      reliefCoveringJobRoleIds: loaded.reliefCoveringJobRoleIds,
+      isManager: loaded.isManager,
+      isDepartmentHead: loaded.isDepartmentHead,
+    };
+  }, [user, isAdmin, permissionMap, catalog, ready, loaded.reliefCoveringJobRoleIds, loaded.isManager, loaded.isDepartmentHead]);
 
   return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
 }

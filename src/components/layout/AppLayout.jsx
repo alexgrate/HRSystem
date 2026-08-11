@@ -128,7 +128,7 @@ const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMo
 
 const AppLayout = () => {
   const { user, logout } = useAuth();
-  const { can, isAdmin } = usePermissions();
+  const { can, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead } = usePermissions();
   const { config } = useConfig();
   const navigate = useNavigate();
   const location = useLocation();
@@ -158,13 +158,13 @@ const AppLayout = () => {
     let stale = false;
     const load = async () => {
       const jobs = [];
-      if (can("LEAVE_REQUEST", "manage") && isDesignatedApprover(approverFlows, "LEAVE_REQUEST", user, isAdmin))
+      if (can("LEAVE_REQUEST", "manage") && isDesignatedApprover(approverFlows, "LEAVE_REQUEST", user, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead))
         jobs.push(approvalService.getPendingLeave().catch(() => []));
-      if (can("DOCUMENT", "manage") && isDesignatedApprover(approverFlows, "DOCUMENT_UPLOAD", user, isAdmin))
+      if (can("DOCUMENT", "manage") && isDesignatedApprover(approverFlows, "DOCUMENT_UPLOAD", user, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead))
         jobs.push(approvalService.getPendingDocuments().catch(() => []));
-      if (can("PROFILE_UPDATE_REQUEST", "manage") && isDesignatedApprover(approverFlows, "EMPLOYEE_UPDATE", user, isAdmin))
+      if (can("PROFILE_UPDATE_REQUEST", "manage") && isDesignatedApprover(approverFlows, "EMPLOYEE_UPDATE", user, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead))
         jobs.push(approvalService.getPendingProfileUpdates().catch(() => []));
-      if (can("STAFF_LOAN", "manage") && isDesignatedApprover(approverFlows, "LOAN_REQUEST", user, isAdmin))
+      if (can("STAFF_LOAN", "manage") && isDesignatedApprover(approverFlows, "LOAN_REQUEST", user, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead))
         jobs.push(
           loanService.listAll()
             .then((rows) => (Array.isArray(rows) ? rows : []).filter((r) => String(r.status).toLowerCase() === "pending_approval"))
@@ -180,7 +180,7 @@ const AppLayout = () => {
     load();
     const timer = setInterval(load, 90000);
     return () => { stale = true; clearInterval(timer); };
-  }, [can, isAdmin, approverFlows, user, location.pathname]);
+  }, [can, isAdmin, approverFlows, user, location.pathname, reliefCoveringJobRoleIds, isManager, isDepartmentHead]);
 
   const items = RESOURCES.filter((r) => (r.adminOnly ? isAdmin : can(r.resource, r.action || "read")));
 

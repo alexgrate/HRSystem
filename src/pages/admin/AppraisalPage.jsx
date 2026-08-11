@@ -54,8 +54,9 @@ const fmtDate = (d) => (d ? String(d).slice(0, 10) : "—");
 // approve/reject/cancel; here 'submitted'/'completed' are the positive states.
 const apStatusCls = (status) => {
   const s = String(status || "").toLowerCase();
-  if (s === "completed" || s === "submitted" || s === "locked") return "bg-emerald-50 text-emerald-700";
-  if (s === "in_progress" || s === "draft" || s === "unlocked") return "bg-amber-50 text-amber-700";
+  if (s === "completed" || s === "submitted" || s === "locked" || s === "accepted") return "bg-emerald-50 text-emerald-700";
+  if (s === "in_progress" || s === "draft" || s === "unlocked" || s === "proposed") return "bg-amber-50 text-amber-700";
+  if (s === "rejected") return "bg-red-50 text-red-700";
   return "bg-sunken text-ink-muted";
 };
 
@@ -886,6 +887,12 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
   const [progress, setProgress] = useState(null);
   const [progressLoading, setProgressLoading] = useState(false);
   const [lockBusy, setLockBusy] = useState(false);
+  const [indicatorLocks, setIndicatorLocks] = useState([]);
+  const [indicatorLockBusy, setIndicatorLockBusy] = useState(false);
+  const [reviewingId, setReviewingId] = useState(null); // selection id whose inline edit form is open
+  const [reviewBusyId, setReviewBusyId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editWeight, setEditWeight] = useState("");
 
   const loadCycle = useCallback(async () => {
     setLoading(true);
@@ -975,6 +982,25 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
   }, [cycle]);
 
   const locked = !!cycle?.indicators_locked;
+  const isBottomUp = cycle?.workflow_type === "bottom_up";
+  const deptIndicatorLock = indicatorLocks.find((l) => l.department_id === deptId) || null;
+
+  const loadIndicatorLocks = useCallback(async () => {
+    if (!isBottomUp) {
+      setIndicatorLocks([]);
+      return;
+    }
+    try {
+      const rows = await appraisalCycleService.listIndicatorLocks(cycleId);
+      setIndicatorLocks(Array.isArray(rows) ? rows : []);
+    } catch {
+      setIndicatorLocks([]);
+    }
+  }, [cycleId, isBottomUp]);
+
+  useEffect(() => {
+    loadIndicatorLocks();
+  }, [loadIndicatorLocks]);
 
   const lock = async () => {
     const ok = await confirm({
@@ -1156,6 +1182,87 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
     }
   };
 
+  // ── Bottom-up: reviewing personal indicator proposals ───────────────────
+
+  const startEditProposal = (sel) => {
+    setReviewingId(sel.id);
+    setEditName(sel.performance_indicator_name || "");
+    setEditWeight(String(sel.weight ?? ""));
+  };
+
+  const reviewProposal = async (sel, action) => {
+    setReviewBusyId(sel.id);
+    try {
+      const payload = { action };
+      if (action === "edit") {
+        payload.name = editName.trim();
+        payload.weight = Number(editWeight);
+        if (!payload.name) {
+          toast.error("Name is required.");
+          setReviewBusyId(null);
+          return;
+        }
+        if (!Number.isFinite(payload.weight) || payload.weight < 0) {
+          toast.error("Enter a weight of 0 or more.");
+          setReviewBusyId(null);
+          return;
+        }
+      }
+      await appraisalCycleService.reviewIndicatorProposal(cycleId, deptId, sel.id, payload);
+      toast.success(action === "reject" ? "Proposal rejected." : "Proposal accepted.");
+      setReviewingId(null);
+      await loadSelections();
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to review the proposal."));
+    } finally {
+      setReviewBusyId(null);
+    }
+  };
+
+  const lockDeptIndicators = async () => {
+    const undecided = selections.filter((s) => s.employee_id && s.status === "proposed").length;
+    const ok = await confirm({
+      title: "Lock in department indicators?",
+      message:
+        undecided > 0
+          ? `${undecided} proposal${undecided === 1 ? "" : "s"} still need${undecided === 1 ? "s" : ""} a decision — accept or reject them first.`
+          : "Once locked, no new proposals can be submitted and employees can begin setting targets against the accepted indicators.",
+      confirmLabel: "Lock indicators",
+      danger: true,
+    });
+    if (!ok) return;
+    setIndicatorLockBusy(true);
+    try {
+      await appraisalCycleService.lockDepartmentIndicators(cycleId, deptId);
+      toast.success("Department indicators locked in.");
+      await loadIndicatorLocks();
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to lock department indicators."));
+    } finally {
+      setIndicatorLockBusy(false);
+    }
+  };
+
+  const unlockDeptIndicators = async () => {
+    const ok = await confirm({
+      title: "Unlock department indicators?",
+      message: "Department heads will be able to review new proposals again. Not possible once targets are locked.",
+      confirmLabel: "Unlock",
+      danger: true,
+    });
+    if (!ok) return;
+    setIndicatorLockBusy(true);
+    try {
+      await appraisalCycleService.unlockDepartmentIndicators(cycleId, deptId);
+      toast.success("Department indicators unlocked.");
+      await loadIndicatorLocks();
+    } catch (err) {
+      toast.error(errMsg(err, "Failed to unlock department indicators."));
+    } finally {
+      setIndicatorLockBusy(false);
+    }
+  };
+
   if (loading) {
     return (
       <Card>
@@ -1187,15 +1294,18 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
             <h2 className="text-sm font-bold text-ink">{cycle.name || `Cycle ${cycle.id.slice(0, 8)}`}</h2>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusChip status={cycle.status || "draft"} label={`Lifecycle: ${(cycle.status || "draft").replace(/^\w/, (m) => m.toUpperCase())}`} />
-              <StatusChip status={locked ? "locked" : "unlocked"} label={locked ? "Indicators locked" : "Open for selection"} />
-              {cycle.locked_at ? <span className="text-[11px] text-ink-faint">Locked {fmtDate(cycle.locked_at)}</span> : null}
+              <StatusChip status={isBottomUp ? "bottom_up" : "top_down"} label={isBottomUp ? "Bottom to top" : "Top to bottom"} />
+              {!isBottomUp && (
+                <StatusChip status={locked ? "locked" : "unlocked"} label={locked ? "Indicators locked" : "Open for selection"} />
+              )}
+              {cycle.locked_at && !isBottomUp ? <span className="text-[11px] text-ink-faint">Locked {fmtDate(cycle.locked_at)}</span> : null}
               {cycle.closed_at ? <span className="text-[11px] text-ink-faint">Closed {fmtDate(cycle.closed_at)}</span> : null}
             </div>
           </div>
           {/* Lock + lifecycle transitions are admin-only (backend gates them on isAdmin). */}
           {isAdmin && (
             <div className="flex flex-wrap items-center gap-2">
-              {!locked ? (
+              {!locked && !isBottomUp ? (
                 <PrimaryBtn onClick={lock} disabled={locking}>
                   <Lock className="h-4 w-4" /> {locking ? "Locking…" : "Lock indicators"}
                 </PrimaryBtn>
@@ -1279,20 +1389,121 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
                 ))}
               </select>
             </div>
-            {deptId && !locked && !progress?.locked ? (
+            {!isBottomUp && deptId && !locked && !progress?.locked ? (
               <PrimaryBtn onClick={() => setAddOpen(true)}>
                 <Plus className="h-4 w-4" /> Add indicator
               </PrimaryBtn>
             ) : null}
+            {isBottomUp && deptId && canSeeProgress && !deptIndicatorLock ? (
+              <PrimaryBtn onClick={lockDeptIndicators} disabled={indicatorLockBusy}>
+                <Lock className="h-4 w-4" /> {indicatorLockBusy ? "Locking…" : "Lock indicators"}
+              </PrimaryBtn>
+            ) : null}
           </div>
+
+          {isBottomUp && deptId && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <StatusChip status={deptIndicatorLock ? "locked" : "unlocked"} label={deptIndicatorLock ? `Indicators locked ${deptIndicatorLock.locked_at ? fmtDate(deptIndicatorLock.locked_at) : ""}` : "Under review"} />
+              {deptIndicatorLock && isAdmin && (
+                <GhostBtn onClick={unlockDeptIndicators} disabled={indicatorLockBusy} className="border-amber-300 text-amber-700 hover:bg-amber-50">
+                  {indicatorLockBusy ? "Unlocking…" : "Unlock"}
+                </GhostBtn>
+              )}
+            </div>
+          )}
 
           <div className="mt-4">
             {!deptId ? (
-              <p className="py-8 text-center text-xs text-ink-muted">Select a department to view and manage its performance indicators.</p>
+              <p className="py-8 text-center text-xs text-ink-muted">
+                {isBottomUp ? "Select a department to review employees' proposed indicators." : "Select a department to view and manage its performance indicators."}
+              </p>
             ) : selLoading ? (
               <Loading label="Loading indicators…" />
             ) : selections.length === 0 ? (
-              <EmptyState Icon={Gauge} title="No indicators selected" hint={locked ? "This department has no indicators and the cycle is locked." : "Add performance indicators for this department."} />
+              <EmptyState
+                Icon={Gauge}
+                title={isBottomUp ? "No indicators proposed yet" : "No indicators selected"}
+                hint={
+                  isBottomUp
+                    ? "Employees in this department haven't proposed any performance indicators yet."
+                    : locked
+                      ? "This department has no indicators and the cycle is locked."
+                      : "Add performance indicators for this department."
+                }
+              />
+            ) : isBottomUp ? (
+              <div className="overflow-x-auto rounded-xl border border-line-soft">
+                <table className="w-full min-w-[720px] text-sm">
+                  <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left font-semibold">Indicator</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Proposed by</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Weight</th>
+                      <th className="px-3 py-2.5 text-left font-semibold">Status</th>
+                      {!deptIndicatorLock ? <th className="px-3 py-2.5" /> : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selections.map((s) => {
+                      const proposer = directory.find((p) => p.id === s.employee_id);
+                      const editing = reviewingId === s.id;
+                      const decidable = !deptIndicatorLock && s.status !== "rejected";
+                      return (
+                        <tr key={s.id} className="border-t border-line-soft align-top">
+                          <td className="px-4 py-3">
+                            {editing ? (
+                              <input className={`${inputCls} h-9`} value={editName} onChange={(e) => setEditName(e.target.value)} />
+                            ) : (
+                              <>
+                                <div className="font-semibold text-ink">{s.performance_indicator_name || "Indicator"}</div>
+                                {s.measurement_unit ? <div className="text-[11px] text-ink-faint">Unit: {s.measurement_unit}</div> : null}
+                                {s.performance_indicator_description ? <div className="text-[11px] text-ink-faint">{s.performance_indicator_description}</div> : null}
+                              </>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-ink-muted">{proposer ? getEmployeeName(proposer, proposer.email) : "—"}</td>
+                          <td className="px-3 py-3 text-ink-muted">
+                            {editing ? (
+                              <input type="number" min="0" step="0.1" className={`${inputCls} h-9 w-24`} value={editWeight} onChange={(e) => setEditWeight(e.target.value)} />
+                            ) : (
+                              fmtNum(s.weight)
+                            )}
+                          </td>
+                          <td className="px-3 py-3">
+                            <StatusChip status={s.status} label={(s.status || "proposed").replace(/^\w/, (m) => m.toUpperCase())} />
+                          </td>
+                          {!deptIndicatorLock ? (
+                            <td className="px-3 py-3 text-right">
+                              {editing ? (
+                                <div className="flex justify-end gap-1.5">
+                                  <GhostBtn onClick={() => setReviewingId(null)} disabled={reviewBusyId === s.id}>Cancel</GhostBtn>
+                                  <PrimaryBtn onClick={() => reviewProposal(s, "edit")} disabled={reviewBusyId === s.id}>
+                                    {reviewBusyId === s.id ? "Saving…" : "Save"}
+                                  </PrimaryBtn>
+                                </div>
+                              ) : decidable ? (
+                                <div className="flex justify-end gap-1.5">
+                                  {s.status !== "accepted" && (
+                                    <GhostBtn onClick={() => reviewProposal(s, "accept")} disabled={reviewBusyId === s.id} className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                                      <Check className="h-3.5 w-3.5" /> Accept
+                                    </GhostBtn>
+                                  )}
+                                  <GhostBtn onClick={() => startEditProposal(s)} disabled={reviewBusyId === s.id}>
+                                    <Pencil className="h-3.5 w-3.5" /> Edit
+                                  </GhostBtn>
+                                  <GhostBtn onClick={() => reviewProposal(s, "reject")} disabled={reviewBusyId === s.id} className="border-red-200 text-red-600 hover:bg-red-50">
+                                    <X className="h-3.5 w-3.5" /> Reject
+                                  </GhostBtn>
+                                </div>
+                              ) : null}
+                            </td>
+                          ) : null}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-line-soft">
                 <table className="w-full min-w-[600px] text-sm">

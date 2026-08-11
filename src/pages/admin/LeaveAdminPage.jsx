@@ -9,11 +9,13 @@ import { setupService } from "../../services/setupService";
 import { usePermissions } from "../../context/PermissionContext";
 import { useAuth } from "../../context/AuthContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
-import { resolvePersonName } from "../../utils/employee";
+import { resolvePersonName, getEmployeeName } from "../../utils/employee";
 import { statusBadgeCls } from "../../utils/status";
 import { workingDays } from "../../utils/leave";
 import { isDesignatedApprover } from "../../utils/approvers";
 import { orgService } from "../../services/orgService";
+import { previewDocument } from "../../utils/documentPreview";
+import api from "../../services/api";
 
 const STATUS_TABS = [
   { key: "pending", label: "Pending", matches: ["pend"] },
@@ -29,7 +31,7 @@ const statusOf = (r) => String(r.status || "pending").toLowerCase();
 const fmtDate = (d) => (d ? String(d).slice(0, 10) : "—");
 
 const LeaveAdminPage = () => {
-  const { isAdmin } = usePermissions();
+  const { isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead } = usePermissions();
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
@@ -43,7 +45,7 @@ const LeaveAdminPage = () => {
   // designated approver (job role) alone — no RBAC 'manage' is required (the
   // backend performs no manage check). Gate on the designated-approver signal to
   // match, so an authorized approver is not hidden from the controls.
-  const canManage = isDesignatedApprover(workflows, "LEAVE_REQUEST", user, isAdmin);
+  const canManage = isDesignatedApprover(workflows, "LEAVE_REQUEST", user, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("pending");
   const [q, setQ] = useState("");
@@ -104,6 +106,27 @@ const LeaveAdminPage = () => {
     "Leave";
 
   const requesterName = (r) => resolvePersonName(r, staff, "Employee");
+
+  const reliefOfficerName = (id) => {
+    if (!id) return null;
+    const s = staff.find((u) => u.id === id);
+    return s ? getEmployeeName(s, s.email) : null;
+  };
+
+  const viewHandoverDocument = async (leaveRequestId) => {
+    try {
+      const docs = await api.get(`/api/documentations/?feature_type=LEAVE_APPLICATION_DOCUMENT&feature_entity_id=${encodeURIComponent(leaveRequestId)}`);
+      const rows = Array.isArray(docs) ? docs : docs?.documents || docs?.items || [];
+      if (rows.length === 0) {
+        toast.error("No handover document found for this request.");
+        return;
+      }
+      previewDocument(rows[0].id, toast);
+    } catch (err) {
+      console.error("[LeaveAdminPage] Handover document fetch failed:", err);
+      toast.error("Couldn't load the handover document.");
+    }
+  };
 
   const today = new Date().toISOString().slice(0, 10);
   const counts = useMemo(() => {
@@ -277,7 +300,18 @@ const LeaveAdminPage = () => {
                   const pending = s.startsWith("pend");
                   return (
                     <tr key={r.id} className={`border-t border-line-soft ${busyId === r.id ? "opacity-50 pointer-events-none" : ""}`}>
-                      <td className="px-4 py-3 font-semibold text-ink">{requesterName(r)}</td>
+                      <td className="px-4 py-3 font-semibold text-ink">
+                        {requesterName(r)}
+                        {reliefOfficerName(r.relief_officer_employee_id) && (
+                          <div className="mt-0.5 text-[11px] font-normal text-ink-faint">
+                            Relief: {reliefOfficerName(r.relief_officer_employee_id)}
+                            {" · "}
+                            <button type="button" onClick={() => viewHandoverDocument(r.id)} className="font-medium text-brand hover:underline">
+                              Handover
+                            </button>
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-ink-2">{typeName(r)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-ink-muted">{fmtDate(r.start_date)} → {fmtDate(r.end_date)}</td>
                       <td className="px-4 py-3 text-ink-2">{r.start_date && r.end_date ? workingDays(r.start_date, r.end_date) : "—"}</td>

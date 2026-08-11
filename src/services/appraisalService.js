@@ -68,6 +68,35 @@ export const appraisalCycleService = {
   // Per-employee target readiness for a department (dept head or admin).
   targetProgress: (cycleId, departmentId) =>
     api.get(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/target-progress`),
+
+  // ── Bottom-up cycles only: personal indicator proposals ──────────────────
+  // Any employee proposes a brand-new indicator for themself; the department
+  // head/admin accepts, edits-then-accepts, or rejects it via reviewIndicatorProposal
+  // (listDepartmentIndicators above doubles as the review queue for a dept
+  // head/admin — it returns every proposal, not just the caller's own).
+  proposeIndicator: (cycleId, departmentId, { name, description, measurement_unit, weight }) =>
+    api.post(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/propose-indicator`, {
+      name,
+      description: description || null,
+      measurement_unit: measurement_unit || null,
+      weight: Number.isFinite(Number(weight)) ? Number(weight) : 0,
+    }),
+  reviewIndicatorProposal: (cycleId, departmentId, selectionId, { action, name, description, measurement_unit, weight }) =>
+    api.post(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/indicators/${selectionId}/review`, {
+      action,
+      ...(name !== undefined ? { name } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(measurement_unit !== undefined ? { measurement_unit } : {}),
+      ...(weight !== undefined ? { weight: Number(weight) } : {}),
+    }),
+  // Department indicator locks — the bottom-up equivalent of lockIndicators
+  // above, scoped per department instead of cycle-wide.
+  lockDepartmentIndicators: (cycleId, departmentId) =>
+    api.post(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/lock-indicators`, {}),
+  unlockDepartmentIndicators: (cycleId, departmentId) =>
+    api.post(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/unlock-indicators`, {}),
+  listIndicatorLocks: (cycleId) =>
+    api.get(`/api/appraisal-cycles/${cycleId}/indicator-locks`).then((res) => unwrapList(res, ['locks'])),
 };
 
 // ---------------------------------------------------------------------------

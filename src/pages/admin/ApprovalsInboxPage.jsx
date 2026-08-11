@@ -233,6 +233,8 @@ const Timeline = ({ detail }) => {
         const iconColor =
           st === "done" ? "text-emerald-600" : st === "rejected" ? "text-red-600"
             : st === "current" ? "text-amber-600" : "text-ink-ghost";
+        const isDynamic = s.approver_type === "LINE_MANAGER" || s.approver_type === "HOD";
+        const dynamicLabel = s.approver_type === "LINE_MANAGER" ? "Line Manager" : s.approver_type === "HOD" ? "Department Head (HOD)" : null;
         return (
           <li key={s.step_order} className="flex gap-3">
             <div className="flex flex-col items-center">
@@ -241,11 +243,14 @@ const Timeline = ({ detail }) => {
             <div className="min-w-0 flex-1 pb-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold text-ink">
-                  Step {s.step_order} · {s.approver_job_role_name || "Approver"}
+                  Step {s.step_order} · {dynamicLabel || s.approver_job_role_name || "Approver"}
+                  {isDynamic && (s.resolved_approver_name ? ` (${s.resolved_approver_name})` : " (not configured)")}
                 </span>
-                <span className="rounded-full bg-line-soft px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-faint">
-                  {s.require_all_approvers ? "All approvers" : "Any approver"}
-                </span>
+                {!isDynamic && (
+                  <span className="rounded-full bg-line-soft px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-faint">
+                    {s.require_all_approvers ? "All approvers" : "Any approver"}
+                  </span>
+                )}
               </div>
               {stepActions.length > 0 ? (
                 <ul className="mt-1 space-y-1">
@@ -443,7 +448,7 @@ const ApprovalDrawer = ({ item, tab, personName, currency, canManage, busy, onAc
 };
 
 const ApprovalsInboxPage = () => {
-  const { can, isAdmin } = usePermissions();
+  const { can, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead } = usePermissions();
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
@@ -496,8 +501,8 @@ const ApprovalsInboxPage = () => {
   // genuinely require the RBAC review/manage permission, so keep the conjunct.
   const canManage = activeTab
     ? activeTab.resource === "LEAVE_REQUEST"
-      ? isDesignatedApprover(workflows, activeTab.workflowType, user, isAdmin)
-      : can(activeTab.resource, "manage") && isDesignatedApprover(workflows, activeTab.workflowType, user, isAdmin)
+      ? isDesignatedApprover(workflows, activeTab.workflowType, user, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead)
+      : can(activeTab.resource, "manage") && isDesignatedApprover(workflows, activeTab.workflowType, user, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead)
     : false;
 
   const fetchItems = useCallback(async (tabDef) => {

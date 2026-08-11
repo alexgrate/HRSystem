@@ -44,6 +44,19 @@ export const payrollService = {
   createLineItem: (data) => api.post('/api/payroll-line-items', data),
   updateLineItem: (id, data) => api.put(`/api/payroll-line-items/${id}`, data),
   deleteLineItem: (id) => api.delete(`/api/payroll-line-items/${id}`, { data: {} }),
+
+  // Custom columns — one-off, scoped to a single payroll run. "Global"
+  // (is_global: true) starts blank for every employee on the run until the
+  // officer sets individual values; "peculiar" (is_global: false) is created
+  // directly against one employee with its amount.
+  listCustomColumns: (runId) =>
+    api.get('/api/payroll/custom-columns', { params: { run_id: runId } }).then((res) => unwrapList(res, ['columns'])),
+  createCustomColumn: (data) => api.post('/api/payroll/custom-columns', data),
+  setCustomColumnValue: (columnId, { employee_id, amount }) =>
+    api.put(`/api/payroll/custom-columns/${columnId}/values`, { employee_id, amount }),
+  deleteCustomColumnValue: (columnId, employeeId) =>
+    api.delete(`/api/payroll/custom-columns/${columnId}/values/${employeeId}`, { data: {} }),
+  deleteCustomColumn: (columnId) => api.delete(`/api/payroll/custom-columns/${columnId}`, { data: {} }),
 };
 
 export const findApprovalRequestId = (obj) => {

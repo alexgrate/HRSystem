@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Building2, Palette, Globe, Save, Upload, X, ImageIcon, RotateCcw, CheckCircle2 } from "lucide-react";
+import { Building2, Palette, Globe, Save, Upload, X, ImageIcon, RotateCcw, CheckCircle2, ClipboardCheck } from "lucide-react";
 import { configService } from "../../services/configService";
 import { useConfig } from "../../context/ConfigContext";
 import { usePermissions } from "../../context/PermissionContext";
@@ -13,6 +13,10 @@ const THEME_MODES = [
   { value: "auto", label: "Match system" },
 ];
 const CURRENCIES = ["NGN", "USD", "GBP", "EUR", "GHS", "KES", "ZAR"];
+const APPRAISAL_WORKFLOW_TYPES = [
+  { value: "top_down", label: "Top to bottom" },
+  { value: "bottom_up", label: "Bottom to top" },
+];
 
 // Only settings the application actually consumes are surfaced here. Fields that
 // were stored but never enforced anywhere (2FA, session timeout, timezone,
@@ -30,6 +34,7 @@ const DEFAULTS = {
   accent_color: "#e9a8ff",
   theme_mode: "light",
   currency: "NGN",
+  appraisal_workflow_type: "top_down",
 };
 const KEPT_KEYS = Object.keys(DEFAULTS);
 
@@ -334,6 +339,7 @@ const OrganizationSettingsPage = () => {
         accent_color: form.accent_color,
         theme_mode: form.theme_mode,
         currency: form.currency,
+        appraisal_workflow_type: form.appraisal_workflow_type,
       };
       const saved = hasConfig ? await configService.update(payload) : await configService.create(payload);
       setHasConfig(true);
@@ -424,6 +430,14 @@ const OrganizationSettingsPage = () => {
           id="currency" label="Currency" value={form.currency} onChange={(v) => set("currency", v)}
           disabled={!canEdit} options={CURRENCIES}
           hint="Default currency for payroll, loans and self-service amounts."
+        />
+      </Section>
+
+      <Section icon={ClipboardCheck} title="Appraisals" subtitle="How performance indicators originate each cycle.">
+        <Select
+          id="appraisal-workflow-type" label="Appraisal type" value={form.appraisal_workflow_type}
+          onChange={(v) => set("appraisal_workflow_type", v)} disabled={!canEdit} options={APPRAISAL_WORKFLOW_TYPES}
+          hint="Top to bottom: management sets indicators, staff set targets against them. Bottom to top: staff propose their own indicators for their department head to accept, edit or reject before locking them in. Applies to newly opened appraisal cycles — in-progress cycles keep the type they were opened with."
         />
       </Section>
 

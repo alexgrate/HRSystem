@@ -46,4 +46,7 @@ export const lineAmounts = (l) => ({
   // Configured per-pay-group remuneration/deduction rules, itemized on the
   // snapshot alongside their computed amount for this employee's base salary.
   lineItems: Array.isArray(l.snapshot?.line_items) ? l.snapshot.line_items : [],
+  // One-off named columns the payroll officer added to this specific run
+  // (global — applies to everyone — or peculiar to just this employee).
+  customColumns: Array.isArray(l.snapshot?.custom_columns) ? l.snapshot.custom_columns : [],
 });

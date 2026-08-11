@@ -17,4 +17,7 @@ export const leaveService = {
   // client default), so always send an empty object.
   remove: (id) => api.delete(`/api/leave-requests/${id}`, { data: {} }),
   remind: (id) => api.post(`/api/leave-requests/${id}/remind`, {}),
+  // Who am I currently covering for, right now — powers the ESS "you're
+  // covering for X" banner. Personal-scope, no special permission required.
+  getMyReliefCoverage: () => api.get('/api/leave-requests/relief-coverage/me').then((res) => (Array.isArray(res) ? res : [])),
 };

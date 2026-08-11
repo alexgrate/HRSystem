@@ -5,7 +5,8 @@ import { auditService } from "../services/auditService";
 import { leaveService } from "../services/leaveService";
 import { loanService } from "../services/loanService";
 import { appraisalReviewService } from "../services/appraisalService";
-import { formatAuditLog, buildPersonalNotifications, loadReadSet, persistReadSet } from "../utils/notifications";
+import { finalApprovalNotificationService } from "../services/finalApprovalNotificationService";
+import { formatAuditLog, buildPersonalNotifications, formatFinalApprovalNotification, loadReadSet, persistReadSet } from "../utils/notifications";
 
 const NotificationContext = createContext({
   notifications: [], unreadCount: 0, loading: false, lastUpdated: null,
@@ -42,6 +43,18 @@ export function NotificationProvider({ children }) {
           loanService.listMine().then((r) => (Array.isArray(r) ? r : [])).catch(() => []),
         ]);
         next = buildPersonalNotifications({ reviews, leave, loans, myEmployeeId });
+      }
+      // Always also pull final-approval notifications — server-scoped to the
+      // caller, fired whenever any approval process reaches its final step
+      // while they hold a subscribed job role. Independent of the audit/personal
+      // branch above since it's its own feed, not derived from either.
+      const finalApprovals = await finalApprovalNotificationService
+        .listMine()
+        .then((r) => (Array.isArray(r) ? r : []))
+        .catch(() => []);
+      if (finalApprovals.length) {
+        next = [...next, ...finalApprovals.map(formatFinalApprovalNotification)]
+          .sort((a, b) => String(b.at).localeCompare(String(a.at)));
       }
       setItems(next.slice(0, 40));
       setLastUpdated(Date.now());

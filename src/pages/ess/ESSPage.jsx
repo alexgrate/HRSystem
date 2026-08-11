@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, FileText, Upload, Banknote, AlertCircle, CalendarDays } from "lucide-react";
+import { X, FileText, Upload, Banknote, AlertCircle, CalendarDays, ShieldCheck } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useConfig } from "../../context/ConfigContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
@@ -18,6 +18,7 @@ import { statusBadgeCls } from "../../utils/status";
 import { previewDocument } from "../../utils/documentPreview";
 import { TabPills } from "../../components/ui/TabPills";
 import EmployeeAppraisalTab from "../../components/appraisal/EmployeeAppraisal";
+import LoanAgreementView from "../../components/loans/LoanAgreementView";
 import api from "../../services/api";
 
 function useOrgNames(user) {
@@ -43,6 +44,39 @@ function useOrgNames(user) {
         jobTitle: lookups.jobRoles.find((r) => r.id === user?.job_role_id)?.title || "",
         jobRoles: lookups.jobRoles,
     };
+}
+
+// "You're covering for X" — shown whenever this employee is the active relief
+// officer on someone else's approved, in-progress leave. Purely informational;
+// the actual access grant happens server-side (authorization.service.ts).
+function ReliefCoverageBanner() {
+    const [coverage, setCoverage] = useState([]);
+
+    useEffect(() => {
+        let stale = false;
+        leaveService.getMyReliefCoverage()
+            .then((rows) => { if (!stale) setCoverage(rows); })
+            .catch((err) => console.error("[ESS] Relief coverage unavailable:", err));
+        return () => { stale = true; };
+    }, []);
+
+    if (coverage.length === 0) return null;
+
+    return (
+        <div className="space-y-2">
+            {coverage.map((c) => (
+                <div key={c.leave_request_id} className="flex items-center gap-2.5 rounded-xl bg-sky-50 p-3.5 text-xs text-sky-800 border border-sky-200">
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-sky-600" />
+                    <span>
+                        You're covering <span className="font-semibold">{c.leave_type_name}</span> for{" "}
+                        <span className="font-semibold">{c.absent_employee_name}</span> until{" "}
+                        <span className="font-semibold">{String(c.end_date).slice(0, 10)}</span> — their access and
+                        pending approvals are temporarily available to you.
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
 }
 
 const ESSPage = () => {
@@ -71,6 +105,7 @@ const ESSPage = () => {
 
     return (
         <div className="space-y-6">
+            <ReliefCoverageBanner />
             <div className="flex items-end justify-between flex-wrap gap-4">
                 <div>
                     <div className="text-xs font-semibold uppercase tracking-wider text-brand">Self-service</div>
@@ -575,23 +610,26 @@ function LeaveTracker({ onRequestLeave, refreshKey = 0 }) {
     const [currentPeriod, setCurrentPeriod] = useState(null);
     const [busyId, setBusyId] = useState(null);
     const [tick, setTick] = useState(0);
+    const [colleagues, setColleagues] = useState([]); // for resolving relief_officer_employee_id -> name
 
     useEffect(() => {
         const fetchLeaves = async () => {
         setLoading(true);
         try {
-            const [types, names, mine, period] = await Promise.all([
+            const [types, names, mine, period, colleagueList] = await Promise.all([
                 // The backend already filters to this employee's pay grade —
                 // the cards simply render what comes back.
                 setupService.getEligibleLeaveTypes(),
                 setupService.getLeaveTypes().catch(() => []),
                 leaveService.list().catch(() => []),
                 administrationPeriodService.current().catch(() => null),
+                orgService.listDirectory().catch(() => []),
             ]);
             setLeaveTypes(Array.isArray(types) ? types : []);
             setAllLeaveTypes(Array.isArray(names) ? names : []);
             setMyRequests(Array.isArray(mine) ? mine : []);
             setCurrentPeriod(period && period.id ? period : null);
+            setColleagues(Array.isArray(colleagueList) ? colleagueList : []);
         } catch (err) {
             console.error("[LeaveTracker] Error loading leaves:", err);
         } finally {
@@ -600,6 +638,27 @@ function LeaveTracker({ onRequestLeave, refreshKey = 0 }) {
         };
         fetchLeaves();
     }, [refreshKey, tick]);
+
+    const reliefOfficerName = (id) => {
+        if (!id) return null;
+        const c = colleagues.find((x) => x.id === id);
+        return c ? getEmployeeName(c, c.email) : null;
+    };
+
+    const viewHandoverDocument = async (leaveRequestId) => {
+        try {
+            const docs = await api.get(`/api/documentations/?feature_type=LEAVE_APPLICATION_DOCUMENT&feature_entity_id=${encodeURIComponent(leaveRequestId)}`);
+            const rows = Array.isArray(docs) ? docs : docs?.documents || docs?.items || [];
+            if (rows.length === 0) {
+                toast.error("No handover document found for this request.");
+                return;
+            }
+            previewDocument(rows[0].id, toast);
+        } catch (err) {
+            console.error("[LeaveTracker] Handover document fetch failed:", err);
+            toast.error("Couldn't load the handover document.");
+        }
+    };
 
     const remindRequest = async (r) => {
         if (busyId) return;
@@ -774,6 +833,15 @@ function LeaveTracker({ onRequestLeave, refreshKey = 0 }) {
                                             </span>
                                         </div>
                                         {r.reason && <div className="truncate text-xs text-ink-faint">“{r.reason}”</div>}
+                                        {reliefOfficerName(r.relief_officer_employee_id) && (
+                                            <div className="text-xs text-ink-faint">
+                                                Relief officer: <span className="font-medium text-ink-muted">{reliefOfficerName(r.relief_officer_employee_id)}</span>
+                                                {" · "}
+                                                <button type="button" onClick={() => viewHandoverDocument(r.id)} className="font-medium text-brand hover:underline">
+                                                    View handover
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="flex shrink-0 items-center gap-2">
                                         {s.startsWith("pend") && (
@@ -816,13 +884,28 @@ function LeaveTracker({ onRequestLeave, refreshKey = 0 }) {
 }
 
 function LeaveRequestModal({ leaveType, remaining = null, existingRequests = [], period = null, editRequest = null, onClose, onSubmitted }) {
+  const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
   const editing = !!editRequest;
   const [startDate, setStartDate] = useState(editing ? String(editRequest.start_date).slice(0, 10) : "");
   const [endDate, setEndDate] = useState(editing ? String(editRequest.end_date).slice(0, 10) : "");
   const [reason, setReason] = useState(editing ? editRequest.reason || "" : "");
+  const [reliefOfficerId, setReliefOfficerId] = useState(editing ? editRequest.relief_officer_employee_id || "" : "");
+  const [handoverFile, setHandoverFile] = useState(null);
+  const [colleagues, setColleagues] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Colleague picker for "relief officer" — same directory endpoint TeamDirectory
+  // already uses (available to any employee via EMPLOYEE:read-directory), not the
+  // admin-only full employee list.
+  useEffect(() => {
+    let stale = false;
+    orgService.listDirectory()
+      .then((all) => { if (!stale) setColleagues((Array.isArray(all) ? all : []).filter((c) => c.id !== user?.id)); })
+      .catch((err) => console.error("[ESS] Colleague directory unavailable for relief officer picker:", err));
+    return () => { stale = true; };
+  }, [user?.id]);
 
   const requestedDays = startDate && endDate && endDate >= startDate ? workingDays(startDate, endDate) : 0;
 
@@ -869,17 +952,43 @@ function LeaveRequestModal({ leaveType, remaining = null, existingRequests = [],
       const payload = {
         start_date: startDate,
         end_date: endDate,
-        reason: reason.trim()
+        reason: reason.trim(),
+        relief_officer_employee_id: reliefOfficerId || null,
       };
+      let leaveRequestId = editRequest?.id;
       if (editing) {
         // Only draft/pending requests are editable; the backend re-runs the
         // period, overlap and balance checks on the new dates.
         await leaveService.update(editRequest.id, payload);
         toast.success("Leave request updated.");
       } else {
-        await api.post("/api/leave-requests/", { ...payload, leave_type_id: leaveType.id });
+        const created = await api.post("/api/leave-requests/", { ...payload, leave_type_id: leaveType.id });
+        leaveRequestId = created?.id;
         toast.success(`Leave request for ${leaveType.name} submitted successfully!`);
       }
+
+      if (handoverFile && leaveRequestId) {
+        if (!DOC_ACCEPTED_TYPES[handoverFile.type]) {
+          toast.error("Leave request saved, but the handover file type isn't accepted — use a PDF, PNG or JPG and re-attach it from Documents.");
+        } else if (handoverFile.size > DOC_MAX_BYTES) {
+          toast.error("Leave request saved, but the handover file is too large (limit 8 MB) — re-attach a smaller file from Documents.");
+        } else {
+          try {
+            const formData = new FormData();
+            formData.append("file", handoverFile);
+            formData.append("feature_type", "LEAVE_APPLICATION_DOCUMENT");
+            formData.append("feature_entity_id", leaveRequestId);
+            formData.append("title", `Handover — ${leaveType.name} (${startDate} to ${endDate})`);
+            await api.post("/api/documentations/upload", formData, {
+              headers: { "Content-Type": "multipart/form-data" },
+            });
+          } catch (docErr) {
+            console.error("[ESS] Handover document upload failed:", docErr);
+            toast.error("Leave request saved, but the handover document failed to upload — try re-attaching it from Documents.");
+          }
+        }
+      }
+
       onSubmitted?.();
       onClose();
     } catch (err) {
@@ -936,6 +1045,30 @@ function LeaveRequestModal({ leaveType, remaining = null, existingRequests = [],
             <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Purpose / Reason</label>
             <textarea value={reason} onChange={e => setReason(e.target.value)} className="w-full h-24 border border-line rounded-xl p-3 outline-none mt-1 resize-none" placeholder="Provide a brief reason for cover..." required />
           </div>
+          <div>
+            <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Relief officer (optional)</label>
+            <select value={reliefOfficerId} onChange={e => setReliefOfficerId(e.target.value)} className="w-full h-11 border border-line rounded-xl px-3 outline-none mt-1 bg-card">
+              <option value="">— None —</option>
+              {colleagues.map((c) => (
+                <option key={c.id} value={c.id}>{getEmployeeName(c, c.email)}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-ink-faint">
+              They'll temporarily gain your access and any pending approvals routed to your role while you're away.
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Handover document (optional)</label>
+            <input
+              type="file"
+              accept={Object.keys(DOC_ACCEPTED_TYPES).join(",")}
+              onChange={(e) => setHandoverFile(e.target.files?.[0] || null)}
+              className="w-full text-xs text-ink-muted mt-1 file:mr-3 file:rounded-lg file:border-0 file:bg-sunken file:px-3 file:py-2 file:text-xs file:font-semibold file:text-ink-2"
+            />
+            {editing && (
+              <p className="mt-1 text-[11px] text-ink-faint">Choosing a file here uploads a new handover document alongside your changes.</p>
+            )}
+          </div>
           <div className="flex gap-2 justify-end pt-2">
             <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
             <button type="submit" disabled={loading} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-75">
@@ -989,7 +1122,7 @@ const localTodayISO = () => {
 // Statuses past approval — a repayment schedule exists for these.
 const LOAN_SCHEDULE_STATUSES = ["approved", "disbursed", "active", "repaid", "defaulted"];
 
-function LoanRow({ loan, typeName, currency, busy, onSchedule, onEdit, onRemind, onCancel, dim = false }) {
+function LoanRow({ loan, typeName, currency, busy, onSchedule, onEdit, onRemind, onCancel, onViewAgreement, agreementBusy, dim = false }) {
     const status = String(loan.status || "").toLowerCase();
     const meta = loanStatusMeta(status);
     const pending = status === "pending_approval";
@@ -999,6 +1132,9 @@ function LoanRow({ loan, typeName, currency, busy, onSchedule, onEdit, onRemind,
             <div className="min-w-0">
                 <div className="text-sm font-semibold text-ink">
                     {typeName}
+                    {loan.loan_source === "dash" && (
+                        <span className="ml-2 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-violet-700">Dash</span>
+                    )}
                     <span className="ml-2 text-xs font-normal text-ink-muted">
                         {fmtMoney(loan.amount, currency)} · {tenure} month{tenure === 1 ? "" : "s"}
                         {loan.created_at && <> · requested {String(loan.created_at).slice(0, 10)}</>}
@@ -1007,6 +1143,15 @@ function LoanRow({ loan, typeName, currency, busy, onSchedule, onEdit, onRemind,
                 {loan.reason && <div className="truncate text-xs text-ink-faint">“{loan.reason}”</div>}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {loan.loan_source === "dash" && loan.agreement_signed_at && (
+                    <button
+                        disabled={agreementBusy}
+                        onClick={onViewAgreement}
+                        className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-muted hover:bg-sunken disabled:opacity-60"
+                    >
+                        {agreementBusy ? "Loading…" : "View agreement"}
+                    </button>
+                )}
                 {LOAN_SCHEDULE_STATUSES.includes(status) && (
                     <button
                         onClick={onSchedule}
@@ -1059,6 +1204,22 @@ function LoansTracker({ onRequestLoan, onOpenSchedule, onChanged, refreshKey = 0
     const [loans, setLoans] = useState([]);
     const [loanTypes, setLoanTypes] = useState([]);
     const [busyId, setBusyId] = useState(null);
+    // Viewing a previously-signed Dash agreement — list rows never carry the
+    // signature image, so this fetches the single-loan detail on demand.
+    const [agreementLoan, setAgreementLoan] = useState(null);
+    const [agreementLoadingId, setAgreementLoadingId] = useState(null);
+    const openAgreement = async (loan) => {
+        if (agreementLoadingId) return;
+        setAgreementLoadingId(loan.id);
+        try {
+            const full = await loanService.get(loan.id);
+            setAgreementLoan(full);
+        } catch (err) {
+            toast.error(err?.error?.message || err?.message || "Couldn't load the agreement.");
+        } finally {
+            setAgreementLoadingId(null);
+        }
+    };
 
     useEffect(() => {
         let mounted = true;
@@ -1244,6 +1405,8 @@ function LoansTracker({ onRequestLoan, onOpenSchedule, onChanged, refreshKey = 0
                                 onEdit={() => onRequestLoan({ loanTypes, loan })}
                                 onRemind={() => handleRemind(loan)}
                                 onCancel={() => handleCancel(loan)}
+                                onViewAgreement={() => openAgreement(loan)}
+                                agreementBusy={agreementLoadingId === loan.id}
                             />
                         ))}
                     </ul>
@@ -1266,6 +1429,38 @@ function LoansTracker({ onRequestLoan, onOpenSchedule, onChanged, refreshKey = 0
                     </div>
                 )}
             </div>
+
+            {agreementLoan && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+                    <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
+                        <div className="flex items-center justify-between border-b pb-3">
+                            <h3 className="text-lg font-bold text-ink">Loan agreement</h3>
+                            <button type="button" aria-label="Close" onClick={() => setAgreementLoan(null)} className="rounded-lg p-1 text-ink-faint hover:bg-sunken">
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                        <div className="mt-4">
+                            <LoanAgreementView
+                                mode="view"
+                                termsText={agreementLoan.agreement_terms_snapshot}
+                                signatureDataUrl={agreementLoan.agreement_signature_data}
+                                currency={currency}
+                                figures={{
+                                    loanTypeName: typeNameOf(agreementLoan),
+                                    amount: agreementLoan.amount,
+                                    interestRate: agreementLoan.interest_rate,
+                                    tenureMonths: agreementLoan.tenure_month,
+                                    monthlyInstallment: agreementLoan.monthly_installment,
+                                    totalRepayable: agreementLoan.total_repayable,
+                                    totalInterest: Number(agreementLoan.total_repayable) - Number(agreementLoan.amount),
+                                    startDate: String(agreementLoan.start_date).slice(0, 10),
+                                    endDate: String(agreementLoan.end_date).slice(0, 10),
+                                }}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -1300,6 +1495,41 @@ function LoanRequestModal({ loanTypes = [], editLoan = null, onClose, onSubmitte
             .catch(() => {});
         return () => { stale = true; };
     }, []);
+
+    // Which loan source(s) — the employee's own organization ("internal") or
+    // Dash (the platform) — the org currently allows. On edit, the loan's
+    // existing source is fixed (immutable server-side); on create, default to
+    // whichever single source is enabled, or "internal" once both are.
+    const [sources, setSources] = useState({ internalEnabled: true, dashEnabled: false, loaded: false });
+    useEffect(() => {
+        let stale = false;
+        loanService.getLoanSources()
+            .then((s) => { if (!stale) setSources({ internalEnabled: s?.internal_enabled !== false, dashEnabled: !!s?.dash_enabled, loaded: true }); })
+            .catch(() => { if (!stale) setSources({ internalEnabled: true, dashEnabled: false, loaded: true }); });
+        return () => { stale = true; };
+    }, []);
+    const [loanSource, setLoanSource] = useState(editLoan?.loan_source || "internal");
+    useEffect(() => {
+        if (editing || !sources.loaded) return;
+        if (!sources.internalEnabled && sources.dashEnabled) setLoanSource("dash");
+        else setLoanSource("internal");
+    }, [editing, sources]);
+    const showSourceSelector = !editing && sources.loaded && sources.internalEnabled && sources.dashEnabled;
+
+    // Loan-agreement step — only for Dash-sourced applications. On edit, only
+    // re-required if amount/tenure/start date actually change (mirrors the
+    // backend's re-sign rule exactly); an unchanged edit (e.g. just the
+    // reason) never re-prompts for a signature.
+    const [step, setStep] = useState("form"); // "form" | "agreement"
+    const [agreement, setAgreement] = useState(null);
+    const [agreementLoading, setAgreementLoading] = useState(false);
+    const [signatureDataUrl, setSignatureDataUrl] = useState(null);
+    const materialChangeOnEdit = editing && (
+        Number(amount) !== Number(editLoan.amount) ||
+        Math.trunc(Number(tenure)) !== Math.trunc(Number(editLoan.tenure_month)) ||
+        startDate !== String(editLoan.start_date).slice(0, 10)
+    );
+    const needsAgreementStep = loanSource === "dash" && (!editing || materialChangeOnEdit);
 
     const type =
         loanTypes.find((t) => t.id === typeId) ||
@@ -1351,9 +1581,10 @@ function LoanRequestModal({ loanTypes = [], editLoan = null, onClose, onSubmitte
     const canSubmit =
         typeRequestable && amountValid && tenureValid && !!startDate && !!reason.trim() && !quoteBlocks && !quoting;
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (loading || !canSubmit) return;
+    // Does the actual create/update call. `signature` is only sent for Dash
+    // loans (a fresh application, or an edit that changed amount/tenure/date
+    // on an already-signed Dash loan — see needsAgreementStep above).
+    const submitLoan = async (signature) => {
         setLoading(true);
         setError("");
         try {
@@ -1366,13 +1597,14 @@ function LoanRequestModal({ loanTypes = [], editLoan = null, onClose, onSubmitte
                 reason: reason.trim(),
                 start_date: startDate,
             };
+            if (signature) body.agreement_signature_data = signature;
             if (editing) {
-                // The product itself can't change on update (the backend
-                // ignores loan_type_id there), so it is deliberately omitted.
+                // The product itself — and the loan source — can't change on
+                // update (the backend ignores both there), so they're omitted.
                 await loanService.update(editLoan.id, body);
                 toast.success("Loan request updated.");
             } else {
-                await loanService.create({ ...body, loan_type_id: type.id });
+                await loanService.create({ ...body, loan_type_id: type.id, loan_source: loanSource });
                 toast.success(`${type.name} request submitted for approval!`);
             }
             onSubmitted?.();
@@ -1387,21 +1619,122 @@ function LoanRequestModal({ loanTypes = [], editLoan = null, onClose, onSubmitte
         }
     };
 
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (loading || !canSubmit) return;
+        if (needsAgreementStep) {
+            // Fetch the agreement (terms + the exact figures that will be
+            // finalized on submit) once, then advance to the sign step —
+            // nothing is submitted yet.
+            setLoading(true);
+            setError("");
+            setAgreementLoading(true);
+            try {
+                const preview = await loanService.previewAgreement({
+                    loan_type_id: typeId, amount: amountNum, tenure_month: tenureNum, start_date: startDate,
+                });
+                setAgreement(preview);
+                setSignatureDataUrl(null);
+                setStep("agreement");
+            } catch (err) {
+                const msg = err?.error?.message || err?.message || "Could not load the loan agreement.";
+                setError(msg);
+                toast.error(msg);
+            } finally {
+                setAgreementLoading(false);
+                setLoading(false);
+            }
+            return;
+        }
+        await submitLoan();
+    };
+
+    const handleAgreementSign = async () => {
+        if (loading || !signatureDataUrl) return;
+        await submitLoan(signatureDataUrl);
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
             <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
                 <div className="flex items-center justify-between border-b pb-3">
-                    <h3 className="text-lg font-bold text-ink">{editing ? "Edit loan request" : "Request a loan"}</h3>
+                    <h3 className="text-lg font-bold text-ink">
+                        {step === "agreement" ? "Sign loan agreement" : editing ? "Edit loan request" : "Request a loan"}
+                    </h3>
                     <button type="button" aria-label="Close" onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken">
                         <X className="h-4 w-4" />
                     </button>
                 </div>
 
+                {step === "agreement" ? (
+                    <div className="mt-4 space-y-4">
+                        {error && (
+                            <div className="flex items-center gap-2.5 rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
+                                <AlertCircle className="h-4 w-4 shrink-0 text-red-600" /> <span>{error}</span>
+                            </div>
+                        )}
+                        <LoanAgreementView
+                            mode="sign"
+                            termsText={agreement?.terms_text}
+                            figures={{
+                                loanTypeName: agreement?.quote?.loan_type?.name,
+                                amount: agreement?.quote?.amount,
+                                interestRate: agreement?.quote?.interest_rate,
+                                tenureMonths: agreement?.quote?.tenure_month,
+                                monthlyInstallment: agreement?.quote?.monthly_installment,
+                                totalRepayable: agreement?.quote?.total_repayable,
+                                totalInterest: agreement?.quote?.total_interest,
+                                startDate: agreement?.quote?.start_date,
+                                endDate: agreement?.quote?.end_date,
+                            }}
+                            onSignatureChange={setSignatureDataUrl}
+                            currency={currency}
+                        />
+                        <div className="flex gap-2 justify-end pt-2">
+                            <button
+                                type="button"
+                                onClick={() => { setStep("form"); setSignatureDataUrl(null); }}
+                                className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted"
+                            >
+                                Back
+                            </button>
+                            <button
+                                type="button"
+                                disabled={loading || !signatureDataUrl}
+                                onClick={handleAgreementSign}
+                                className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-75"
+                            >
+                                {loading ? "Submitting..." : "Sign & Submit Loan Request"}
+                            </button>
+                        </div>
+                    </div>
+                ) : (
                 <form onSubmit={handleSubmit} className="mt-4 space-y-4">
                     {error && (
                         <div className="flex items-center gap-2.5 rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
                             <AlertCircle className="h-4 w-4 shrink-0 text-red-600" /> <span>{error}</span>
                         </div>
+                    )}
+                    {showSourceSelector && (
+                        <div>
+                            <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Loan source</label>
+                            <select
+                                value={loanSource}
+                                onChange={(e) => setLoanSource(e.target.value)}
+                                className="w-full h-11 border border-line rounded-xl px-3 outline-none mt-1 bg-transparent text-sm text-ink-2"
+                            >
+                                <option value="internal">My organization</option>
+                                <option value="dash">Dash</option>
+                            </select>
+                            {loanSource === "dash" && (
+                                <p className="mt-1 text-xs text-ink-faint">
+                                    Loans against Dash require reviewing and signing a loan agreement before submitting.
+                                </p>
+                            )}
+                        </div>
+                    )}
+                    {editing && editLoan?.loan_source === "dash" && (
+                        <p className="text-xs font-semibold text-ink-muted">Loan source: Dash</p>
                     )}
                     <div>
                         <label className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Loan type</label>
@@ -1546,10 +1879,15 @@ function LoanRequestModal({ loanTypes = [], editLoan = null, onClose, onSubmitte
                     <div className="flex gap-2 justify-end pt-2">
                         <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
                         <button type="submit" disabled={loading || !canSubmit} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-75">
-                            {loading ? (editing ? "Saving..." : "Submitting...") : editing ? "Save Changes" : "Submit Loan Request"}
+                            {loading
+                                ? (needsAgreementStep ? "Loading agreement..." : editing ? "Saving..." : "Submitting...")
+                                : needsAgreementStep
+                                    ? "Continue to Agreement"
+                                    : editing ? "Save Changes" : "Submit Loan Request"}
                         </button>
                     </div>
                 </form>
+                )}
             </div>
         </div>
     );
@@ -1815,6 +2153,9 @@ function PayslipDrawer({ run, jobTitle = "", onClose }) {
                                 {amounts.lineItems.filter((li) => li.item_type === "remuneration").map((li) => (
                                     <Line key={li.id} label={li.name} value={fmtMoney(li.amount, run.currency)} />
                                 ))}
+                                {amounts.customColumns.filter((c) => c.item_type === "remuneration").map((c) => (
+                                    <Line key={c.id} label={c.name} value={fmtMoney(c.amount, run.currency)} />
+                                ))}
                                 {amounts.gross != null && <Line label="Gross Pay" value={fmtMoney(amounts.gross, run.currency)} bold />}
 
                                 <div className="text-xs font-semibold uppercase tracking-wider text-brand pt-2">Deductions</div>
@@ -1827,14 +2168,17 @@ function PayslipDrawer({ run, jobTitle = "", onClose }) {
                                 {amounts.lineItems.filter((li) => li.item_type === "deduction").map((li) => (
                                     <Line key={li.id} label={li.name} value={fmtMoney(li.amount, run.currency)} />
                                 ))}
+                                {amounts.customColumns.filter((c) => c.item_type === "deduction").map((c) => (
+                                    <Line key={c.id} label={c.name} value={fmtMoney(c.amount, run.currency)} />
+                                ))}
                                 {(() => {
-                                    const itemizedDeductions = amounts.lineItems
+                                    const itemizedDeductions = [...amounts.lineItems, ...amounts.customColumns]
                                         .filter((li) => li.item_type === "deduction")
                                         .reduce((sum, li) => sum + (Number(li.amount) || 0), 0);
                                     const otherDeductions = Math.max(0, Number(amounts.deductions || 0) - amounts.loanDeductions - itemizedDeductions);
                                     return otherDeductions > 0 ? <Line label="Other deductions" value={fmtMoney(otherDeductions, run.currency)} /> : null;
                                 })()}
-                                <Line label="Total Deductions" value={fmtMoney(amounts.deductions, run.currency)} bold={amounts.loanDeductions > 0 || amounts.lineItems.length > 0} />
+                                <Line label="Total Deductions" value={fmtMoney(amounts.deductions, run.currency)} bold={amounts.loanDeductions > 0 || amounts.lineItems.length > 0 || amounts.customColumns.length > 0} />
 
                                 <div className="mt-5 flex items-center justify-between rounded-xl bg-gradient-to-r from-brand/10 to-brand-2/5 p-4">
                                     <div className="text-sm font-semibold text-ink-2">Net Pay</div>

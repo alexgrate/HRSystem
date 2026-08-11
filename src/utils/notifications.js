@@ -126,6 +126,21 @@ export function buildPersonalNotifications({ reviews = [], leave = [], loans = [
   return out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
 }
 
+// Turn one final-approval-notification row (created server-side when an
+// approval-engine request reaches its LAST step, for employees on a job role
+// flagged "notify on final approval") into a bell item. Distinct id prefix
+// keeps it from colliding with audit-log/personal notification ids.
+export function formatFinalApprovalNotification(n) {
+  return {
+    id: `fap-${n.id}`,
+    title: n.title || "Request received final approval",
+    description: n.message || "Approval workflow",
+    iconKey: "approval",
+    route: "/app/approvals",
+    at: n.created_at,
+  };
+}
+
 // Group notifications into Today / Yesterday / Earlier This Week / Older, in order.
 export function groupByRecency(items) {
   const now = new Date();

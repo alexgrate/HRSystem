@@ -26,6 +26,7 @@ import { useToast, useConfirm } from "../../components/ui/Notifications";
 import { resolvePersonName, getInitials } from "../../utils/employee";
 import { fmtMoney } from "../../utils/payroll";
 import { TabPills } from "../../components/ui/TabPills";
+import LoanAgreementView from "../../components/loans/LoanAgreementView";
 
 const STATUS_META = {
   draft: { label: "Draft", cls: "bg-sunken text-ink-muted", step: 0 },
@@ -88,7 +89,7 @@ const inputCls = "w-full h-11 border border-line bg-card rounded-xl px-3 outline
 const labelCls = "text-xs font-semibold text-ink-muted uppercase tracking-wider";
 
 const LoanAdminPage = () => {
-  const { can, isAdmin } = usePermissions();
+  const { can, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead } = usePermissions();
   const { user } = useAuth();
   const { config } = useConfig();
   const toast = useToast();
@@ -121,7 +122,7 @@ const LoanAdminPage = () => {
   const canAdminister = can("STAFF_LOAN", "manage");
   const canReview =
     can("STAFF_LOAN", "approve") &&
-    isDesignatedApprover(workflows, "LOAN_REQUEST", user, isAdmin);
+    isDesignatedApprover(workflows, "LOAN_REQUEST", user, isAdmin, reliefCoveringJobRoleIds, isManager, isDepartmentHead);
 
   const selectedIdRef = useRef(selectedId);
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
@@ -882,6 +883,7 @@ function LoanDetailDrawer({
   const disbursable = status === "approved";
 
   const [method, setMethod] = useState(loan.repayment_method || "");
+  const [showAgreement, setShowAgreement] = useState(false);
 
   return (
     <>
@@ -901,6 +903,9 @@ function LoanDetailDrawer({
               <div className="flex items-center gap-2 text-xs text-ink-muted">
                 <span className="truncate">{typeName}</span>
                 <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${meta.cls}`}>{meta.label}</span>
+                {loan.loan_source === "dash" && (
+                  <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-violet-700">Dash</span>
+                )}
               </div>
             </div>
           </div>
@@ -1041,6 +1046,51 @@ function LoanDetailDrawer({
               <p className="mt-3 border-t border-line-soft pt-3 text-xs text-ink-muted">{loan.reason}</p>
             )}
           </div>
+
+          {/* Dash loan agreement */}
+          {loan.loan_source === "dash" && (
+            <div className="rounded-xl border border-line p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-semibold text-ink">Loan agreement</h4>
+                  <p className="text-xs text-ink-muted">
+                    {loan.agreement_signed_at
+                      ? `Signed on ${fmtDate(loan.agreement_signed_at)}.`
+                      : "Not yet signed."}
+                  </p>
+                </div>
+                {loan.agreement_signed_at && (
+                  <button
+                    onClick={() => setShowAgreement((v) => !v)}
+                    className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink-muted hover:bg-sunken"
+                  >
+                    {showAgreement ? "Hide agreement" : "View signed agreement"}
+                  </button>
+                )}
+              </div>
+              {showAgreement && (
+                <div className="mt-3 border-t border-line-soft pt-3">
+                  <LoanAgreementView
+                    mode="view"
+                    termsText={loan.agreement_terms_snapshot}
+                    signatureDataUrl={loan.agreement_signature_data}
+                    currency={currency}
+                    figures={{
+                      loanTypeName: typeName,
+                      amount: loan.amount,
+                      interestRate: loan.interest_rate,
+                      tenureMonths: loan.tenure_month,
+                      monthlyInstallment: loan.monthly_installment,
+                      totalRepayable: loan.total_repayable,
+                      totalInterest: Number(loan.total_repayable) - Number(loan.amount),
+                      startDate: fmtDate(loan.start_date),
+                      endDate: fmtDate(loan.end_date),
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Repayment method assignment */}
           {repayable && canAdminister && (
@@ -1326,6 +1376,21 @@ function LoanPolicyCard({ policy, saving, onSave, currency }) {
   const patchBool = (key, val) => onSave({ [key]: val });
   const patchSelect = (key, val) => onSave({ [key]: val });
 
+  // Client-side mirror of the backend's "at least one loan source must stay
+  // enabled" guard — blocks the second toggle-click before even calling the
+  // backend, since staff need somewhere to apply loans against.
+  const [sourceError, setSourceError] = useState("");
+  const toggleSource = (key) => {
+    const other = key === "loan_source_internal_enabled" ? "loan_source_dash_enabled" : "loan_source_internal_enabled";
+    const next = !p[key];
+    if (!next && !p[other]) {
+      setSourceError("At least one loan source must stay enabled.");
+      return;
+    }
+    setSourceError("");
+    onSave({ [key]: next });
+  };
+
   const saveRatio = () => {
     const pct = Number(ratioPct);
     if (!(pct > 0) || pct > 100) return;
@@ -1345,14 +1410,14 @@ function LoanPolicyCard({ policy, saving, onSave, currency }) {
     if (Number.isInteger(n) && n >= 0) onSave({ repayment_grace_days: n });
   };
 
-  const Toggle = ({ label, hint, k }) => (
+  const Toggle = ({ label, hint, k, onToggle }) => (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-line p-3">
       <div className="min-w-0">
         <div className="text-sm font-semibold text-ink">{label}</div>
         {hint && <div className="text-[11px] text-ink-muted">{hint}</div>}
       </div>
       <button
-        onClick={() => patchBool(k, !p[k])}
+        onClick={() => (onToggle ? onToggle() : patchBool(k, !p[k]))}
         disabled={saving}
         role="switch"
         aria-checked={!!p[k]}
@@ -1443,6 +1508,27 @@ function LoanPolicyCard({ policy, saving, onSave, currency }) {
         <Toggle label="Allow probation employees" hint="Let employees on probation apply." k="allow_probation" />
         <Toggle label="Disburse on approval" hint="Approval immediately releases the loan (off = separate disbursement step)." k="disburse_on_approval" />
       </div>
+
+      <h4 className="mt-6 text-xs font-semibold uppercase tracking-wider text-ink-muted">Loan source</h4>
+      <p className="mt-1 text-[11px] text-ink-muted">
+        Which lender(s) staff can apply a loan against. Dash-sourced loans require the employee to review and sign a loan agreement in-app before submitting.
+      </p>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <Toggle
+          label="Allow internal (organization-funded) loans"
+          hint="Staff can apply for a loan funded by your organization."
+          k="loan_source_internal_enabled"
+          onToggle={() => toggleSource("loan_source_internal_enabled")}
+        />
+        <Toggle
+          label="Allow loans against Dash"
+          hint="Staff can apply for a loan funded by Dash, the platform — requires a signed in-app agreement."
+          k="loan_source_dash_enabled"
+          onToggle={() => toggleSource("loan_source_dash_enabled")}
+        />
+      </div>
+      {sourceError && <p className="mt-2 text-[11px] font-semibold text-red-600">{sourceError}</p>}
+
       {saving && <p className="mt-3 text-[11px] text-ink-faint">Saving…</p>}
     </div>
   );

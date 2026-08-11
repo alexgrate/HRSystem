@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   Plus, Trash2, Pencil, Copy, Search, GitBranch, CheckCircle2, Play, Flag,
-  AlertTriangle, ArrowUp, ArrowDown, Users, X, Layers,
+  AlertTriangle, ArrowUp, ArrowDown, Users, X, Layers, Briefcase, UserCog,
+  Building2, Info,
 } from "lucide-react";
 import { setupService } from "../../services/setupService";
 import { auditService } from "../../services/auditService";
@@ -23,6 +24,16 @@ const WORKFLOW_TYPES = [
   { value: "LOAN_REQUEST", label: "Loan Request" },
 ];
 const typeLabel = (t) => WORKFLOW_TYPES.find((x) => x.value === t)?.label || String(t || "System").replace(/_/g, " ");
+
+// A step's approver can be a fixed job role, or resolved dynamically per
+// request from the requester's own reporting line — never configured
+// against a fixed role/grade for the latter two.
+const APPROVER_TYPES = [
+  { value: "JOB_ROLE", label: "Job role", short: "Job role", Icon: Briefcase },
+  { value: "LINE_MANAGER", label: "Requester's line manager", short: "Line manager", Icon: UserCog },
+  { value: "HOD", label: "Requester's department head (HOD)", short: "HOD", Icon: Building2 },
+];
+const approverTypeShortLabel = (t) => (t === "LINE_MANAGER" ? "Line Manager" : t === "HOD" ? "Department Head" : null);
 const typeAccent = (t) => {
   const s = String(t || "").toUpperCase();
   if (s.includes("LEAVE")) return "emerald";
@@ -74,14 +85,21 @@ function StageTimeline({ flow, roleName, gradeName }) {
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
               <div className="min-w-0">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint">Stage {s.step_order}</div>
-                <div className="truncate text-sm font-semibold text-ink">{roleName(s.approver_job_role_id)}</div>
+                <div className="truncate text-sm font-semibold text-ink">{approverTypeShortLabel(s.approver_type) || roleName(s.approver_job_role_id)}</div>
               </div>
-              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${s.require_all_approvers ? "bg-amber-50 text-amber-700" : "bg-sunken text-ink-muted"}`}>
-                <Users className="h-3 w-3" aria-hidden="true" /> {s.require_all_approvers ? "All must approve" : "Any one approves"}
-              </span>
+              {s.approver_type === "JOB_ROLE" || !s.approver_type ? (
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${s.require_all_approvers ? "bg-amber-50 text-amber-700" : "bg-sunken text-ink-muted"}`}>
+                  <Users className="h-3 w-3" aria-hidden="true" /> {s.require_all_approvers ? "All must approve" : "Any one approves"}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">Dynamic</span>
+              )}
             </div>
             {s.approver_grade_id && (
               <div className="mt-1.5 text-[11px] text-ink-muted">Grade: <b className="text-ink">{gradeName(s.approver_grade_id)}</b></div>
+            )}
+            {(s.approver_type === "LINE_MANAGER" || s.approver_type === "HOD") && (
+              <div className="mt-1.5 text-[11px] text-ink-muted">Routes to the requester's own {s.approver_type === "LINE_MANAGER" ? "line manager" : "department head"}, resolved per request.</div>
             )}
           </div>
         </li>
@@ -370,17 +388,19 @@ const WorkflowPage = () => {
 /* -------------------------------------------------------------- builder modal */
 
 let stepSeq = 1;
-const newStep = () => ({ uid: `s${stepSeq++}`, approver_job_role_id: "", approver_grade_id: "", require_all_approvers: false });
+const newStep = () => ({ uid: `s${stepSeq++}`, approver_type: "JOB_ROLE", approver_job_role_id: "", approver_grade_id: "", require_all_approvers: false });
 
 function WorkflowFormModal({ flow = null, duplicate = false, reduce, existingNames = [], jobRoles, grades, roleName, onClose, onSaved }) {
   const toast = useToast();
   const isEdit = !!flow?.workflow?.id && !duplicate;
   const [name, setName] = useState(duplicate ? `${flow?.workflow?.name || ""} (copy)` : flow?.workflow?.name || "");
   const [workflowType, setWorkflowType] = useState(flow?.workflow?.workflow_type || "LEAVE_REQUEST");
+  const [isActive, setIsActive] = useState(duplicate ? true : (flow?.workflow?.is_active ?? true));
   const [saving, setSaving] = useState(false);
   const [steps, setSteps] = useState(() => {
     const existing = (flow?.steps || []).slice().sort((a, b) => a.step_order - b.step_order).map((s) => ({
       uid: `s${stepSeq++}`,
+      approver_type: s.approver_type || "JOB_ROLE",
       approver_job_role_id: s.approver_job_role_id || "",
       approver_grade_id: s.approver_grade_id || "",
       require_all_approvers: !!s.require_all_approvers,
@@ -405,7 +425,7 @@ function WorkflowFormModal({ flow = null, duplicate = false, reduce, existingNam
       w.push("Another workflow already uses this name.");
     if (steps.length === 0) w.push("Add at least one approval stage.");
     steps.forEach((s, i) => {
-      if (!s.approver_job_role_id) w.push(`Stage ${i + 1}: choose an approving job role.`);
+      if ((s.approver_type || "JOB_ROLE") === "JOB_ROLE" && !s.approver_job_role_id) w.push(`Stage ${i + 1}: choose an approving job role.`);
     });
     return w;
   }, [name, steps, existingNames, flow]);
@@ -417,13 +437,18 @@ function WorkflowFormModal({ flow = null, duplicate = false, reduce, existingNam
     setSaving(true);
     try {
       const payload = {
-        name: name.trim(), workflow_type: workflowType, is_active: true,
-        steps: steps.map((s, idx) => ({
-          step_order: idx + 1,
-          approver_job_role_id: s.approver_job_role_id,
-          approver_grade_id: s.approver_grade_id || null,
-          require_all_approvers: !!s.require_all_approvers,
-        })),
+        name: name.trim(), workflow_type: workflowType, is_active: isActive,
+        steps: steps.map((s, idx) => {
+          const approverType = s.approver_type || "JOB_ROLE";
+          const isDynamic = approverType === "LINE_MANAGER" || approverType === "HOD";
+          return {
+            step_order: idx + 1,
+            approver_type: approverType,
+            approver_job_role_id: isDynamic ? null : s.approver_job_role_id,
+            approver_grade_id: isDynamic ? null : s.approver_grade_id || null,
+            require_all_approvers: isDynamic ? false : !!s.require_all_approvers,
+          };
+        }),
       };
       if (isEdit) { await setupService.updateWorkflow(flow.workflow.id, payload); toast.success("Workflow updated."); }
       else { await setupService.createWorkflow(payload); toast.success(duplicate ? "Workflow duplicated." : "Workflow created."); }
@@ -441,97 +466,178 @@ function WorkflowFormModal({ flow = null, duplicate = false, reduce, existingNam
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
-      <motion.div role="dialog" aria-modal="true" aria-label={isEdit ? "Edit workflow" : "Create workflow"} onClick={(e) => e.stopPropagation()}
-        initial={reduce ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={reduce ? undefined : { opacity: 0, y: 12 }}
-        className="my-8 w-full max-w-2xl rounded-2xl bg-card p-6 shadow-xl">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-lg font-bold text-ink">{isEdit ? `Edit: ${flow.workflow?.name}` : duplicate ? "Duplicate workflow" : "New approval workflow"}</h3>
-          <button onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-ink-muted hover:bg-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"><X className="h-4 w-4" /></button>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm sm:items-center" onClick={onClose}>
+      <motion.form onSubmit={submit} onClick={(e) => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-label={isEdit ? "Edit workflow" : "Create workflow"}
+        initial={reduce ? false : { opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={reduce ? undefined : { opacity: 0, y: 16, scale: 0.98 }}
+        transition={{ duration: 0.18, ease: "easeOut" }}
+        className="my-8 flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-card shadow-2xl ring-1 ring-black/5">
+
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line-soft px-5 py-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-brand-2 text-white shadow-md shadow-brand/20">
+              <GitBranch className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <h3 className="truncate text-base font-bold text-ink">{isEdit ? "Edit approval workflow" : duplicate ? "Duplicate workflow" : "New approval workflow"}</h3>
+              <p className="truncate text-xs text-ink-muted">{isEdit || duplicate ? flow.workflow?.name : "Define who approves this process, and in what order."}</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="shrink-0 rounded-lg p-2 text-ink-muted hover:bg-sunken hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"><X className="h-4 w-4" /></button>
         </div>
 
-        <form onSubmit={submit} className="mt-4 grid gap-4 lg:grid-cols-2">
-          {/* Left: form */}
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="wf-name" className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Workflow name</label>
-              <input id="wf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Manager → HR leave approval"
-                className="mt-1 h-11 w-full rounded-xl border border-line px-3 outline-none focus-visible:ring-2 focus-visible:ring-brand/40" />
-            </div>
-            <div>
-              <label htmlFor="wf-type" className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Process type</label>
-              <select id="wf-type" value={workflowType} onChange={(e) => setWorkflowType(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-line bg-card px-3 outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
-                {WORKFLOW_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Approval stages</label>
-                <button type="button" onClick={addStep} className="inline-flex items-center gap-1 text-xs font-bold text-brand focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"><Plus className="h-3 w-3" /> Add stage</button>
+        {/* Body — scrollable */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+          <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+            {/* Left: form */}
+            <div className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="wf-name" className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Workflow name</label>
+                  <input id="wf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Manager → HR leave approval"
+                    className="mt-1.5 h-11 w-full rounded-xl border border-line bg-card px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand/40" />
+                </div>
+                <div>
+                  <label htmlFor="wf-type" className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Process type</label>
+                  <select id="wf-type" value={workflowType} onChange={(e) => setWorkflowType(e.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-line bg-card px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
+                    {WORKFLOW_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </div>
               </div>
-              <div className="mt-2 space-y-2">
-                {steps.map((s, index) => (
-                  <div key={s.uid} className="rounded-xl border border-line-soft bg-sunken/40 p-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="w-12 shrink-0 text-xs font-bold text-ink-faint">Stage {index + 1}</span>
-                      <select value={s.approver_job_role_id} onChange={(e) => setStep(s.uid, { approver_job_role_id: e.target.value })} aria-label={`Stage ${index + 1} approver role`}
-                        className="h-10 min-w-0 flex-1 rounded-lg border border-line bg-card px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
-                        <option value="">— Approving job role —</option>
-                        {jobRoles.map((r) => <option key={r.id} value={r.id}>{r.title || r.name}</option>)}
-                      </select>
-                      <div className="flex shrink-0 items-center">
-                        <button type="button" onClick={() => move(index, -1)} disabled={index === 0} aria-label="Move stage up" className="rounded p-1 text-ink-faint hover:text-brand disabled:opacity-30"><ArrowUp className="h-4 w-4" /></button>
-                        <button type="button" onClick={() => move(index, 1)} disabled={index === steps.length - 1} aria-label="Move stage down" className="rounded p-1 text-ink-faint hover:text-brand disabled:opacity-30"><ArrowDown className="h-4 w-4" /></button>
-                        <button type="button" onClick={() => removeStep(s.uid)} disabled={steps.length === 1} aria-label="Remove stage" className="rounded p-1 text-ink-faint hover:text-red-600 disabled:opacity-30"><Trash2 className="h-4 w-4" /></button>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-12">
-                      <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-ink-muted">
-                        <input type="checkbox" checked={s.require_all_approvers} onChange={() => setStep(s.uid, { require_all_approvers: !s.require_all_approvers })} className="h-3.5 w-3.5 rounded border-line text-brand focus:ring-brand" />
-                        All holders must approve
-                      </label>
-                      {grades.length > 0 && (
-                        <select value={s.approver_grade_id} onChange={(e) => setStep(s.uid, { approver_grade_id: e.target.value })} aria-label={`Stage ${index + 1} grade`} className="h-8 rounded-lg border border-line bg-card px-2 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
-                          <option value="">Any grade</option>
-                          {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                        </select>
-                      )}
-                    </div>
+
+              {/* Active toggle */}
+              <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-line-soft bg-sunken/30 px-4 py-3">
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-ink">Workflow active</span>
+                  <span className="block text-xs text-ink-muted">Inactive workflows keep their history but stop gating new requests.</span>
+                </span>
+                <button type="button" role="switch" aria-checked={isActive} aria-label="Toggle workflow active" onClick={() => setIsActive((v) => !v)}
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${isActive ? "bg-emerald-500" : "bg-line"}`}>
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${isActive ? "translate-x-5" : "translate-x-0.5"}`} />
+                </button>
+              </label>
+
+              {/* Stages */}
+              <div>
+                <div className="flex items-end justify-between gap-2">
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wider text-ink-muted">Approval stages</label>
+                    <p className="text-[11px] text-ink-faint">Requests move through these, in order.</p>
                   </div>
-                ))}
+                  <button type="button" onClick={addStep} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-brand/30 bg-brand/5 px-2.5 py-1.5 text-xs font-bold text-brand hover:bg-brand/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"><Plus className="h-3.5 w-3.5" /> Add stage</button>
+                </div>
+
+                <div className="mt-3 space-y-1">
+                  {steps.map((s, index) => {
+                    const approverType = s.approver_type || "JOB_ROLE";
+                    const isDynamic = approverType === "LINE_MANAGER" || approverType === "HOD";
+                    return (
+                      <div key={s.uid} className="flex gap-3">
+                        {/* Connector */}
+                        <div className="flex flex-col items-center">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand/10 text-xs font-bold text-brand">{index + 1}</span>
+                          {index < steps.length - 1 && <span className="my-1 w-px flex-1 bg-line-soft" aria-hidden="true" />}
+                        </div>
+
+                        <div className="min-w-0 flex-1 rounded-2xl border border-line-soft bg-card p-3.5 shadow-sm mb-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-ink-faint">Stage {index + 1}</span>
+                            <div className="flex items-center gap-0.5">
+                              <button type="button" onClick={() => move(index, -1)} disabled={index === 0} aria-label="Move stage up" className="rounded-lg p-1 text-ink-faint hover:bg-sunken hover:text-brand disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" /></button>
+                              <button type="button" onClick={() => move(index, 1)} disabled={index === steps.length - 1} aria-label="Move stage down" className="rounded-lg p-1 text-ink-faint hover:bg-sunken hover:text-brand disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" /></button>
+                              <button type="button" onClick={() => removeStep(s.uid)} disabled={steps.length === 1} aria-label="Remove stage" className="rounded-lg p-1 text-ink-faint hover:bg-red-50 hover:text-red-600 disabled:opacity-30"><Trash2 className="h-3.5 w-3.5" /></button>
+                            </div>
+                          </div>
+
+                          {/* Approver type segmented control */}
+                          <div className="mt-2.5 flex w-full rounded-lg border border-line bg-sunken/50 p-0.5" role="radiogroup" aria-label={`Stage ${index + 1} approver type`}>
+                            {APPROVER_TYPES.map((t) => {
+                              const active = approverType === t.value;
+                              return (
+                                <button key={t.value} type="button" role="radio" aria-checked={active}
+                                  onClick={() => setStep(s.uid, { approver_type: t.value, approver_job_role_id: "", approver_grade_id: "" })}
+                                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-bold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${active ? "bg-card text-brand shadow-sm" : "text-ink-muted hover:text-ink"}`}>
+                                  <t.Icon className="h-3.5 w-3.5" aria-hidden="true" /> {t.short}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {isDynamic ? (
+                            <div className="mt-2.5 flex items-start gap-2 rounded-lg bg-sky-50 px-2.5 py-2 text-[11px] leading-relaxed text-sky-800">
+                              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                              <span>Routes to the requester's own {approverType === "LINE_MANAGER" ? "line manager" : "department head"}, resolved automatically for each request. If none is configured, this stage is skipped.</span>
+                            </div>
+                          ) : (
+                            <div className="mt-2.5 space-y-2">
+                              <select value={s.approver_job_role_id} onChange={(e) => setStep(s.uid, { approver_job_role_id: e.target.value })} aria-label={`Stage ${index + 1} approver role`}
+                                className="h-10 w-full rounded-lg border border-line bg-card px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
+                                <option value="">— Approving job role —</option>
+                                {jobRoles.map((r) => <option key={r.id} value={r.id}>{r.title || r.name}</option>)}
+                              </select>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                                <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-ink-muted">
+                                  <input type="checkbox" checked={s.require_all_approvers} onChange={() => setStep(s.uid, { require_all_approvers: !s.require_all_approvers })} className="h-3.5 w-3.5 rounded border-line text-brand focus:ring-brand" />
+                                  All holders must approve
+                                </label>
+                                {grades.length > 0 && (
+                                  <select value={s.approver_grade_id} onChange={(e) => setStep(s.uid, { approver_grade_id: e.target.value })} aria-label={`Stage ${index + 1} grade`} className="h-8 rounded-lg border border-line bg-card px-2 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
+                                    <option value="">Any grade</option>
+                                    {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                  </select>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Right: live preview */}
+            <div className="lg:sticky lg:top-0 lg:self-start">
+              <div className="rounded-2xl border border-line-soft bg-gradient-to-br from-sunken/50 to-card p-4">
+                <div className="mb-3 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+                  <Layers className="h-3.5 w-3.5" aria-hidden="true" /> Live preview
+                </div>
+                <ol className="space-y-2.5">
+                  <li className="flex items-center gap-2 text-xs text-ink-muted"><Play className="h-3.5 w-3.5" aria-hidden="true" /> Request submitted</li>
+                  {steps.map((s, i) => {
+                    const dynamicLabel = approverTypeShortLabel(s.approver_type);
+                    return (
+                      <li key={s.uid} className="flex items-center gap-2">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand text-[10px] font-bold text-white">{i + 1}</span>
+                        <span className="min-w-0 truncate text-xs text-ink">{dynamicLabel || (s.approver_job_role_id ? roleName(s.approver_job_role_id) : <span className="text-amber-600">No approver</span>)}{!dynamicLabel && s.require_all_approvers ? " · all" : ""}</span>
+                      </li>
+                    );
+                  })}
+                  <li className="flex items-center gap-2 text-xs font-semibold text-emerald-700"><Flag className="h-3.5 w-3.5" aria-hidden="true" /> Approved</li>
+                </ol>
+                {warnings.length > 0 && (
+                  <div className="mt-3 space-y-1.5 border-t border-line-soft pt-3">
+                    {warnings.slice(0, 5).map((w, i) => (
+                      <div key={i} className="flex items-start gap-1.5 text-[11px] text-amber-700"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /> {w}</div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Right: live preview */}
-          <div className="rounded-xl border border-line-soft bg-sunken/30 p-3">
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">Live preview</div>
-            <ol className="space-y-2">
-              <li className="flex items-center gap-2 text-xs text-ink-muted"><Play className="h-3.5 w-3.5" aria-hidden="true" /> Request submitted</li>
-              {steps.map((s, i) => (
-                <li key={s.uid} className="flex items-center gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand text-[10px] font-bold text-white">{i + 1}</span>
-                  <span className="min-w-0 truncate text-xs text-ink">{s.approver_job_role_id ? roleName(s.approver_job_role_id) : <span className="text-amber-600">No approver</span>}{s.require_all_approvers ? " · all" : ""}</span>
-                </li>
-              ))}
-              <li className="flex items-center gap-2 text-xs font-semibold text-emerald-700"><Flag className="h-3.5 w-3.5" aria-hidden="true" /> Approved</li>
-            </ol>
-            {warnings.length > 0 && (
-              <div className="mt-3 space-y-1 border-t border-line-soft pt-2">
-                {warnings.slice(0, 5).map((w, i) => (
-                  <div key={i} className="flex items-start gap-1.5 text-[11px] text-amber-700"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /> {w}</div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2 lg:col-span-2">
+        {/* Footer */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-line-soft bg-sunken/30 px-5 py-4 sm:px-6">
+          <div className="text-xs text-ink-faint">{steps.length} stage{steps.length === 1 ? "" : "s"} configured</div>
+          <div className="flex gap-2">
             <button type="button" onClick={onClose} disabled={saving} className="h-11 rounded-xl border border-line px-4 text-sm font-semibold text-ink-muted disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">Cancel</button>
-            <button type="submit" disabled={!canSave} className="h-11 rounded-xl bg-brand px-5 text-sm font-semibold text-white disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">{saving ? "Saving…" : isEdit ? "Save changes" : "Create workflow"}</button>
+            <button type="submit" disabled={!canSave} className="h-11 rounded-xl bg-gradient-to-r from-brand to-brand-2 px-5 text-sm font-semibold text-white shadow-md shadow-brand/20 disabled:opacity-50 disabled:shadow-none focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">{saving ? "Saving…" : isEdit ? "Save changes" : "Create workflow"}</button>
           </div>
-        </form>
-      </motion.div>
+        </div>
+      </motion.form>
     </div>
   );
 }
