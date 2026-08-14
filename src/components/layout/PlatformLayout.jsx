@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, LogOut, Menu, X, LayoutDashboard, Building2 } from "lucide-react";
+import { ChevronLeft, LogOut, Menu, X, LayoutDashboard, Building2, FileSignature, HandCoins } from "lucide-react";
 import { usePlatformAuth } from "../../context/PlatformAuthContext";
 
 // Sibling to AppLayout.jsx, deliberately much simpler (no per-resource RBAC
@@ -10,6 +10,8 @@ import { usePlatformAuth } from "../../context/PlatformAuthContext";
 const NAV_ITEMS = [
   { key: "dashboard", label: "Dashboard", to: "/platform/dashboard", Icon: LayoutDashboard },
   { key: "organizations", label: "Organizations", to: "/platform/organizations", Icon: Building2 },
+  { key: "loans", label: "Loans", to: "/platform/loans", Icon: HandCoins },
+  { key: "loan-agreement", label: "Loan Agreement", to: "/platform/loan-agreement", Icon: FileSignature },
 ];
 
 const getInitials = (name) =>

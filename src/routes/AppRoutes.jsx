@@ -19,6 +19,8 @@ import { RESOURCES, pathFor } from "../config/resources";
 // majority of users who only ever visit /app.
 const PlatformDashboardPage = lazy(() => import("../pages/platform/PlatformDashboardPage"));
 const PlatformOrganizationsPage = lazy(() => import("../pages/platform/PlatformOrganizationsPage"));
+const PlatformLoansPage = lazy(() => import("../pages/platform/PlatformLoansPage"));
+const PlatformLoanAgreementPage = lazy(() => import("../pages/platform/PlatformLoanAgreementPage"));
 
 // Shown while a lazy route chunk downloads.
 function PageLoading() {
@@ -120,6 +122,22 @@ function PlatformApp() {
             element={
               <Suspense fallback={<PageLoading />}>
                 <PlatformOrganizationsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="loans"
+            element={
+              <Suspense fallback={<PageLoading />}>
+                <PlatformLoansPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="loan-agreement"
+            element={
+              <Suspense fallback={<PageLoading />}>
+                <PlatformLoanAgreementPage />
               </Suspense>
             }
           />
