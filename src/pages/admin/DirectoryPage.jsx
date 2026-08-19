@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, X, Plus, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Pencil, Trash2, UserX, UserCheck, Mail, Download, Upload, Eye } from "lucide-react";
 import { usePermissions } from "../../context/PermissionContext";
@@ -226,6 +226,14 @@ const DirectoryPage = () => {
   // Full results of the last bulk import ({ tab, total, successCount, failures, warnings })
   // — every failed/warned row, not just the first couple previewed in a toast.
   const [bulkResults, setBulkResults] = useState(null);
+
+  // Employees checked in the directory table, keyed by id so the actual
+  // employee object (needed for its email) survives a page change even
+  // though `listData` itself gets replaced on every fetch — selection spans
+  // pages, not just whatever's currently rendered.
+  const [selectedEmployees, setSelectedEmployees] = useState(() => new Map());
+  const [sendingBulkInvites, setSendingBulkInvites] = useState(false);
+  const headerCheckboxRef = useRef(null);
 
   const canUpdateEmployee = can("EMPLOYEE", "update");
   const canReadEmployee = can("EMPLOYEE", "read");
@@ -918,6 +926,16 @@ const DirectoryPage = () => {
 
   const totalPages = pagination?.totalPages || 1;
 
+  // Header "select all" checkbox reflects the CURRENT page/filter view only
+  // (native indeterminate has no JSX prop — it has to be set imperatively).
+  const visibleSelectedCount = tab === "Employees" ? filteredData.filter((item) => selectedEmployees.has(item.id)).length : 0;
+  const allVisibleSelected = tab === "Employees" && filteredData.length > 0 && visibleSelectedCount === filteredData.length;
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = visibleSelectedCount > 0 && !allVisibleSelected;
+    }
+  }, [visibleSelectedCount, allVisibleSelected]);
+
   const handleDelete = async (item) => {
     const cfg = SETUPS[tab];
     const ok = await confirm({
@@ -976,11 +994,67 @@ const DirectoryPage = () => {
     }
   };
 
+  const toggleSelectEmployee = (item) => {
+    setSelectedEmployees((prev) => {
+      const next = new Map(prev);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.set(item.id, item);
+      return next;
+    });
+  };
+
+  const toggleSelectAllOnPage = () => {
+    setSelectedEmployees((prev) => {
+      const next = new Map(prev);
+      const allSelected = filteredData.length > 0 && filteredData.every((item) => next.has(item.id));
+      filteredData.forEach((item) => (allSelected ? next.delete(item.id) : next.set(item.id, item)));
+      return next;
+    });
+  };
+
+  // Same one-at-a-time call handleSendInvite makes, just looped with the
+  // same accumulate-failures-then-show-a-results-panel shape the bulk CSV
+  // import already uses (see importBulk below) — one flaky email shouldn't
+  // stop the rest of the batch, and the admin sees exactly which ones failed
+  // instead of a single generic error.
+  const handleBulkSendInvites = async () => {
+    const items = Array.from(selectedEmployees.values());
+    if (!items.length || sendingBulkInvites) return;
+    const ok = await confirm({
+      title: `Send onboarding email to ${items.length} employee${items.length === 1 ? "" : "s"}?`,
+      message: "Each selected employee will be emailed a one-time onboarding link to set their password (the link works once and expires in 48 hours).",
+      confirmLabel: "Send emails",
+    });
+    if (!ok) return;
+
+    setSendingBulkInvites(true);
+    const failures = [];
+    let successCount = 0;
+    for (const item of items) {
+      try {
+        await orgService.sendOnboardingLink(item.email);
+        successCount += 1;
+      } catch (err) {
+        failures.push({ where: empName(item), message: err?.error?.message || err?.message || "Unknown error" });
+      }
+    }
+    setSendingBulkInvites(false);
+    setSelectedEmployees(new Map());
+    setBulkResults({ kind: "invite", tab: "Employees", total: items.length, successCount, failures, warnings: [] });
+
+    if (failures.length === 0) {
+      toast.success(`Onboarding email sent to ${successCount} employee${successCount === 1 ? "" : "s"}.`);
+    } else {
+      toast.info(`Sent ${successCount}/${items.length} — see the results panel for details.`);
+    }
+  };
+
   const switchTab = (t) => {
     setTab(t);
     setQ("");
     setPage(1);
     setSetupModal(null);
+    setSelectedEmployees(new Map());
   };
 
   const setupColSpan = activeSetup ? activeSetup.columns.length + 1 : 4;
@@ -1040,6 +1114,27 @@ const DirectoryPage = () => {
         ))}
       </div>
 
+      {tab === "Employees" && selectedEmployees.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand/30 bg-brand/5 px-4 py-3">
+          <span className="text-sm font-semibold text-ink">
+            {selectedEmployees.size} employee{selectedEmployees.size === 1 ? "" : "s"} selected
+          </span>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setSelectedEmployees(new Map())} className="text-xs font-semibold text-ink-muted hover:text-ink">
+              Clear selection
+            </button>
+            <button
+              onClick={handleBulkSendInvites}
+              disabled={sendingBulkInvites}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-60"
+            >
+              <Mail className="h-3.5 w-3.5" />
+              {sendingBulkInvites ? "Sending…" : `Send onboarding link${selectedEmployees.size === 1 ? "" : "s"}`}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-line/80 bg-card shadow-sm">
         <div className="flex flex-wrap items-center gap-3 border-b border-line-soft p-4">
           <div className="flex flex-1 min-w-[240px] items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm">
@@ -1070,6 +1165,18 @@ const DirectoryPage = () => {
                 <tr>
                   {tab === "Employees" ? (
                     <>
+                      {canUpdateEmployee && (
+                        <th className="w-10 px-4 py-3">
+                          <input
+                            ref={headerCheckboxRef}
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={toggleSelectAllOnPage}
+                            aria-label="Select all employees on this page"
+                            className="h-4 w-4 rounded border-line text-brand"
+                          />
+                        </th>
+                      )}
                       <th className="px-4 py-3 text-left font-semibold">Employee</th>
                       <th className="px-4 py-3 text-left font-semibold">Staff ID</th>
                       <th className="px-4 py-3 text-left font-semibold">Job Title</th>
@@ -1094,7 +1201,7 @@ const DirectoryPage = () => {
               <tbody>
                 {filteredData.length === 0 ? (
                   <tr>
-                    <td colSpan={tab === "Employees" ? 10 : setupColSpan} className="p-8 text-center text-ink-faint">
+                    <td colSpan={tab === "Employees" ? (canUpdateEmployee ? 11 : 10) : setupColSpan} className="p-8 text-center text-ink-faint">
                       No active records registered.
                     </td>
                   </tr>
@@ -1108,6 +1215,17 @@ const DirectoryPage = () => {
                         onClick={() => { if (canReadEmployee) setViewEmployee(item); }}
                         className={`border-t border-line-soft hover:bg-sunken/70 ${canReadEmployee ? "cursor-pointer" : ""} ${blocked ? "opacity-60" : ""}`}
                       >
+                        {canUpdateEmployee && (
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedEmployees.has(item.id)}
+                              onChange={() => toggleSelectEmployee(item)}
+                              aria-label={`Select ${empName(item)}`}
+                              className="h-4 w-4 rounded border-line text-brand"
+                            />
+                          </td>
+                        )}
                         <td className="px-4 py-3 font-semibold text-ink">{empName(item)}</td>
                         <td className="px-4 py-3 text-ink-muted">{item.staff_id || "—"}</td>
                         <td className="px-4 py-3 text-ink-muted">{roleTitle(item.job_role_id)}</td>
@@ -1416,14 +1534,15 @@ function BulkUploadModal({ tab, onClose, onSubmit }) {
 // first couple previewed in the toast. Stays open until the admin dismisses it.
 function BulkResultsModal({ results, onClose }) {
   const { tab, total, successCount, failures, warnings } = results;
+  const isInvite = results.kind === "invite";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl bg-card shadow-xl">
         <div className="flex items-center justify-between border-b px-6 py-4">
           <div>
-            <h3 className="text-lg font-bold text-ink">Bulk Upload Results · {tab}</h3>
+            <h3 className="text-lg font-bold text-ink">{isInvite ? "Onboarding Emails Sent" : `Bulk Upload Results · ${tab}`}</h3>
             <p className="text-xs text-ink-muted mt-0.5">
-              Imported {successCount}/{total}
+              {isInvite ? "Sent" : "Imported"} {successCount}/{total}
               {failures.length ? ` · ${failures.length} failed` : ""}
               {warnings.length ? ` · ${warnings.length} with warnings` : ""}
             </p>
@@ -1437,7 +1556,7 @@ function BulkResultsModal({ results, onClose }) {
           {!failures.length && !warnings.length && (
             <div className="flex items-center gap-2.5 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800 border border-emerald-200">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
-              Every record imported cleanly — nothing to review.
+              {isInvite ? "Every onboarding email sent cleanly — nothing to review." : "Every record imported cleanly — nothing to review."}
             </div>
           )}
 
