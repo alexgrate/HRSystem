@@ -679,7 +679,7 @@ const PayrollPage = () => {
         )}
 
         {showLineItems && (
-          <LineItemsModal payGroups={payGroups} payGrades={payGrades} onClose={() => setShowLineItems(false)} />
+          <LineItemsModal payGrades={payGrades} onClose={() => setShowLineItems(false)} />
         )}
 
         {showColumnModal && selectedRun && (
@@ -1101,7 +1101,7 @@ function CustomColumnModal({ run, employees = [], existingNames = [], busy, onCl
   );
 }
 
-function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
+function LineItemsModal({ payGrades = [], onClose }) {
   const { can } = usePermissions();
   const toast = useToast();
   const confirm = useConfirm();
@@ -1109,20 +1109,19 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
   const canUpdate = can("PAYROLL_LINE_ITEM", "update");
   const canDelete = can("PAYROLL_LINE_ITEM", "delete");
 
-  const [payGroupId, setPayGroupId] = useState(payGroups[0]?.id || "");
+  const [payGradeId, setPayGradeId] = useState(payGrades[0]?.id || "");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // null | "new" | item
   const [busy, setBusy] = useState(false);
 
-  const payGradeName = (id) => payGrades.find((g) => g.id === id)?.name || "Unknown grade";
   const itemName = (id) => items.find((i) => i.id === id)?.name || "another item";
 
-  const load = async (pgId) => {
-    if (!pgId) { setItems([]); return; }
+  const load = async (gradeId) => {
+    if (!gradeId) { setItems([]); return; }
     setLoading(true);
     try {
-      setItems(await payrollService.listLineItems(pgId));
+      setItems(await payrollService.listLineItems(gradeId));
     } catch (err) {
       console.error("[Payroll] Failed to load line items:", err);
       toast.error(err?.message || "Couldn't load line items.");
@@ -1132,9 +1131,9 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
   };
 
   useEffect(() => {
-    load(payGroupId);
+    load(payGradeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payGroupId]);
+  }, [payGradeId]);
 
   const describeCalc = (item) => {
     if (item.calculation_method === "percentage") return `${Number(item.value).toLocaleString()}% of base`;
@@ -1151,7 +1150,7 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
   const handleDelete = async (item) => {
     const ok = await confirm({
       title: "Delete line item",
-      message: `Remove "${item.name}"? Future payroll runs for this pay group will no longer include it.`,
+      message: `Remove "${item.name}"? Future payroll runs will no longer include it for staff on this grade.`,
       confirmLabel: "Delete",
       danger: true,
     });
@@ -1160,7 +1159,7 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
     try {
       await payrollService.deleteLineItem(item.id);
       toast.success("Line item deleted.");
-      await load(payGroupId);
+      await load(payGradeId);
     } catch (err) {
       toast.error(err?.message || "Couldn't delete the line item.");
     } finally {
@@ -1174,20 +1173,20 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
         <div className="flex items-center justify-between border-b pb-3">
           <div>
             <h3 className="text-lg font-bold text-ink">Payroll line items</h3>
-            <p className="text-xs text-ink-muted">Recurring remuneration/deduction rules, applied automatically per pay group — optionally scoped to one pay grade.</p>
+            <p className="text-xs text-ink-muted">Recurring remuneration/deduction rules, categorized by pay grade — applied automatically to every staff member on that grade, in any pay group.</p>
           </div>
           <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
         </div>
 
         <div className="mt-4 flex items-end justify-between gap-3 flex-wrap">
           <div className="min-w-[220px]">
-            <label className={labelCls}>Pay group</label>
-            <select value={payGroupId} onChange={(e) => { setEditing(null); setPayGroupId(e.target.value); }} className={inputCls}>
-              <option value="">— Select pay group —</option>
-              {payGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            <label className={labelCls}>Pay grade</label>
+            <select value={payGradeId} onChange={(e) => { setEditing(null); setPayGradeId(e.target.value); }} className={inputCls}>
+              <option value="">— Select pay grade —</option>
+              {payGrades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           </div>
-          {canCreate && payGroupId && (
+          {canCreate && payGradeId && (
             <button
               onClick={() => setEditing("new")}
               className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-sunken"
@@ -1199,10 +1198,9 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
 
         {editing && (
           <LineItemForm
-            payGroups={payGroups}
             payGrades={payGrades}
             existingItems={items}
-            defaultPayGroupId={payGroupId}
+            defaultPayGradeId={payGradeId}
             item={editing === "new" ? null : editing}
             busy={busy}
             onCancel={() => setEditing(null)}
@@ -1217,7 +1215,7 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
                   toast.success("Line item updated.");
                 }
                 setEditing(null);
-                await load(payGroupId);
+                await load(payGradeId);
               } catch (err) {
                 toast.error(err?.message || "Couldn't save the line item.");
               } finally {
@@ -1230,16 +1228,15 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
         <div className="mt-4 overflow-x-auto rounded-xl border border-line">
           {loading ? (
             <div className="p-6 text-center text-xs text-ink-faint">Loading line items…</div>
-          ) : !payGroupId ? (
-            <div className="p-6 text-center text-xs text-ink-faint">Pick a pay group to see its configured line items.</div>
+          ) : !payGradeId ? (
+            <div className="p-6 text-center text-xs text-ink-faint">Pick a pay grade to see its configured line items.</div>
           ) : items.length === 0 ? (
-            <div className="p-6 text-center text-xs text-ink-faint">No line items configured for this pay group yet.</div>
+            <div className="p-6 text-center text-xs text-ink-faint">No line items configured for this pay grade yet.</div>
           ) : (
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[560px] text-sm">
               <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
                 <tr>
                   <th className="px-3 py-2 text-left font-semibold">Name</th>
-                  <th className="px-3 py-2 text-left font-semibold">Scope</th>
                   <th className="px-3 py-2 text-left font-semibold">Type</th>
                   <th className="px-3 py-2 text-left font-semibold">Calculation</th>
                   <th className="px-3 py-2 text-left font-semibold">Status</th>
@@ -1250,13 +1247,6 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
                 {items.map((item) => (
                   <tr key={item.id} className="border-t border-line-soft">
                     <td className="px-3 py-2 font-medium text-ink-2">{item.name}</td>
-                    <td className="px-3 py-2 text-ink-muted">
-                      {item.pay_grade_id ? (
-                        <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold text-brand">{payGradeName(item.pay_grade_id)}</span>
-                      ) : (
-                        <span className="text-ink-faint">All grades</span>
-                      )}
-                    </td>
                     <td className="px-3 py-2">
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${item.item_type === "deduction" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
                         {item.item_type}
@@ -1293,10 +1283,9 @@ function LineItemsModal({ payGroups = [], payGrades = [], onClose }) {
   );
 }
 
-function LineItemForm({ payGroups = [], payGrades = [], existingItems = [], defaultPayGroupId, item, busy, onCancel, onSubmit }) {
+function LineItemForm({ payGrades = [], existingItems = [], defaultPayGradeId, item, busy, onCancel, onSubmit }) {
   const [name, setName] = useState(item?.name || "");
-  const [payGroupId, setPayGroupId] = useState(item?.pay_group_id || defaultPayGroupId || "");
-  const [payGradeId, setPayGradeId] = useState(item?.pay_grade_id || "");
+  const [payGradeId, setPayGradeId] = useState(item?.pay_grade_id || defaultPayGradeId || "");
   const [itemType, setItemType] = useState(item?.item_type || "remuneration");
   const [calcMethod, setCalcMethod] = useState(item?.calculation_method || "fixed");
   const [value, setValue] = useState(item?.value != null ? String(item.value) : "");
@@ -1306,7 +1295,7 @@ function LineItemForm({ payGroups = [], payGrades = [], existingItems = [], defa
   const [isActive, setIsActive] = useState(item?.is_active !== false);
   const [error, setError] = useState("");
 
-  // Other items in this pay group an item can be derived from — never itself.
+  // Other items on this pay grade an item can be derived from — never itself.
   const referenceable = existingItems.filter((i) => i.id !== item?.id);
   const isDerived = calcMethod === "percentage_of" || calcMethod === "sum_of";
 
@@ -1317,7 +1306,7 @@ function LineItemForm({ payGroups = [], payGrades = [], existingItems = [], defa
   const submit = (e) => {
     e.preventDefault();
     if (!name.trim()) return setError("Name is required.");
-    if (!payGroupId) return setError("Pick a pay group.");
+    if (!payGradeId) return setError("Pick a pay grade.");
 
     let numeric = 0;
     if (calcMethod === "fixed" || calcMethod === "percentage" || calcMethod === "percentage_of") {
@@ -1337,8 +1326,7 @@ function LineItemForm({ payGroups = [], payGrades = [], existingItems = [], defa
     setError("");
     onSubmit({
       name: name.trim(),
-      pay_group_id: payGroupId,
-      pay_grade_id: payGradeId || null,
+      pay_grade_id: payGradeId,
       item_type: itemType,
       calculation_method: calcMethod,
       value: numeric,
@@ -1362,20 +1350,12 @@ function LineItemForm({ payGroups = [], payGrades = [], existingItems = [], defa
           <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="e.g. Housing Allowance" />
         </div>
         <div>
-          <label className={labelCls}>Pay group</label>
-          <select value={payGroupId} onChange={(e) => setPayGroupId(e.target.value)} className={inputCls}>
+          <label className={labelCls}>Pay grade</label>
+          <select value={payGradeId} onChange={(e) => setPayGradeId(e.target.value)} className={inputCls}>
             <option value="">— Select —</option>
-            {payGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            {payGrades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
         </div>
-      </div>
-      <div>
-        <label className={labelCls}>Pay grade (optional)</label>
-        <select value={payGradeId} onChange={(e) => setPayGradeId(e.target.value)} className={inputCls}>
-          <option value="">All grades in this pay group</option>
-          {payGrades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </select>
-        <p className="mt-1 text-[11px] text-ink-faint">Leave as "All grades" for a group-wide item, or pick one grade so this item only applies to staff on that grade.</p>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -1431,7 +1411,7 @@ function LineItemForm({ payGroups = [], payGrades = [], existingItems = [], defa
         <div>
           <label className={labelCls}>Sum of (pick two or more)</label>
           {referenceable.length === 0 ? (
-            <p className="mt-1 text-xs text-ink-faint">No other line items in this pay group yet — add at least two before creating a sum.</p>
+            <p className="mt-1 text-xs text-ink-faint">No other line items on this pay grade yet — add at least two before creating a sum.</p>
           ) : (
             <div className="mt-1 max-h-40 overflow-y-auto rounded-xl border border-line p-2 space-y-1">
               {referenceable.map((i) => (
