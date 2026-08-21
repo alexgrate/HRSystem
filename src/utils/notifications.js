@@ -15,8 +15,6 @@ export const persistReadSet = (set) => {
   catch { /* storage unavailable — read-state simply won't persist */ }
 };
 
-// resource_type → { iconKey, route, noun }. iconKey is resolved to a real icon
-// by the rendering component (keeps this module icon-library-agnostic).
 const RESOURCE_META = {
   leave_request: { iconKey: "leave", route: "/app/approvals", noun: "Leave request" },
   loan_request: { iconKey: "loan", route: "/app/loans", noun: "Loan" },

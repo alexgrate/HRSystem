@@ -114,6 +114,7 @@ const SidebarInner = ({ isMobile = false, collapsed, onToggleCollapse, onCloseMo
       })}
     </nav>
 
+    
     <div className="border-t border-line-soft p-3">
       <button
         onClick={onSignout}
@@ -142,8 +143,7 @@ const AppLayout = () => {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  // Workflows are fetched once — the badge only counts queues this user is a
-  // designated approver for (same rule that shows the approve buttons).
+
   useEffect(() => {
     let stale = false;
     setupService.getWorkflows()
@@ -152,8 +152,6 @@ const AppLayout = () => {
     return () => { stale = true; };
   }, []);
 
-  // Pending-approvals badge: refreshed on navigation and every 90s, so the
-  // number stays honest while working on other pages.
   useEffect(() => {
     let stale = false;
     const load = async () => {
@@ -255,6 +253,7 @@ const AppLayout = () => {
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <HeaderBell />
+
             <div className="flex items-center gap-2 rounded-full border border-line bg-card py-1 pl-1 pr-2 shadow-sm sm:pr-3">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-2 text-[11px] font-bold text-white">
                 {getInitials(name)}
@@ -266,6 +265,16 @@ const AppLayout = () => {
                 </div>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={handleSignout}
+              aria-label="Sign out"
+              title="Sign out"
+              className="rounded-full border border-red-200 bg-red-50 p-2 text-red-600 shadow-sm transition-colors hover:border-red-600 hover:bg-red-600 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </header>
 

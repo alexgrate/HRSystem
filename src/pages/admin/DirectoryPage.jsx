@@ -21,7 +21,7 @@ import api from "../../services/api";
 import EmployeeDetailsDrawer from "./EmployeeDetailsDrawer";
 
 const TABS = ["Employees", "Offices", "Departments", "Job Titles", "Grades", "Pay Grades", "Pay Groups", "Benefit Levels", "Allowances", "Leave Types"];
-const PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 const StatusBadge = ({ active }) => (
   <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${active ? "bg-emerald-50 text-emerald-700" : "bg-sunken text-ink-muted"}`}>
@@ -209,6 +209,8 @@ const DirectoryPage = () => {
 
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  const [pageSize, setPageSize] = useState(25);
+  const [sortKey, setSortKey] = useState("recent"); // recent | oldest | name
 
   const [statusFilter, setStatusFilter] = useState("ALL"); // employee lifecycle filter
   const [refreshTick, setRefreshTick] = useState(0);
@@ -851,7 +853,12 @@ const DirectoryPage = () => {
             setListData(all);
             setPagination(null);
           } else {
-            const res = await api.get(`/api/users/?page=${page}&limit=${PAGE_SIZE}`);
+            // Server-side sort for recency (works across all pages). "name"
+            // isn't a top-level column, so it stays a client-side sort below.
+            const sortParam =
+              sortKey === "recent" ? "&sortBy=created_at&sortOrder=desc"
+                : sortKey === "oldest" ? "&sortBy=created_at&sortOrder=asc" : "";
+            const res = await api.get(`/api/users/?page=${page}&limit=${pageSize}${sortParam}`);
             if (stale) return;
             setListData(Array.isArray(res) ? res : res.users || []);
             setPagination(Array.isArray(res) ? null : res.pagination || null);
@@ -874,7 +881,7 @@ const DirectoryPage = () => {
       clearTimeout(timer);
     };
 
-  }, [tab, page, refreshTick, employeeSearch, employeeFullRoster]);
+  }, [tab, page, pageSize, sortKey, refreshTick, employeeSearch, employeeFullRoster]);
 
   const empName = (u) => getEmployeeName(u);
   const deptName = (id) => allDepartments.find((d) => d.id === id)?.name || "—";
@@ -896,7 +903,7 @@ const DirectoryPage = () => {
     formatOffice(allOffices.find((o) => o.id === item?.report_location)) ||
     "—";
 
-  const filteredData = listData.filter((item) => {
+  const filteredRows = listData.filter((item) => {
     // Employee lifecycle-status filter (Employees tab only).
     if (tab === "Employees" && statusFilter !== "ALL" && normalizeStatus(item.status) !== statusFilter) {
       return false;
@@ -922,6 +929,15 @@ const DirectoryPage = () => {
       nameMatch || emailMatch || titleMatch || addressMatch || stateMatch ||
       codeMatch || staffIdMatch || levelMatch || locationMatch
     );
+  });
+
+  // Client-side sort over the loaded rows (Employees tab). With a generous page
+  // size this covers the whole roster; the users API doesn't expose a sort param.
+  const filteredData = tab !== "Employees" ? filteredRows : [...filteredRows].sort((a, b) => {
+    if (sortKey === "name") return empName(a).localeCompare(empName(b));
+    const ta = new Date(a?.created_at || 0).getTime();
+    const tb = new Date(b?.created_at || 0).getTime();
+    return sortKey === "oldest" ? ta - tb : tb - ta; // default: most recent first
   });
 
   const totalPages = pagination?.totalPages || 1;
@@ -1154,14 +1170,45 @@ const DirectoryPage = () => {
               ))}
             </select>
           )}
+          {tab === "Employees" && (
+            <select
+              value={sortKey}
+              onChange={(e) => { setSortKey(e.target.value); setPage(1); }}
+              className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand"
+              title="Sort employees"
+            >
+              <option value="recent">Most recent</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">Name A–Z</option>
+            </select>
+          )}
+          {tab === "Employees" && (
+            <select
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+              className="rounded-lg border border-line px-3 py-2 text-sm outline-none focus:border-brand"
+              title="Rows per page"
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>{n} / page</option>
+              ))}
+            </select>
+          )}
         </div>
 
-        <div className="overflow-x-auto">
+        {/* tabIndex makes the scroll area focusable, so ↑ ↓ ← → / PageUp / PageDown /
+            Home / End scroll it with the keyboard — not just the trackpad. */}
+        <div
+          tabIndex={0}
+          role="region"
+          aria-label={`${tab} table — scrollable, use arrow keys`}
+          className="overflow-auto max-h-[calc(100vh-320px)] rounded-b-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+        >
           {loading ? (
             <div className="p-8 text-center text-ink-muted">Retrieving records from database...</div>
           ) : (
             <table className="w-full min-w-[720px] text-sm">
-              <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
+              <thead className="sticky top-0 z-10 bg-sunken text-xs uppercase tracking-wider text-ink-muted">
                 <tr>
                   {tab === "Employees" ? (
                     <>
@@ -1177,21 +1224,21 @@ const DirectoryPage = () => {
                           />
                         </th>
                       )}
-                      <th className="px-4 py-3 text-left font-semibold">Employee</th>
-                      <th className="px-4 py-3 text-left font-semibold">Staff ID</th>
-                      <th className="px-4 py-3 text-left font-semibold">Job Title</th>
-                      <th className="px-4 py-3 text-left font-semibold">Department</th>
-                      <th className="px-4 py-3 text-left font-semibold">Level</th>
-                      <th className="px-4 py-3 text-left font-semibold">Report Location</th>
-                      <th className="px-4 py-3 text-left font-semibold">Status</th>
-                      <th className="px-4 py-3 text-left font-semibold">Base Salary</th>
-                      <th className="px-4 py-3 text-left font-semibold">Email</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Employee</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Staff ID</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Job Title</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Department</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Level</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Report Location</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Status</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Base Salary</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Email</th>
                       <th className="px-4 py-3"></th>
                     </>
                   ) : (
                     <>
                       {activeSetup.columns.map((c) => (
-                        <th key={c.header} className="px-4 py-3 text-left font-semibold">{c.header}</th>
+                        <th key={c.header} className="whitespace-nowrap px-4 py-3 text-left font-semibold">{c.header}</th>
                       ))}
                       <th className="px-4 py-3"></th>
                     </>
@@ -1226,19 +1273,31 @@ const DirectoryPage = () => {
                             />
                           </td>
                         )}
-                        <td className="px-4 py-3 font-semibold text-ink">{empName(item)}</td>
-                        <td className="px-4 py-3 text-ink-muted">{item.staff_id || "—"}</td>
-                        <td className="px-4 py-3 text-ink-muted">{roleTitle(item.job_role_id)}</td>
-                        <td className="px-4 py-3 text-ink-muted">{deptName(item.department_id)}</td>
-                        <td className="px-4 py-3 text-ink-muted">{item.level || "—"}</td>
-                        <td className="px-4 py-3 text-ink-muted">{officeName(item)}</td>
-                        <td className="px-4 py-3">
-                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.cls}`} title={`Lifecycle status: ${statusMeta.label}`}>
+                        <td className="px-4 py-3 align-middle font-semibold text-ink">
+                          <div className="max-w-[180px] truncate" title={empName(item)}>{empName(item)}</div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 align-middle text-ink-muted">{item.staff_id || "—"}</td>
+                        <td className="px-4 py-3 align-middle text-ink-muted">
+                          <div className="max-w-[170px] truncate" title={roleTitle(item.job_role_id)}>{roleTitle(item.job_role_id)}</div>
+                        </td>
+                        <td className="px-4 py-3 align-middle text-ink-muted">
+                          <div className="max-w-[150px] truncate" title={deptName(item.department_id)}>{deptName(item.department_id)}</div>
+                        </td>
+                        <td className="px-4 py-3 align-middle text-ink-muted">
+                          <div className="max-w-[140px] truncate" title={item.level || "—"}>{item.level || "—"}</div>
+                        </td>
+                        <td className="px-4 py-3 align-middle text-ink-muted">
+                          <div className="max-w-[220px] truncate" title={officeName(item)}>{officeName(item)}</div>
+                        </td>
+                        <td className="px-4 py-3 align-middle">
+                          <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.cls}`} title={`Lifecycle status: ${statusMeta.label}`}>
                             {statusMeta.label}
                           </span>
                         </td>
-                        <td className="px-4 py-3">₦{(Number(item.base_salary) || 0).toLocaleString()}</td>
-                        <td className="px-4 py-3 text-ink-muted">{item.email}</td>
+                        <td className="whitespace-nowrap px-4 py-3 align-middle">₦{(Number(item.base_salary) || 0).toLocaleString()}</td>
+                        <td className="px-4 py-3 align-middle text-ink-muted">
+                          <div className="max-w-[200px] truncate" title={item.email}>{item.email}</div>
+                        </td>
                         <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                           {(canReadEmployee || canUpdateEmployee) && (
                             <div className="flex items-center justify-end gap-1">
@@ -1287,7 +1346,9 @@ const DirectoryPage = () => {
                     return (
                       <tr key={item.id || i} className="border-t border-line-soft hover:bg-sunken/70">
                         {activeSetup.columns.map((c) => (
-                          <td key={c.header} className="px-4 py-3 text-ink-muted">{c.render(item)}</td>
+                          <td key={c.header} className="px-4 py-3 align-middle text-ink-muted">
+                            <div className="max-w-[280px] truncate">{c.render(item)}</div>
+                          </td>
                         ))}
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           {canUpd && (
