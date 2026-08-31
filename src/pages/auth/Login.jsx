@@ -114,13 +114,12 @@ const Login = () => {
               Workforce Setup
             </div>
             <h1 className="mt-5 font-serif text-[60px] leading-[0.95] tracking-tight xl:text-[76px] font-bold">
-              <span className="anim anim-reveal block" style={{ animationDelay: "0.2s" }}>The quiet</span>
-              <span className="anim anim-reveal block italic text-accent" style={{ animationDelay: "0.36s" }}>architecture</span>
-              <span className="anim anim-reveal block" style={{ animationDelay: "0.52s" }}>of <span className="italic">people</span>.</span>
+              <span className="anim anim-reveal block" style={{ animationDelay: "0.2s" }}>The smarter way</span>
+              <span className="anim anim-reveal block italic text-accent" style={{ animationDelay: "0.36s" }}>to manage people.</span>
             </h1>
             <p className="anim anim-fade mt-6 max-w-md text-sm leading-relaxed text-white/60" style={{ animationDelay: "0.8s" }}>
-              A dynamic, multi-tenant HRIS for modern African enterprises. Onboarding,
-              payroll setups, leaving schedules, and PITA local tax structured cleanly.
+              A simple, modern HR platform built for growing African businesses.
+              Hire. Onboard. Pay. Manage. Everything your team needs, without the complexity.
             </p>
           </div>
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { createPortal } from "react-dom";
 import {
@@ -452,10 +453,12 @@ const ApprovalsInboxPage = () => {
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
+  // Deep-linking in from a notification email: /app/approvals?tab=leave&requestId=<id>
+  const [searchParams, setSearchParams] = useSearchParams();
   const { config } = useConfig();
   const currency = config?.currency || "NGN";
 
-  const [tab, setTab] = useState(null);
+  const [tab, setTab] = useState(() => searchParams.get("tab") || null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -546,6 +549,22 @@ const ApprovalsInboxPage = () => {
     return () => { stale = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab?.key]);
+
+  // Deep-linking in from a notification email (?requestId=<id>): once that
+  // tab's queue has loaded, open the matching item and drop the param so a
+  // later refresh of this page doesn't keep re-opening it.
+  useEffect(() => {
+    const requestId = searchParams.get("requestId");
+    if (!requestId || items.length === 0) return;
+    const match = items.find((i) => String(i.id) === requestId);
+    if (match) {
+      setOpenItem(match);
+      const next = new URLSearchParams(searchParams);
+      next.delete("requestId");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   // Live-ish queue: re-pull the active tab when the window regains focus, so an
   // approver returning to the tab doesn't act on a stale (already-decided) row.
