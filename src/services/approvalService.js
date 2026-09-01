@@ -4,12 +4,17 @@ const unwrapList = (res) => unwrapListBy(res, ['requests', 'documents']);
 
 export const approvalService = {
 
-  // Approvals inbox needs the organization's requests, not the caller's own.
-  // /all is admin-gated — fall back to the current-user list on 403 so a
-  // non-admin approver still sees something rather than an error.
+  // Approvals inbox needs "everything pending on me", not the caller's own
+  // leave history. /all is HR/admin-gated (LEAVE_REQUEST:manage) and returns
+  // every request org-wide; a plain manager/HOD only has approve/reject, so
+  // on 403 fall back to /pending-for-me, which is scoped to exactly the
+  // requests where they're the resolved current-step approver — the same
+  // resolution the notification emails use. (Previously this fell back to
+  // "my own submitted leave requests", which isn't the same thing at all and
+  // meant non-admin approvers never saw anything to approve here.)
   getPendingLeave: () =>
     api.get('/api/leave-requests/all')
-      .catch(() => api.get('/api/leave-requests/'))
+      .catch(() => api.get('/api/leave-requests/pending-for-me'))
       .then((res) =>
         unwrapList(res).filter((r) => String(r.status || 'pending').toLowerCase().startsWith('pend'))
       ),
