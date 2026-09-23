@@ -45,6 +45,11 @@ export const payrollService = {
   createLineItem: (data) => api.post('/api/payroll-line-items', data),
   updateLineItem: (id, data) => api.put(`/api/payroll-line-items/${id}`, data),
   deleteLineItem: (id) => api.delete(`/api/payroll-line-items/${id}`, { data: {} }),
+  // Bulk create multiple line items for a pay grade. Expects an array of
+  // item objects matching the create payload shape. The backend should
+  // validate and return created items or an error.
+  bulkCreateLineItems: (payGradeId, items) =>
+    api.post('/api/payroll-line-items/bulk', { pay_grade_id: payGradeId, items }),
 
   // Custom columns — one-off, scoped to a single payroll run. "Global"
   // (is_global: true) starts blank for every employee on the run until the

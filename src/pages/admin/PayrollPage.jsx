@@ -1194,7 +1194,16 @@ function LineItemsModal({ payGrades = [], onClose }) {
               <Plus className="h-3.5 w-3.5" /> Add item
             </button>
           )}
+          {canCreate && payGradeId && (
+            <button
+              onClick={() => setBulk(true)}
+              className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-sunken"
+            >
+              <Plus className="h-3.5 w-3.5" /> Bulk upload
+            </button>
+          )}
         </div>
+  const [bulk, setBulk] = useState(false);
 
         {editing && (
           <LineItemForm
@@ -1277,6 +1286,128 @@ function LineItemsModal({ payGrades = [], onClose }) {
               </tbody>
             </table>
           )}
+        </div>
+      </div>
+      {bulk && (
+        <BulkUploadModal
+          payGrades={payGrades}
+          defaultPayGradeId={payGradeId}
+          onClose={() => setBulk(false)}
+          onUploaded={async () => {
+            setBulk(false);
+            await load(payGradeId);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function BulkUploadModal({ payGrades = [], defaultPayGradeId, onClose, onUploaded }) {
+  const toast = useToast();
+  const [file, setFile] = useState(null);
+  const [payGradeId, setPayGradeId] = useState(defaultPayGradeId || "");
+  const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState([]);
+
+  const parseCSV = (text) => {
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) return { items: [] };
+    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const items = [];
+    const errs = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map(c => c.trim());
+      if (cols.length < header.length) {
+        errs.push(`Line ${i+1}: wrong column count`);
+        continue;
+      }
+      const obj = {};
+      for (let j = 0; j < header.length; j++) obj[header[j]] = cols[j];
+      // Basic validation
+      if (!obj.name) { errs.push(`Line ${i+1}: missing name`); continue; }
+      if (!obj.item_type) { errs.push(`Line ${i+1}: missing item_type`); continue; }
+      // normalize fields expected by API
+      items.push({
+        name: obj.name,
+        pay_grade_id: payGradeId,
+        item_type: obj.item_type,
+        calculation_method: obj.calculation_method || 'fixed',
+        value: obj.value ? Number(obj.value) : 0,
+        base_line_item_id: obj.base_line_item_id || null,
+        component_line_item_ids: obj.component_line_item_ids ? obj.component_line_item_ids.split('|').map(x=>x.trim()) : [],
+        description: obj.description || '',
+        is_active: obj.is_active === 'false' ? false : true,
+      });
+    }
+    return { items, errors: errs };
+  };
+
+  const submit = async () => {
+    if (!payGradeId) return toast.error('Pick a pay grade first.');
+    if (!file) return toast.error('Select a CSV file to upload.');
+    setBusy(true);
+    try {
+      const text = await file.text();
+      const { items, errors: parseErrors } = parseCSV(text);
+      if (parseErrors.length) { setErrors(parseErrors); setBusy(false); return; }
+      if (items.length === 0) { toast.error('No items parsed from file.'); setBusy(false); return; }
+      const failures = [];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        try {
+          await payrollService.createLineItem(it);
+        } catch (err) {
+          failures.push({ line: i + 2, message: err?.message || String(err) });
+        }
+      }
+      if (failures.length) {
+        const msgs = failures.map((f) => `Line ${f.line}: ${f.message}`);
+        setErrors(msgs);
+        toast.error(`Uploaded with ${failures.length} error(s).`);
+      } else {
+        toast.success('Bulk upload successful.');
+        onUploaded();
+      }
+    } catch (err) {
+      toast.error(err?.message || 'Bulk upload failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="text-lg font-bold text-ink">Bulk upload line items</h3>
+          <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="mt-4 space-y-4">
+          <div>
+            <label className={labelCls}>Pay grade</label>
+            <select value={payGradeId} onChange={(e) => setPayGradeId(e.target.value)} className={inputCls}>
+              <option value="">— Select pay grade —</option>
+              {payGrades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>CSV file</label>
+            <input type="file" accept="text/csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <p className="text-xs text-ink-faint">Columns: name,item_type,calculation_method,value,base_line_item_id,component_line_item_ids (pipe-separated),description,is_active</p>
+          </div>
+          {errors.length > 0 && (
+            <div className="rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
+              <strong>Parse errors:</strong>
+              <ul className="mt-2 list-disc list-inside">
+                {errors.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+          )}
+          <div className="flex gap-2 justify-end pt-1">
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
+            <button type="button" disabled={busy} onClick={submit} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">{busy ? 'Uploading…' : 'Upload'}</button>
+          </div>
         </div>
       </div>
     </div>
