@@ -25,7 +25,9 @@ const CURRENCIES = ["NGN", "USD", "GBP", "EUR", "GHS", "KES", "ZAR"];
 // (and its computed amount for this employee) — same idea as the existing
 // loan-deduction tooltip, just generalized to named, admin-configured items.
 const lineItemsTooltip = (lineItems, itemType, currency) => {
-  const matches = (Array.isArray(lineItems) ? lineItems : []).filter((li) => li.item_type === itemType);
+  // sum_of rows that merely restate other rows are subtotals — omit them so
+  // nothing appears to be counted twice.
+  const matches = (Array.isArray(lineItems) ? lineItems : []).filter((li) => li.item_type === itemType && !li.is_subtotal);
   if (matches.length === 0) return undefined;
   return matches.map((li) => `${li.name}: ${fmtMoney(li.amount, currency)}`).join("\n");
 };
@@ -528,11 +530,14 @@ const PayrollPage = () => {
                               <td className="px-3 py-2 font-medium text-ink-2">
                                 {l.snapshot?.employee_name || l.employee_name || getEmployeeName(l.employee, null) || staffName(l.employee_id)}
                               </td>
-                              <td className="px-3 py-2 text-right">{fmtMoney(l.base_salary ?? l.base, selectedRun.currency)}</td>
+                              {/* Base salary is the whole fixed pay; the tooltip shows the components it splits into (they sum to it). */}
                               <td
-                                className="px-3 py-2 text-right text-emerald-600"
+                                className="px-3 py-2 text-right"
                                 title={lineItemsTooltip(l.snapshot?.line_items, "remuneration", selectedRun.currency)}
                               >
+                                {fmtMoney(l.base_salary ?? l.base, selectedRun.currency)}
+                              </td>
+                              <td className="px-3 py-2 text-right text-emerald-600" title="Benefit-level allowances paid on top of base salary">
                                 {fmtMoney(l.allowances_total ?? l.allowances, selectedRun.currency)}
                               </td>
                               <td
@@ -1173,7 +1178,7 @@ function LineItemsModal({ payGrades = [], onClose }) {
         <div className="flex items-center justify-between border-b pb-3">
           <div>
             <h3 className="text-lg font-bold text-ink">Payroll line items</h3>
-            <p className="text-xs text-ink-muted">Recurring remuneration/deduction rules, categorized by pay grade — applied automatically to every staff member on that grade, in any pay group.</p>
+            <p className="text-xs text-ink-muted">Recurring remuneration/deduction rules, categorized by pay grade — applied automatically to every staff member on that grade, in any pay group. Remuneration items are the components a staff member's base salary is split into (any part they don't claim is shown as "Balance of base salary"), so they never add to it; deductions come off gross pay.</p>
           </div>
           <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
         </div>

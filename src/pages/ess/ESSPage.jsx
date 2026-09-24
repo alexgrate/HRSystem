@@ -2148,11 +2148,23 @@ function PayslipDrawer({ run, jobTitle = "", onClose }) {
                         {hasAmounts ? (
                             <div className="space-y-2 border-t pt-4">
                                 <div className="text-xs font-semibold uppercase tracking-wider text-brand">Earnings</div>
-                                <Line label="Basic Salary" value={fmtMoney(amounts.base, run.currency)} />
-                                <Line label="Allowances" value={fmtMoney(amounts.allowances, run.currency)} />
-                                {amounts.lineItems.filter((li) => li.item_type === "remuneration").map((li) => (
-                                    <Line key={li.id} label={li.name} value={fmtMoney(li.amount, run.currency)} />
-                                ))}
+                                {amounts.lineItems.some((li) => li.is_component) ? (
+                                    // Current layout: base salary is split into components that sum to it.
+                                    amounts.lineItems.filter((li) => li.is_component).map((li) => (
+                                        <Line key={li.id} label={li.name} value={fmtMoney(li.amount, run.currency)} />
+                                    ))
+                                ) : (
+                                    // Payslips generated before base salary was split into components.
+                                    <>
+                                        <Line label="Basic Salary" value={fmtMoney(amounts.base, run.currency)} />
+                                        {amounts.lineItems.filter((li) => li.item_type === "remuneration").map((li) => (
+                                            <Line key={li.id} label={li.name} value={fmtMoney(li.amount, run.currency)} />
+                                        ))}
+                                    </>
+                                )}
+                                {(Number(amounts.allowances) > 0 || !amounts.lineItems.some((li) => li.is_component)) && (
+                                    <Line label={amounts.lineItems.some((li) => li.is_component) ? "Benefit allowances" : "Allowances"} value={fmtMoney(amounts.allowances, run.currency)} />
+                                )}
                                 {amounts.customColumns.filter((c) => c.item_type === "remuneration").map((c) => (
                                     <Line key={c.id} label={c.name} value={fmtMoney(c.amount, run.currency)} />
                                 ))}
@@ -2165,7 +2177,7 @@ function PayslipDrawer({ run, jobTitle = "", onClose }) {
                                         value={fmtMoney(amounts.loanDeductions, run.currency)}
                                     />
                                 )}
-                                {amounts.lineItems.filter((li) => li.item_type === "deduction").map((li) => (
+                                {amounts.lineItems.filter((li) => li.item_type === "deduction" && !li.is_subtotal).map((li) => (
                                     <Line key={li.id} label={li.name} value={fmtMoney(li.amount, run.currency)} />
                                 ))}
                                 {amounts.customColumns.filter((c) => c.item_type === "deduction").map((c) => (
@@ -2173,7 +2185,7 @@ function PayslipDrawer({ run, jobTitle = "", onClose }) {
                                 ))}
                                 {(() => {
                                     const itemizedDeductions = [...amounts.lineItems, ...amounts.customColumns]
-                                        .filter((li) => li.item_type === "deduction")
+                                        .filter((li) => li.item_type === "deduction" && !li.is_subtotal)
                                         .reduce((sum, li) => sum + (Number(li.amount) || 0), 0);
                                     const otherDeductions = Math.max(0, Number(amounts.deductions || 0) - amounts.loanDeductions - itemizedDeductions);
                                     return otherDeductions > 0 ? <Line label="Other deductions" value={fmtMoney(otherDeductions, run.currency)} /> : null;
