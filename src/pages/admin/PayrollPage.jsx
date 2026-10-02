@@ -1119,6 +1119,7 @@ function LineItemsModal({ payGrades = [], onClose }) {
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null); // null | "new" | item
   const [busy, setBusy] = useState(false);
+  const [bulk, setBulk] = useState(false);
 
   const itemName = (id) => items.find((i) => i.id === id)?.name || "another item";
 
@@ -1208,7 +1209,6 @@ function LineItemsModal({ payGrades = [], onClose }) {
             </button>
           )}
         </div>
-  const [bulk, setBulk] = useState(false);
 
         {editing && (
           <LineItemForm
