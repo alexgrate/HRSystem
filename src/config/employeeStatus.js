@@ -39,6 +39,16 @@ export const ACCESS_REVOKING_STATUSES = [
   EMPLOYEE_STATUS.RETIRED,
 ];
 
+// Statuses that end employment outright (vs. INACTIVE/SUSPENDED, which just
+// revoke access while employment continues) — these are the ones an Exit
+// Date applies to. Mirrors LEAVING_STATUSES in
+// src/modules/constants/employee-status.ts on the backend.
+export const LEAVING_STATUSES = [
+  EMPLOYEE_STATUS.TERMINATED,
+  EMPLOYEE_STATUS.RESIGNED,
+  EMPLOYEE_STATUS.RETIRED,
+];
+
 export const normalizeStatus = (value) => {
   const s = String(value || "").toUpperCase();
   return EMPLOYEE_STATUS_META[s] ? s : EMPLOYEE_STATUS.ACTIVE;
@@ -49,6 +59,9 @@ export const employeeStatusMeta = (value) =>
 
 export const isAccessRevoking = (value) =>
   ACCESS_REVOKING_STATUSES.includes(normalizeStatus(value));
+
+export const isLeavingStatus = (value) =>
+  LEAVING_STATUSES.includes(normalizeStatus(value));
 
 export const STATUS_CONFIRM_COPY = {
   INACTIVE: {
@@ -66,19 +79,19 @@ export const STATUS_CONFIRM_COPY = {
   TERMINATED: {
     title: "Terminate this employee?",
     message:
-      "Employment ends: they immediately lose access, all active sessions are revoked, and login is permanently blocked. Regaining access requires HR. Payroll, leave and audit history are preserved.",
+      "Employment ends on the exit date you set below. They immediately lose access, all active sessions are revoked, and login is permanently blocked. Regaining access requires HR. Payroll, leave and audit history are preserved.",
     confirmLabel: "Terminate",
   },
   RESIGNED: {
     title: "Mark this employee as resigned?",
     message:
-      "Employment ends: the End Date is stamped automatically, they immediately lose access, and all active sessions are revoked. Payroll, leave and audit history are preserved.",
+      "Employment ends on the exit date you set below. They immediately lose access, and all active sessions are revoked. Payroll, leave and audit history are preserved.",
     confirmLabel: "Mark resigned",
   },
   RETIRED: {
     title: "Mark this employee as retired?",
     message:
-      "Employment ends: the End Date is stamped automatically, they immediately lose access, and all active sessions are revoked. Payroll, leave and audit history are preserved.",
+      "Employment ends on the exit date you set below. They immediately lose access, and all active sessions are revoked. Payroll, leave and audit history are preserved.",
     confirmLabel: "Mark retired",
   },
 };

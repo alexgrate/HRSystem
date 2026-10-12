@@ -12,6 +12,7 @@ import {
   employeeStatusMeta,
   normalizeStatus,
   isAccessRevoking,
+  isLeavingStatus,
 } from "../../config/employeeStatus";
 import { setupService } from "../../services/setupService";
 import { orgService } from "../../services/orgService";
@@ -1924,6 +1925,7 @@ function EmployeeEditModal({ employee, isSelf = false, departments = [], jobRole
     phone: employee?.phone || "",
     staff_id: employee?.staff_id || "",
     start_date: dateOnly(employee?.start_date),
+    end_date: dateOnly(employee?.end_date),
     report_location: employee?.report_location || "",
     department_id: employee?.department_id || "",
     job_role_id: employee?.job_role_id || "",
@@ -1957,10 +1959,8 @@ function EmployeeEditModal({ employee, isSelf = false, departments = [], jobRole
       const nullable = (v) => (v === "" || v === undefined ? null : v);
       const payload = {
         phone: nullable(form.phone.trim()),
-        // Admin-managed employment fields. End Date is intentionally NOT sent —
-        // it is lifecycle-driven (stamped on resign/terminate/retire, cleared on
-        // reactivation), never edited by hand. Level and Estimated Gross are
-        // derived server-side and are likewise never sent.
+        // Admin-managed employment fields. Level and Estimated Gross are
+        // derived server-side and are never sent.
         staff_id: nullable(String(form.staff_id).trim()),
         start_date: nullable(form.start_date),
         report_location: nullable(form.report_location),
@@ -1978,6 +1978,19 @@ function EmployeeEditModal({ employee, isSelf = false, departments = [], jobRole
       if (statusChanged) {
         payload.status = form.status;
         if (statusReason.trim()) payload.status_change_reason = statusReason.trim();
+        // Moving to Terminated/Resigned/Retired: send the chosen exit date
+        // (defaults to today, but is editable below — e.g. to backdate to the
+        // actual last working day). For every other status change the
+        // backend auto-stamps or clears end_date on its own, so end_date is
+        // deliberately left out of the payload.
+        if (isLeavingStatus(form.status)) {
+          // Never send a blank/null exit date for a leaving status — fall
+          // back to today if the field was somehow left empty.
+          payload.end_date = form.end_date || dateOnly(new Date());
+        }
+      } else if (isLeavingStatus(form.status) && form.end_date && form.end_date !== dateOnly(employee?.end_date)) {
+        // Already exited: correcting the recorded exit date on its own.
+        payload.end_date = form.end_date;
       }
       const saved = await api.put(`/api/users/${employee.id}`, payload);
       const appliedStatus = normalizeStatus(saved?.status ?? form.status);
@@ -2067,7 +2080,7 @@ function EmployeeEditModal({ employee, isSelf = false, departments = [], jobRole
               <input
                 value={employee?.end_date ? dateOnly(employee.end_date) : "While employed"}
                 disabled
-                title="Set automatically when the employee resigns, is terminated, or retires; cleared on reactivation."
+                title="Set when the employee resigns, is terminated, or retires (edit it via Exit date below); cleared on reactivation."
                 className={`${inputCls} bg-sunken text-ink-muted cursor-not-allowed`}
               />
             </div>
@@ -2141,7 +2154,16 @@ function EmployeeEditModal({ employee, isSelf = false, departments = [], jobRole
               <label className={labelCls}>Account status</label>
               <select
                 value={form.status}
-                onChange={(e) => set("status", e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((p) => ({
+                    ...p,
+                    status: next,
+                    // Default the exit date to today the first time the status
+                    // moves to a leaving one — still fully editable below.
+                    end_date: isLeavingStatus(next) && !p.end_date ? dateOnly(new Date()) : p.end_date,
+                  }));
+                }}
                 disabled={!statusEditable}
                 aria-disabled={!statusEditable}
                 title={statusEditable ? undefined : "You cannot change your own account status."}
@@ -2162,6 +2184,22 @@ function EmployeeEditModal({ employee, isSelf = false, departments = [], jobRole
                 </p>
               )}
             </div>
+            {isLeavingStatus(form.status) && (
+              <div>
+                <label className={labelCls}>Exit date</label>
+                <input
+                  type="date"
+                  value={form.end_date}
+                  min={form.start_date || undefined}
+                  onChange={(e) => set("end_date", e.target.value)}
+                  className={inputCls}
+                  required
+                />
+                <p className="mt-1 text-[11px] text-ink-faint">
+                  Employment end date — defaults to today, but can be backdated to the actual last working day or set for a future date.
+                </p>
+              </div>
+            )}
             {statusChanged && isAccessRevoking(form.status) && (
               <div className="sm:col-span-2">
                 <label className={labelCls}>Reason (optional)</label>

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { Plus, X, AlertCircle, Check, CheckCircle2, Settings2 } from "lucide-react";
+import { Plus, X, AlertCircle, Check, CheckCircle2, Settings2, Trash2 } from "lucide-react";
 import { payrollService, findApprovalRequestId } from "../../services/payrollService";
 import { setupService } from "../../services/setupService";
 import { usePermissions } from "../../context/PermissionContext";
@@ -94,6 +94,7 @@ const PayrollPage = () => {
   const canCreate = can("PAYROLL_RUN", "create");
   const canUpdate = can("PAYROLL_RUN", "update");
   const canManage = can("PAYROLL_RUN", "manage");
+  const canDeleteRun = can("PAYROLL_RUN", "delete");
   // Adjustments are a SEPARATE backend RBAC resource (PAYROLL_ADJUSTMENT), not
   // PAYROLL_RUN, with its own create/submit/approve/reject actions.
   const canAdjCreate = can("PAYROLL_ADJUSTMENT", "create");
@@ -234,6 +235,30 @@ const PayrollPage = () => {
     } catch (err) {
       console.error("[Payroll] Action failed:", err);
       toast.error(err?.message || `${action.label} failed.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteRun = async () => {
+    if (!selectedRun) return;
+    const ok = await confirm({
+      title: "Delete this payroll run?",
+      message: `This permanently deletes the ${MONTHS[(selectedRun.month || 1) - 1]} ${selectedRun.year} · ${payGroupName(selectedRun.pay_group)} run, along with its line items, adjustments and notifications. This cannot be undone.`,
+      confirmLabel: "Delete run",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await payrollService.deleteRun(selectedRun.id);
+      toast.success("Payroll run deleted.");
+      setSelectedId(null);
+      setDetailState({ forId: null, data: null });
+      await loadRuns();
+    } catch (err) {
+      console.error("[Payroll] Delete run failed:", err);
+      toast.error(err?.message || "Couldn't delete the payroll run.");
     } finally {
       setBusy(false);
     }
@@ -442,6 +467,15 @@ const PayrollPage = () => {
                       <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
                         <Check className="h-3.5 w-3.5" /> Fully distributed
                       </span>
+                    )}
+                    {canDeleteRun && ["draft", "preview_generated"].includes(selectedRun.status) && (
+                      <button
+                        disabled={busy || detailLoading}
+                        onClick={() => handleDeleteRun()}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Delete run
+                      </button>
                     )}
                   </div>
                 </div>

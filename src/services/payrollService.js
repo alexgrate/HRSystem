@@ -5,6 +5,9 @@ export const payrollService = {
 
   listRuns: () => api.get('/api/payroll/runs').then((res) => unwrapList(res, ['runs'])),
   getRun: (runId) => api.get(`/api/payroll/runs/${runId}`),
+  // Only draft/preview-generated runs — once a run has entered the approval
+  // pipeline the backend rejects this.
+  deleteRun: (runId) => api.delete(`/api/payroll/runs/${runId}`, { data: {} }),
 
   // Employee self-service payslips: server-scoped to the caller's own lines
   // (only distributed runs). Use this from ESS instead of reading whole runs —
