@@ -138,7 +138,7 @@ const GhostBtn = ({ children, className = "", ...props }) => (
 /* ============================================================== main page */
 
 const AppraisalPage = () => {
-  const { isAdmin, ready } = usePermissions();
+  const { isAdmin: isSuperAdmin, can, ready } = usePermissions();
   const { user } = useAuth();
   const myEmployeeId = user?.id || null;
 
@@ -198,12 +198,16 @@ const AppraisalPage = () => {
   );
   const isDeptHead = headedDeptIds.length > 0;
   const isManager = managedEmployeeIds.length > 0;
-  // Opening cycles, calling up reviews, and lifecycle transitions are admin-only.
-  // Department heads reach the Cycles tab too, but only to manage their own
-  // department's per-cycle indicator selection (backend allows head or admin).
-  const canViewCycles = isAdmin || isDeptHead;
+  // Appraisal administration (opening cycles, lifecycle transitions, call-ups,
+  // sessions, reports) belongs to Administrators AND to any role granted
+  // "Manage" on Appraisal Cycle in Access Management — mirroring the
+  // backend's hasAppraisalAccess. Department heads reach the Cycles tab too,
+  // but only to manage their own department's per-cycle indicator selection.
+  const isAdmin = isSuperAdmin || can("APPRAISAL_CYCLE", "manage");
+  const isReviewAdmin = isAdmin || can("APPRAISAL_REVIEW", "manage");
+  const canViewCycles = isAdmin || isDeptHead || can("APPRAISAL_CYCLE", "read");
   const canManageIndicators = isAdmin || isDeptHead;
-  const canReviewTeam = isAdmin || isDeptHead || isManager || isDesignatedReviewer;
+  const canReviewTeam = isReviewAdmin || isDeptHead || isManager || isDesignatedReviewer;
 
   // Employee-facing views (My Targets / My Reviews) live on the Self-Service
   // page under the Appraisals tab; this page is the management console.
@@ -213,9 +217,9 @@ const AppraisalPage = () => {
         { key: "team-reviews", label: "Team Reviews", Icon: Users, show: canReviewTeam },
         { key: "cycles", label: "Cycles", Icon: Repeat, show: canViewCycles },
         { key: "indicators", label: "Indicators", Icon: Gauge, show: canManageIndicators },
-        { key: "reports", label: "Reports", Icon: BarChart3, show: isAdmin },
+        { key: "reports", label: "Reports", Icon: BarChart3, show: isReviewAdmin },
       ].filter((t) => t.show),
-    [canReviewTeam, canViewCycles, canManageIndicators, isAdmin]
+    [canReviewTeam, canViewCycles, canManageIndicators, isReviewAdmin]
   );
 
   const [tab, setTab] = useState("team-reviews");
@@ -272,10 +276,10 @@ const AppraisalPage = () => {
       <Header />
       <TabPills layoutId="appraisal-tab" active={activeTab} onChange={setTab} tabs={tabs} />
 
-      {activeTab === "team-reviews" && canReviewTeam && <TeamReviewsSection {...shared} />}
+      {activeTab === "team-reviews" && canReviewTeam && <TeamReviewsSection {...shared} isAdmin={isReviewAdmin} />}
       {activeTab === "cycles" && canViewCycles && <CyclesSection {...shared} />}
       {activeTab === "indicators" && canManageIndicators && <IndicatorsSection {...shared} />}
-      {activeTab === "reports" && isAdmin && <ReportsSection {...shared} />}
+      {activeTab === "reports" && isReviewAdmin && <ReportsSection {...shared} isAdmin={isReviewAdmin} />}
     </div>
   );
 };

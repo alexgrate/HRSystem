@@ -58,9 +58,48 @@ function OrgFormFields({ form, setForm, disabled = {} }) {
   );
 }
 
+// Without this, a newly created org has zero employees — nobody with
+// Administrator rights exists to even log in and set it up (see
+// OrganizationService.createOrganization, which seeds the standard roles
+// AND assigns this first user the Administrator role when initial_user is
+// present). Deliberately not optional-by-omission in the UI: an org created
+// without one is a dead end until someone fills this in later another way.
+function InitialAdminFields({ admin, setAdmin }) {
+  const set = (k, v) => setAdmin((a) => ({ ...a, [k]: v }));
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div>
+        <label className={labelCls}>First name</label>
+        <input className={inputCls} value={admin.firstName || ""} onChange={(e) => set("firstName", e.target.value)} required />
+      </div>
+      <div>
+        <label className={labelCls}>Last name</label>
+        <input className={inputCls} value={admin.lastName || ""} onChange={(e) => set("lastName", e.target.value)} required />
+      </div>
+      <div className="sm:col-span-2">
+        <label className={labelCls}>Admin email</label>
+        <input type="email" className={inputCls} value={admin.email || ""} onChange={(e) => set("email", e.target.value)} required />
+      </div>
+      <div className="sm:col-span-2">
+        <label className={labelCls}>Temporary password</label>
+        <input
+          type="text"
+          className={inputCls}
+          value={admin.password || ""}
+          onChange={(e) => set("password", e.target.value)}
+          placeholder="Shared with the admin to sign in and change"
+          minLength={6}
+          required
+        />
+      </div>
+    </div>
+  );
+}
+
 function CreateOrganizationModal({ onClose, onCreated }) {
   const toast = useToast();
   const [form, setForm] = useState({});
+  const [admin, setAdmin] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -71,11 +110,18 @@ function CreateOrganizationModal({ onClose, onCreated }) {
       setError("Name and slug are required.");
       return;
     }
+    if (!admin.firstName?.trim() || !admin.lastName?.trim() || !admin.email?.trim() || !admin.password?.trim()) {
+      setError("The first admin's name, email and a temporary password are required.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
-      await platformOrganizationService.create(form);
-      toast.success("Organization created.");
+      await platformOrganizationService.create({
+        ...form,
+        initial_user: { ...admin, isAdmin: true },
+      });
+      toast.success("Organization and first admin created.");
       onCreated();
       onClose();
     } catch (err) {
@@ -92,9 +138,13 @@ function CreateOrganizationModal({ onClose, onCreated }) {
           <h3 className="text-lg font-bold text-ink">New organization</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
         </div>
-        <form onSubmit={submit} className="mt-4 space-y-4">
+        <form onSubmit={submit} className="mt-4 space-y-5">
           {error && <div className="rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">{error}</div>}
           <OrgFormFields form={form} setForm={setForm} />
+          <div className="border-t border-line-soft pt-4">
+            <div className={`${labelCls} mb-2`}>First admin</div>
+            <InitialAdminFields admin={admin} setAdmin={setAdmin} />
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="h-11 rounded-xl border border-line px-4 text-sm font-semibold text-ink-muted">Cancel</button>
             <button type="submit" disabled={saving} className="h-11 rounded-xl bg-brand px-4 text-sm font-semibold text-white disabled:opacity-60">

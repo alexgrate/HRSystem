@@ -72,6 +72,18 @@ export const AuthProvider = ({ children }) => {
     return login(email, password, remember);
   };
 
+  // Completes an SSO sign-in: /sso-callback lands here with a `token`
+  // already minted by the backend (the authorization-code exchange and
+  // session creation already happened server-side), so this just persists
+  // it the same way a password login would and loads the profile.
+  const loginWithToken = async (token) => {
+    if (typeof token !== 'string' || !token) {
+      throw new Error('No sign-in token was provided.');
+    }
+    setToken(token, true);
+    return refreshUser();
+  };
+
   const logout = async () => {
     try {
       await api.post('/api/auth/logout');
@@ -85,7 +97,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, forceLogin, logout, setUser, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, forceLogin, loginWithToken, logout, setUser, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

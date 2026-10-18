@@ -1,22 +1,83 @@
-import { useState, useRef } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, Mail, Lock, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { ArrowRight, Mail, Lock, AlertCircle, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useConfirm } from "../../components/ui/Notifications";
-import { isSessionConflict } from "../../services/authService";
+import { isSessionConflict, authService } from "../../services/authService";
+import api from "../../services/api";
 import logoImg from "../../assets/dashIcon.jpg"
 
 const Login = () => {
   const { login, forceLogin } = useAuth();
   const confirm = useConfirm();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // This organization's own choice of sign-in method (see
+  // OrganizationSettingsPage → Authentication): password by default, or
+  // redirect to whatever OpenID Connect provider the org's admin configured.
+  const [loginMethod, setLoginMethod] = useState(null); // { auth_type, auth_url? }
+  const [resolvingMethod, setResolvingMethod] = useState(true);
+  const [ssoRedirecting, setSsoRedirecting] = useState(false);
+  const revokeToken = searchParams.get("revoke_token");
+
+  useEffect(() => {
+    const ssoError = searchParams.get("sso_error");
+    if (ssoError) setError(ssoError);
+
+    let mounted = true;
+    (async () => {
+      try {
+        const method = await authService.getLoginMethod();
+        if (mounted) setLoginMethod(method);
+      } catch (err) {
+        console.error("[Login] Failed to resolve sign-in method:", err);
+        if (mounted) setLoginMethod({ auth_type: "password" });
+      } finally {
+        if (mounted) setResolvingMethod(false);
+      }
+    })();
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const continueWithSso = async () => {
+    setError("");
+    setSsoRedirecting(true);
+    try {
+      const method = await authService.getLoginMethod();
+      if (method?.auth_type === "oidc" && method?.auth_url) {
+        window.location.href = method.auth_url;
+      } else {
+        setError("Single sign-on is not available right now. Please try again shortly.");
+        setSsoRedirecting(false);
+      }
+    } catch (err) {
+      setError(err?.message || "Could not start single sign-on.");
+      setSsoRedirecting(false);
+    }
+  };
+
+  // The identity provider sign-in succeeded, but this account already has an
+  // active session elsewhere — the callback hands back a short-lived revoke
+  // token (same mechanism as the password-login conflict) instead of a
+  // regular session token. Spend it, then retry the SSO redirect.
+  const retrySsoAfterRevoke = async () => {
+    try {
+      await api.post("/api/auth/logout-all", { token: revokeToken });
+    } catch (err) {
+      console.warn("[Login] Session revoke failed:", err?.message || err);
+    }
+    navigate("/login", { replace: true });
+    continueWithSso();
+  };
 
   // Cursor glow on the brand panel — CSS variables via ref, no re-renders.
   const brandRef = useRef(null);
@@ -163,6 +224,37 @@ const Login = () => {
               </div>
             )}
 
+            {resolvingMethod ? (
+              <div className="flex items-center justify-center py-10">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+              </div>
+            ) : loginMethod?.auth_type === "oidc" ? (
+              <div className="space-y-4 pt-2">
+                <motion.button
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.99 }}
+                  type="button"
+                  disabled={ssoRedirecting}
+                  onClick={revokeToken ? retrySsoAfterRevoke : continueWithSso}
+                  className="group flex w-full items-center justify-between rounded-full bg-brand px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-white shadow-md hover:bg-brand-dark disabled:opacity-75"
+                >
+                  <span className="flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4" />
+                    {ssoRedirecting
+                      ? "Redirecting…"
+                      : revokeToken
+                        ? "Sign out other session & continue"
+                        : "Continue with single sign-on"}
+                  </span>
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 transition-transform group-hover:translate-x-0.5">
+                    <ArrowRight className="h-4 w-4" />
+                  </span>
+                </motion.button>
+                <p className="text-center text-[11px] text-ink-faint">
+                  You'll be redirected to your organization's identity provider to sign in.
+                </p>
+              </div>
+            ) : (
             <form onSubmit={submit} className="space-y-6 pt-2">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">Work email</label>
@@ -227,6 +319,16 @@ const Login = () => {
                 </span>
               </motion.button>
             </form>
+            )}
+
+            {!resolvingMethod && loginMethod?.auth_type !== "oidc" && (
+              <p className="text-center text-xs text-ink-muted">
+                New to dash?{" "}
+                <Link to="/signup" className="font-semibold text-brand hover:underline">
+                  Create your organization's workspace
+                </Link>
+              </p>
+            )}
           </div>
 
           <div className="text-center text-[9px] uppercase tracking-[0.24em] text-ink-faint shrink-0 mt-8">

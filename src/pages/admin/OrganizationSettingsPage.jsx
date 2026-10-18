@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Building2, Palette, Globe, Save, Upload, X, ImageIcon, RotateCcw, CheckCircle2, ClipboardCheck } from "lucide-react";
+import { Building2, Palette, Globe, Save, Upload, X, ImageIcon, RotateCcw, CheckCircle2, ClipboardCheck, ShieldCheck, Copy, Check } from "lucide-react";
 import { configService } from "../../services/configService";
+import { authConfigService } from "../../services/authConfigService";
 import { useConfig } from "../../context/ConfigContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { useToast, useConfirm } from "../../components/ui/Notifications";
@@ -224,6 +225,272 @@ function Color({ id, label, value, onChange, disabled }) {
   );
 }
 
+const AUTH_DEFAULTS = {
+  auth_type: "password",
+  issuer_url: "",
+  client_id: "",
+  client_secret: "", // always blank on load — write-only, never echoed back
+  scope: "openid profile email",
+  jit_provisioning_enabled: false,
+};
+
+// Separate backend resource (/api/auth-config) from the branding config
+// above, with its own save — client_secret must never ride along with an
+// unrelated branding save, and the two forms shouldn't share a dirty state.
+function AuthenticationSection({ canEdit }) {
+  const toast = useToast();
+  const [form, setForm] = useState(AUTH_DEFAULTS);
+  const [baseline, setBaseline] = useState(AUTH_DEFAULTS);
+  const [hasClientSecret, setHasClientSecret] = useState(false);
+  const [redirectUri, setRedirectUri] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const cfg = await authConfigService.get();
+        if (!mounted || !cfg) return;
+        const next = {
+          auth_type: cfg.auth_type || "password",
+          issuer_url: cfg.issuer_url || "",
+          client_id: cfg.client_id || "",
+          client_secret: "",
+          scope: cfg.scope || AUTH_DEFAULTS.scope,
+          jit_provisioning_enabled: Boolean(cfg.jit_provisioning_enabled),
+        };
+        setForm(next);
+        setBaseline(next);
+        setHasClientSecret(Boolean(cfg.has_client_secret));
+        setRedirectUri(cfg.redirect_uri || "");
+      } catch (err) {
+        console.error("[OrgSettings] auth config load failed:", err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const dirty = useMemo(
+    () => Object.keys(AUTH_DEFAULTS).some((k) => form[k] !== baseline[k]),
+    [form, baseline],
+  );
+
+  const invalidReason = useMemo(() => {
+    if (form.auth_type !== "oidc") return "";
+    if (!form.issuer_url.trim()) return "Issuer URL is required for single sign-on.";
+    try {
+      if (new URL(form.issuer_url.trim()).protocol !== "https:") {
+        return "Issuer URL must start with https://.";
+      }
+    } catch {
+      return "Issuer URL must be a valid https URL.";
+    }
+    if (!form.client_id.trim()) return "Client ID is required for single sign-on.";
+    if (!hasClientSecret && !form.client_secret.trim()) {
+      return "Client secret is required the first time you enable single sign-on.";
+    }
+    return "";
+  }, [form, hasClientSecret]);
+
+  const copyRedirectUri = async () => {
+    try {
+      await navigator.clipboard.writeText(redirectUri);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Couldn't copy — select and copy the URL manually.");
+    }
+  };
+
+  const handleSave = async () => {
+    if (!canEdit || !dirty) return;
+    if (invalidReason) {
+      toast.error(invalidReason);
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        auth_type: form.auth_type,
+        issuer_url: form.auth_type === "oidc" ? form.issuer_url.trim() : null,
+        client_id: form.auth_type === "oidc" ? form.client_id.trim() : null,
+        // Blank means "keep the existing secret" — only sent when non-empty.
+        client_secret: form.client_secret.trim() || undefined,
+        scope: form.auth_type === "oidc" ? (form.scope.trim() || AUTH_DEFAULTS.scope) : undefined,
+        jit_provisioning_enabled: form.auth_type === "oidc" ? form.jit_provisioning_enabled : false,
+      };
+      const saved = await authConfigService.update(payload);
+      const next = {
+        auth_type: saved?.auth_type || form.auth_type,
+        issuer_url: saved?.issuer_url || "",
+        client_id: saved?.client_id || "",
+        client_secret: "",
+        scope: saved?.scope || AUTH_DEFAULTS.scope,
+        jit_provisioning_enabled: Boolean(saved?.jit_provisioning_enabled),
+      };
+      setForm(next);
+      setBaseline(next);
+      setHasClientSecret(Boolean(saved?.has_client_secret));
+      setRedirectUri(saved?.redirect_uri || redirectUri);
+      toast.success("Sign-in method saved.");
+    } catch (err) {
+      console.error("[OrgSettings] auth config save failed:", err);
+      toast.error(err?.message || "Failed to save sign-in method.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <section className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm sm:p-6">
+        <div className="h-20 animate-pulse rounded-xl bg-sunken" />
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm sm:p-6">
+      <div className="flex items-center gap-3 border-b border-line-soft pb-4">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+          <ShieldCheck className="h-[18px] w-[18px]" aria-hidden="true" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="font-semibold text-ink">Authentication</h2>
+          <p className="text-xs text-ink-muted">How everyone in this organization signs in.</p>
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {[
+            { value: "password", label: "Password", hint: "Staff sign in with their email and password." },
+            { value: "oidc", label: "Single sign-on (OIDC)", hint: "Staff sign in via your own identity provider — OCI IAM, Azure AD, Okta, Keycloak, or any other OpenID Connect provider." },
+          ].map((opt) => (
+            <label
+              key={opt.value}
+              className={`flex cursor-pointer flex-col gap-1 rounded-xl border p-3.5 transition-colors ${
+                form.auth_type === opt.value ? "border-brand bg-brand/5" : "border-line hover:border-line-soft"
+              } ${!canEdit ? "cursor-not-allowed opacity-60" : ""}`}
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <input
+                  type="radio"
+                  name="auth_type"
+                  value={opt.value}
+                  checked={form.auth_type === opt.value}
+                  onChange={() => set("auth_type", opt.value)}
+                  disabled={!canEdit}
+                  className="h-3.5 w-3.5 text-brand focus:ring-brand"
+                />
+                {opt.label}
+              </span>
+              <span className="text-[11px] text-ink-faint">{opt.hint}</span>
+            </label>
+          ))}
+        </div>
+
+        {form.auth_type === "oidc" && (
+          <div className="grid gap-4 border-t border-line-soft pt-5 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className={labelCls}>Redirect URI</label>
+              <div className="mt-1.5 flex items-center gap-2">
+                <input readOnly value={redirectUri} className={`${inputCls} mt-0 font-mono text-xs text-ink-muted`} />
+                <button
+                  type="button"
+                  onClick={copyRedirectUri}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line text-ink-muted hover:bg-sunken"
+                  aria-label="Copy redirect URI"
+                >
+                  {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                </button>
+              </div>
+              <p className={hintCls}>Register this as the redirect/callback URI in your identity provider's app.</p>
+            </div>
+
+            <Text
+              id="sso-issuer" label="Issuer URL" value={form.issuer_url} onChange={(v) => set("issuer_url", v)}
+              disabled={!canEdit} placeholder="https://idcs-xxxx.identity.oraclecloud.com" full
+              hint="Your identity provider's base URL — its authorize/token endpoints are discovered automatically from its OpenID Connect configuration."
+            />
+            <Text
+              id="sso-client-id" label="Client ID" value={form.client_id} onChange={(v) => set("client_id", v)}
+              disabled={!canEdit} placeholder="Client ID from your IdP app registration"
+            />
+            <div>
+              <label htmlFor="sso-client-secret" className={labelCls}>Client secret</label>
+              <input
+                id="sso-client-secret"
+                type="password"
+                value={form.client_secret}
+                onChange={(e) => set("client_secret", e.target.value)}
+                disabled={!canEdit}
+                placeholder={hasClientSecret ? "Leave blank to keep the current secret" : "Client secret from your IdP app registration"}
+                className={inputCls}
+                autoComplete="new-password"
+              />
+              <p className={hintCls}>{hasClientSecret ? "A secret is already saved — only fill this in to replace it." : "Required the first time you enable single sign-on."}</p>
+            </div>
+            <Text
+              id="sso-scope" label="Scope" value={form.scope} onChange={(v) => set("scope", v)}
+              disabled={!canEdit} hint="Space-separated OAuth2 scopes requested from the provider." full
+            />
+            <label
+              className={`sm:col-span-2 flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 transition-colors ${
+                form.jit_provisioning_enabled ? "border-brand bg-brand/5" : "border-line hover:border-line-soft"
+              } ${!canEdit ? "cursor-not-allowed opacity-60" : ""}`}
+            >
+              <input
+                type="checkbox"
+                checked={form.jit_provisioning_enabled}
+                onChange={(e) => set("jit_provisioning_enabled", e.target.checked)}
+                disabled={!canEdit}
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand focus:ring-brand"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-ink">Automatically create accounts on first sign-in (JIT provisioning)</span>
+                <span className="mt-0.5 block text-[11px] text-ink-faint">
+                  Off by default — anyone who can authenticate against your identity provider but has no account here is rejected and told to contact an admin.
+                  Turning this on creates their account automatically on first sign-in instead (no role assigned — an admin still needs to set their job role/permissions afterward).
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+
+        {canEdit && (
+          <div className="flex items-center justify-end gap-3 border-t border-line-soft pt-4">
+            {dirty && (
+              <button
+                type="button"
+                onClick={() => { setForm(baseline); }}
+                disabled={saving}
+                className="text-sm font-semibold text-ink-muted hover:text-ink disabled:opacity-50"
+              >
+                Discard
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-brand to-brand-2 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-60"
+            >
+              <Save className="h-4 w-4" aria-hidden="true" /> {saving ? "Saving…" : "Save sign-in method"}
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 const OrganizationSettingsPage = () => {
   const { config, setConfig, refresh, previewTheme, previewBrand } = useConfig();
   const { can } = usePermissions();
@@ -365,6 +632,7 @@ const OrganizationSettingsPage = () => {
   const orgName = form.organization_name?.trim();
 
   return (
+    <>
     <form onSubmit={handleSave} className="space-y-6 pb-24">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
@@ -479,6 +747,10 @@ const OrganizationSettingsPage = () => {
         )}
       </AnimatePresence>
     </form>
+    <div className="mt-6">
+      <AuthenticationSection canEdit={canEdit} />
+    </div>
+    </>
   );
 };
 

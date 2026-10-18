@@ -39,9 +39,18 @@ api.interceptors.request.use(
         }
         // Deployed backends resolve the org from the hostname; a localhost
         // backend can't, so VITE_ORG_SLUG pins the real org in local dev.
+        // Sent both ways (header + query param) — the header is what every
+        // other environment relies on, and the query param mirrors it so
+        // the same request is also visible/testable directly in the
+        // Network tab or by pasting the URL into Swagger/a browser.
         const orgSlug = import.meta.env.VITE_ORG_SLUG;
-        if (orgSlug && !config.headers['x-organization-slug']) {
-            config.headers['x-organization-slug'] = orgSlug;
+        if (orgSlug) {
+            if (!config.headers['x-organization-slug']) {
+                config.headers['x-organization-slug'] = orgSlug;
+            }
+            // if (!config.params?.organization_slug) {
+            //     config.params = { ...config.params, organization_slug: orgSlug };
+            // }
         }
         return config;
     },

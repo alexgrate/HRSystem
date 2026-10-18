@@ -10,7 +10,9 @@ import PlatformProtectedRoute from "./PlatformProtectedRoute";
 import AppLayout from "../components/layout/AppLayout";
 import PlatformLayout from "../components/layout/PlatformLayout";
 import Login from "../pages/auth/Login";
+import SignUp from "../pages/auth/SignUp";
 import ForgotPassword from "../pages/auth/ForgotPassword";
+import SsoCallback from "../pages/auth/SsoCallback";
 import PlatformLoginPage from "../pages/platform/PlatformLoginPage";
 import { RESOURCES, pathFor } from "../config/resources";
 
@@ -48,7 +50,9 @@ function OrgApp() {
         <ConfigProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<SignUp />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/sso-callback" element={<SsoCallback />} />
 
             <Route
               path="/app"
