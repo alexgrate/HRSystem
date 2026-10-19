@@ -244,11 +244,18 @@ function AuthenticationSection({ canEdit }) {
   const [hasClientSecret, setHasClientSecret] = useState(false);
   const [redirectUri, setRedirectUri] = useState("");
   const [loading, setLoading] = useState(true);
+  // A failed load must never fall through to the editable form: it would show
+  // the password defaults and an empty redirect URI, and saving would
+  // overwrite the organization's real sign-in configuration.
+  const [loadError, setLoadError] = useState(null);
+  const [reloadTick, setReloadTick] = useState(0);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
+    setLoadError(null);
     (async () => {
       try {
         const cfg = await authConfigService.get();
@@ -267,12 +274,22 @@ function AuthenticationSection({ canEdit }) {
         setRedirectUri(cfg.redirect_uri || "");
       } catch (err) {
         console.error("[OrgSettings] auth config load failed:", err);
+        if (mounted) {
+          const status = err?.httpStatus;
+          setLoadError(
+            status === 404
+              ? "The server doesn't have the sign-in settings feature yet (404 on /api/auth-config). Deploy the latest backend build, then retry."
+              : status === 403
+                ? "You don't have permission to view the sign-in settings (needs System Configuration → Read)."
+                : err?.error?.message || err?.message || "Couldn't load the sign-in settings from the server.",
+          );
+        }
       } finally {
         if (mounted) setLoading(false);
       }
     })();
     return () => { mounted = false; };
-  }, []);
+  }, [reloadTick]);
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -351,6 +368,23 @@ function AuthenticationSection({ canEdit }) {
     return (
       <section className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm sm:p-6">
         <div className="h-20 animate-pulse rounded-xl bg-sunken" />
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="rounded-2xl border border-line/80 bg-card p-5 shadow-sm sm:p-6" role="alert">
+        <h2 className="font-semibold text-ink">Authentication</h2>
+        <p className="mt-2 text-sm text-red-600">{loadError}</p>
+        <p className="mt-1 text-xs text-ink-muted">Nothing can be changed here until the current settings load, so the existing configuration isn't overwritten.</p>
+        <button
+          type="button"
+          onClick={() => setReloadTick((t) => t + 1)}
+          className="mt-3 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:bg-sunken"
+        >
+          Retry
+        </button>
       </section>
     );
   }
