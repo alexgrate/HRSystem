@@ -27,6 +27,7 @@ import {
   appraisalCycleLifecycleService,
   appraisalReviewService,
   appraisalSessionService,
+  appraisalTeamService,
 } from "../../services/appraisalService";
 import { administrationPeriodService } from "../../services/administrationPeriodService";
 import { setupService } from "../../services/setupService";
@@ -138,31 +139,40 @@ const GhostBtn = ({ children, className = "", ...props }) => (
 /* ============================================================== main page */
 
 const AppraisalPage = () => {
-  const { isAdmin: isSuperAdmin, can, ready } = usePermissions();
+  const { ready } = usePermissions();
   const { user } = useAuth();
   const myEmployeeId = user?.id || null;
 
-  const [departments, setDepartments] = useState([]);
+  const [context, setContext] = useState(null);
+  const [contextError, setContextError] = useState(null);
   const [directory, setDirectory] = useState([]);
   const [cycles, setCycles] = useState([]);
   const [currentCycle, setCurrentCycle] = useState(null);
   const [bootLoading, setBootLoading] = useState(true);
+  const [bootTick, setBootTick] = useState(0);
 
   useEffect(() => {
     let stale = false;
+    setBootLoading(true);
+    setContextError(null);
     (async () => {
       try {
-        const [depts, dir, cycle, cycleList] = await Promise.all([
-          setupService.getDepartments().then((r) => (Array.isArray(r) ? r : r?.departments || [])).catch(() => []),
-          orgService.listDirectory().catch(() => []),
+        // Access comes from the server (relationships + role permissions), not
+        // from what this user happens to be allowed to read. The directory is
+        // only used for display names/pickers and is optional.
+        const [ctx, cycle, cycleList, dir] = await Promise.all([
+          appraisalTeamService.context(),
           appraisalCycleService.current().catch(() => null),
           appraisalCycleService.list().catch(() => []),
+          orgService.listDirectory().catch(() => []),
         ]);
         if (stale) return;
-        setDepartments(Array.isArray(depts) ? depts : []);
-        setDirectory(Array.isArray(dir) ? dir : []);
+        setContext(ctx || null);
         setCurrentCycle(cycle || null);
         setCycles(Array.isArray(cycleList) ? cycleList : []);
+        setDirectory(Array.isArray(dir) ? dir : []);
+      } catch (err) {
+        if (!stale) setContextError(errMsg(err, "Couldn't load your appraisal access."));
       } finally {
         if (!stale) setBootLoading(false);
       }
@@ -170,59 +180,30 @@ const AppraisalPage = () => {
     return () => {
       stale = true;
     };
-  }, []);
+  }, [bootTick]);
 
-  const headedDeptIds = useMemo(
-    () => departments.filter((d) => d.head_employee_id && d.head_employee_id === myEmployeeId).map((d) => d.id),
-    [departments, myEmployeeId]
-  );
-  // Direct reports (line-manager relationship) — the backend authorizes a
-  // manager to review these even without a department-head role.
-  const managedEmployeeIds = useMemo(
-    () => directory.filter((p) => p.manager_id && p.manager_id === myEmployeeId).map((p) => p.id),
-    [directory, myEmployeeId]
-  );
-  // A user designated as the reviewer for some active/reviewing cycle
-  // (reviewer_assignment_type 'hr'/'specific_employee') is backend-authorized to
-  // review even if they manage no one and head no department — so they need the
-  // Team Reviews tab too.
-  const isDesignatedReviewer = useMemo(
-    () =>
-      cycles.some(
-        (c) =>
-          c.reviewer_employee_id &&
-          c.reviewer_employee_id === myEmployeeId &&
-          (c.status === "active" || c.status === "reviewing")
-      ),
-    [cycles, myEmployeeId]
-  );
-  const isDeptHead = headedDeptIds.length > 0;
-  const isManager = managedEmployeeIds.length > 0;
-  // Appraisal administration (opening cycles, lifecycle transitions, call-ups,
-  // sessions, reports) belongs to Administrators AND to any role granted
-  // "Manage" on Appraisal Cycle in Access Management — mirroring the
-  // backend's hasAppraisalAccess. Department heads reach the Cycles tab too,
-  // but only to manage their own department's per-cycle indicator selection.
-  const isAdmin = isSuperAdmin || can("APPRAISAL_CYCLE", "manage");
-  const isReviewAdmin = isAdmin || can("APPRAISAL_REVIEW", "manage");
-  const canViewCycles = isAdmin || isDeptHead || can("APPRAISAL_CYCLE", "read");
-  const canManageIndicators = isAdmin || isDeptHead;
-  const canReviewTeam = isReviewAdmin || isDeptHead || isManager || isDesignatedReviewer;
+  const caps = context?.capabilities || {};
+  const isAdmin = !!caps.is_admin;
+  const headedDeptIds = useMemo(() => (context?.headed_departments || []).map((d) => d.id), [context]);
 
-  // Employee-facing views (My Targets / My Reviews) live on the Self-Service
-  // page under the Appraisals tab; this page is the management console.
   const tabs = useMemo(
     () =>
       [
-        { key: "team-reviews", label: "Team Reviews", Icon: Users, show: canReviewTeam },
-        { key: "cycles", label: "Cycles", Icon: Repeat, show: canViewCycles },
-        { key: "indicators", label: "Indicators", Icon: Gauge, show: canManageIndicators },
-        { key: "reports", label: "Reports", Icon: BarChart3, show: isReviewAdmin },
+        { key: "team", label: "My Team", Icon: Users, show: !!context?.can_view_team },
+        { key: "reviews", label: "Reviews", Icon: ClipboardCheck, show: !!context?.can_view_team },
+        { key: "cycles", label: "Cycles", Icon: Repeat, show: !!context?.can_view_cycles },
+        {
+          key: "indicators",
+          label: "Indicator Library",
+          Icon: Gauge,
+          show: !!(caps.can_manage_indicator_library || context?.is_department_head),
+        },
+        { key: "reports", label: "Reports", Icon: BarChart3, show: !!caps.can_view_reports },
       ].filter((t) => t.show),
-    [canReviewTeam, canViewCycles, canManageIndicators, isReviewAdmin]
+    [context, caps.can_manage_indicator_library, caps.can_view_reports]
   );
 
-  const [tab, setTab] = useState("team-reviews");
+  const [tab, setTab] = useState("team");
   // Derive the effective tab so capability changes can't strand us on a hidden
   // tab, without a setState-in-effect round-trip.
   const activeTab = tabs.some((t) => t.key === tab) ? tab : tabs[0]?.key || null;
@@ -233,6 +214,17 @@ const AppraisalPage = () => {
         <Header />
         <Card>
           <Loading label="Loading appraisals…" />
+        </Card>
+      </div>
+    );
+  }
+
+  if (contextError) {
+    return (
+      <div className="space-y-6">
+        <Header />
+        <Card>
+          <ErrorState message={contextError} onRetry={() => setBootTick((t) => t + 1)} />
         </Card>
       </div>
     );
@@ -253,7 +245,8 @@ const AppraisalPage = () => {
               <Link to="/app/self-service" className="font-semibold text-brand hover:underline">
                 Self-Service Portal → Appraisals
               </Link>
-              . This page is for reviewers, department heads, and administrators.
+              . This page is for line managers, heads of department, reviewers, and anyone given appraisal access in Access
+              Management.
             </p>
           </div>
         </Card>
@@ -264,40 +257,589 @@ const AppraisalPage = () => {
   const shared = {
     myEmployeeId,
     isAdmin,
-    departments,
+    context,
+    caps,
     directory,
+    cycles,
     headedDeptIds,
-    managedEmployeeIds,
     currentCycle,
   };
 
   return (
     <div className="space-y-6">
-      <Header />
+      <Header context={context} />
+      <CurrentCycleBanner cycle={currentCycle} />
       <TabPills layoutId="appraisal-tab" active={activeTab} onChange={setTab} tabs={tabs} />
 
-      {activeTab === "team-reviews" && canReviewTeam && <TeamReviewsSection {...shared} isAdmin={isReviewAdmin} />}
-      {activeTab === "cycles" && canViewCycles && <CyclesSection {...shared} />}
-      {activeTab === "indicators" && canManageIndicators && <IndicatorsSection {...shared} />}
-      {activeTab === "reports" && isReviewAdmin && <ReportsSection {...shared} isAdmin={isReviewAdmin} />}
+      {activeTab === "team" && <MyTeamSection {...shared} />}
+      {activeTab === "reviews" && <TeamReviewsSection {...shared} isAdmin={!!caps.can_view_all_reviews || isAdmin} />}
+      {activeTab === "cycles" && <CyclesSection {...shared} />}
+      {activeTab === "indicators" && <IndicatorsSection {...shared} />}
+      {activeTab === "reports" && <ReportsSection {...shared} />}
     </div>
   );
 };
 
-const Header = () => (
-  <div>
-    <div className="text-xs font-semibold uppercase tracking-wider text-brand">Performance</div>
-    <h1 className="mt-1 text-2xl font-bold tracking-tight text-ink sm:text-3xl">Appraisals</h1>
-    <p className="mt-1 text-sm text-ink-muted">
-      Run appraisal cycles, manage indicators and target locks, oversee team reviews, and report on results.
-      Employees set targets and rate themselves under Self-Service → Appraisals.
-    </p>
-  </div>
-);
+const Header = ({ context = null }) => {
+  const chips = [];
+  if (context?.capabilities?.is_admin) chips.push("Appraisal administrator");
+  else if (context?.capabilities?.can_view_all_reviews) chips.push("Review administrator");
+  (context?.headed_departments || []).forEach((d) => chips.push(`Head of ${d.name}`));
+  if (context?.direct_report_count) {
+    chips.push(`Line manager · ${context.direct_report_count} direct report${context.direct_report_count === 1 ? "" : "s"}`);
+  }
+  if ((context?.designated_reviewer_cycle_ids || []).length) chips.push("Designated reviewer");
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-brand">Performance</div>
+        <h1 className="mt-1 text-2xl font-bold tracking-tight text-ink sm:text-3xl">Appraisals</h1>
+        <p className="mt-1 max-w-2xl text-sm text-ink-muted">
+          Follow your team's indicators and targets, run reviews, and manage appraisal cycles. Your own appraisal is under{" "}
+          <Link to="/app/self-service" className="font-semibold text-brand hover:underline">Self-Service → Appraisals</Link>.
+        </p>
+      </div>
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map((c) => (
+            <span key={c} className="rounded-full border border-brand/20 bg-brand/5 px-2.5 py-1 text-[11px] font-semibold text-brand">
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ===================================================== current cycle banner */
+
+const CYCLE_STEPS = [
+  { key: "draft", label: "Draft", hint: "Cycle created; not yet open to staff." },
+  { key: "active", label: "Indicators & targets", hint: "Indicators are chosen and staff set their targets." },
+  { key: "reviewing", label: "Reviews", hint: "Reviews are called up and scored." },
+  { key: "closed", label: "Closed", hint: "Final ratings are computed; no more changes." },
+];
+
+function CycleStepper({ status }) {
+  const idx = Math.max(0, CYCLE_STEPS.findIndex((s) => s.key === (status === "archived" ? "closed" : status || "draft")));
+  return (
+    <ol className="flex flex-wrap items-center gap-x-1 gap-y-2">
+      {CYCLE_STEPS.map((s, i) => {
+        const done = i < idx;
+        const current = i === idx;
+        return (
+          <li key={s.key} className="flex items-center gap-1" title={s.hint}>
+            <span
+              className={`flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ${
+                current ? "bg-brand text-white" : done ? "bg-emerald-50 text-emerald-700" : "bg-sunken text-ink-faint"
+              }`}
+            >
+              {done ? <Check className="h-3 w-3" /> : <span className="tabular-nums">{i + 1}</span>}
+              {s.label}
+            </span>
+            {i < CYCLE_STEPS.length - 1 && <ChevronRight className="h-3.5 w-3.5 text-ink-ghost" />}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function CurrentCycleBanner({ cycle }) {
+  if (!cycle) {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line bg-card px-5 py-4 text-sm text-ink-muted">
+        <Repeat className="h-5 w-5 shrink-0 text-ink-ghost" />
+        No appraisal cycle is running for the current administration period.
+      </div>
+    );
+  }
+  const step = CYCLE_STEPS.find((s) => s.key === (cycle.status === "archived" ? "closed" : cycle.status)) || CYCLE_STEPS[0];
+  return (
+    <div className="rounded-2xl border border-line/80 bg-gradient-to-br from-brand/5 to-card px-5 py-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">Current cycle</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+            <span className="truncate text-base font-bold text-ink">{cycle.name || "Appraisal cycle"}</span>
+            <span className="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-ink-muted">
+              {cycle.workflow_type === "bottom_up" ? "Staff propose indicators" : "Department sets indicators"}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-ink-muted">{step.hint}</p>
+        </div>
+        <CycleStepper status={cycle.status} />
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================ My Team */
+
+const STAGE_META = {
+  no_indicators: { label: "No indicators", cls: "bg-sunken text-ink-muted" },
+  awaiting_proposal_review: { label: "Proposals to review", cls: "bg-amber-50 text-amber-700" },
+  setting_targets: { label: "Setting targets", cls: "bg-amber-50 text-amber-700" },
+  targets_submitted: { label: "Targets submitted", cls: "bg-sky-50 text-sky-700" },
+  in_review: { label: "In review", cls: "bg-violet-50 text-violet-700" },
+  reviewed: { label: "Reviewed", cls: "bg-emerald-50 text-emerald-700" },
+};
+
+const RELATIONSHIP_LABEL = {
+  direct_report: "Direct report",
+  department: "My department",
+  organization: "Organization",
+};
+
+const initialsOf = (name) =>
+  String(name || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase())
+    .join("") || "?";
+
+function ProgressBar({ value, total }) {
+  const p = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0;
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-sunken">
+        <div className={`h-full rounded-full ${p >= 100 ? "bg-emerald-500" : "bg-brand"}`} style={{ width: `${p}%` }} />
+      </div>
+      <span className="text-xs tabular-nums text-ink-muted">
+        {value}/{total}
+      </span>
+    </div>
+  );
+}
+
+function MyTeamSection({ context, caps, cycles = [], currentCycle, myEmployeeId, isAdmin }) {
+  const toast = useToast();
+  const usableCycles = useMemo(() => cycles.filter((c) => c.status !== "archived"), [cycles]);
+  const [cycleId, setCycleId] = useState(currentCycle?.id || usableCycles[0]?.id || "");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [q, setQ] = useState("");
+  const [rel, setRel] = useState("all");
+  const [stage, setStage] = useState("all");
+  const [openEmployeeId, setOpenEmployeeId] = useState(null);
+  const [callUpFor, setCallUpFor] = useState(null);
+  const [reviewId, setReviewId] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!cycleId) {
+      setData(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await appraisalTeamService.team(cycleId));
+    } catch (err) {
+      setError(errMsg(err, "Failed to load your team."));
+    } finally {
+      setLoading(false);
+    }
+  }, [cycleId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const members = useMemo(() => data?.members || [], [data]);
+  const cycle = data?.cycle || usableCycles.find((c) => c.id === cycleId) || null;
+  const canCallUp = !!cycle && (cycle.status === "active" || cycle.status === "reviewing");
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return members.filter((m) => {
+      if (rel !== "all" && m.relationship !== rel) return false;
+      if (stage !== "all" && m.stage !== stage) return false;
+      if (!needle) return true;
+      return [m.name, m.email, m.department_name, m.job_role_title].some((v) => String(v || "").toLowerCase().includes(needle));
+    });
+  }, [members, q, rel, stage]);
+
+  const stats = useMemo(() => {
+    const count = (fn) => members.filter(fn).length;
+    return {
+      total: members.length,
+      withIndicators: count((m) => m.indicators.accepted > 0),
+      proposals: members.reduce((s, m) => s + m.indicators.pending_proposals, 0),
+      submitted: count((m) => ["targets_submitted", "in_review", "reviewed"].includes(m.stage)),
+      reviewed: count((m) => m.stage === "reviewed"),
+    };
+  }, [members]);
+
+  const relationshipOptions = useMemo(() => Array.from(new Set(members.map((m) => m.relationship))), [members]);
+
+  if (usableCycles.length === 0) {
+    return (
+      <Card>
+        <EmptyState Icon={Repeat} title="No appraisal cycles yet" hint="Once an administrator opens a cycle, your team's indicators and targets will appear here." />
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Metric label="People you oversee" value={stats.total} />
+        <Metric label="Have indicators" value={`${stats.withIndicators}/${stats.total}`} />
+        <Metric label="Proposals to review" value={stats.proposals} />
+        <Metric label="Targets submitted" value={`${stats.submitted}/${stats.total}`} />
+        <Metric label="Reviewed" value={`${stats.reviewed}/${stats.total}`} />
+      </div>
+
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-4">
+          <div>
+            <h2 className="text-sm font-bold text-ink">My Team</h2>
+            <p className="text-xs text-ink-muted">
+              {isAdmin || caps?.can_view_all_reviews
+                ? "Everyone in the organization — open a person to see their indicators, targets and reviews."
+                : "Your direct reports and the people in departments you head — open a person to see their indicators, targets and reviews."}
+            </p>
+          </div>
+          <select className={`${inputCls} max-w-xs`} value={cycleId} onChange={(e) => setCycleId(e.target.value)} aria-label="Appraisal cycle">
+            {usableCycles.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name || `Cycle ${c.id.slice(0, 8)}`} · {(c.status || "draft").replace(/^\w/, (m) => m.toUpperCase())}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-5 py-3">
+          <input
+            className={`${inputCls} max-w-xs`}
+            placeholder="Search name, department, role…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            aria-label="Search team"
+          />
+          {relationshipOptions.length > 1 && (
+            <select className={`${inputCls} max-w-[11rem]`} value={rel} onChange={(e) => setRel(e.target.value)} aria-label="Relationship">
+              <option value="all">Everyone</option>
+              {relationshipOptions.map((r) => (
+                <option key={r} value={r}>{RELATIONSHIP_LABEL[r]}</option>
+              ))}
+            </select>
+          )}
+          <select className={`${inputCls} max-w-[12rem]`} value={stage} onChange={(e) => setStage(e.target.value)} aria-label="Progress">
+            <option value="all">Any progress</option>
+            {Object.entries(STAGE_META).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </select>
+          <span className="ml-auto text-xs text-ink-faint">
+            {filtered.length} of {members.length}
+          </span>
+        </div>
+
+        {loading ? (
+          <Loading label="Loading your team…" />
+        ) : error ? (
+          <ErrorState message={error} onRetry={load} />
+        ) : members.length === 0 ? (
+          <EmptyState
+            Icon={Users}
+            title="Nobody to show for this cycle"
+            hint="You'll see people here once someone reports to you as their line manager, you're set as head of a department, or you're given appraisal access in Access Management."
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState Icon={Users} title="No one matches these filters" />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px] text-sm">
+              <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
+                <tr>
+                  <th className="px-5 py-3 text-left font-semibold">Employee</th>
+                  <th className="px-4 py-3 text-left font-semibold">Indicators</th>
+                  <th className="px-4 py-3 text-left font-semibold">Targets submitted</th>
+                  <th className="px-4 py-3 text-left font-semibold">Progress</th>
+                  <th className="px-4 py-3 text-left font-semibold">Review</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((m) => {
+                  const st = STAGE_META[m.stage] || STAGE_META.no_indicators;
+                  return (
+                    <tr key={m.id} className="cursor-pointer border-t border-line-soft hover:bg-sunken/40" onClick={() => setOpenEmployeeId(m.id)}>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand/10 text-[11px] font-bold text-brand">
+                            {initialsOf(m.name)}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="truncate font-semibold text-ink">{m.name}</div>
+                            <div className="truncate text-xs text-ink-faint">
+                              {[m.job_role_title, m.department_name].filter(Boolean).join(" · ") || m.email}
+                            </div>
+                          </div>
+                          {m.relationship !== "organization" && (
+                            <span className="hidden shrink-0 rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-ink-muted sm:inline">
+                              {RELATIONSHIP_LABEL[m.relationship]}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-ink">{m.indicators.accepted}</div>
+                        {m.indicators.pending_proposals > 0 && (
+                          <div className="text-[11px] font-semibold text-amber-600">+{m.indicators.pending_proposals} proposed</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <ProgressBar value={m.targets.submitted} total={m.indicators.accepted} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${st.cls}`}>{st.label}</span>
+                      </td>
+                      <td className="px-4 py-3 text-ink-muted">
+                        {m.review ? (
+                          <div>
+                            <StatusChip status={m.review.status} />
+                            {m.review.overall_rating != null && (
+                              <div className="mt-1 text-xs font-semibold text-ink">{pct(m.review.overall_rating)}</div>
+                            )}
+                          </div>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-end gap-1.5">
+                          {m.review ? (
+                            <GhostBtn onClick={() => setReviewId(m.review.id)}>Open review</GhostBtn>
+                          ) : canCallUp && m.targets.submitted > 0 ? (
+                            <GhostBtn onClick={() => setCallUpFor(m)} className="border-brand/30 text-brand hover:bg-brand/5">
+                              Call up review
+                            </GhostBtn>
+                          ) : null}
+                          <GhostBtn onClick={() => setOpenEmployeeId(m.id)}>
+                            View <ChevronRight className="h-3.5 w-3.5" />
+                          </GhostBtn>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {openEmployeeId && cycleId && (
+        <EmployeeAppraisalDrawer
+          cycleId={cycleId}
+          employeeId={openEmployeeId}
+          onClose={() => setOpenEmployeeId(null)}
+          onOpenReview={(id) => setReviewId(id)}
+          onCallUp={canCallUp ? (emp) => setCallUpFor(members.find((m) => m.id === emp.id) || { id: emp.id, name: emp.name }) : null}
+        />
+      )}
+
+      {callUpFor && (
+        <CallUpModal
+          isAdmin={isAdmin}
+          myEmployeeId={myEmployeeId}
+          context={context}
+          defaultCycle={cycle}
+          presetEmployee={callUpFor}
+          onClose={() => setCallUpFor(null)}
+          onDone={(newId) => {
+            setCallUpFor(null);
+            load();
+            if (newId) setReviewId(newId);
+          }}
+          onToast={toast}
+        />
+      )}
+
+      {reviewId && <ReviewDetailModal reviewId={reviewId} editable onClose={() => setReviewId(null)} onChanged={load} />}
+    </div>
+  );
+}
+
+const SCOPE_LABEL = { department: "Department", job_role: "Job role", personal: "Personal" };
+
+function EmployeeAppraisalDrawer({ cycleId, employeeId, onClose, onOpenReview, onCallUp }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await appraisalTeamService.employeeOverview(cycleId, employeeId));
+    } catch (err) {
+      setError(errMsg(err, "Couldn't load this person's appraisal."));
+    } finally {
+      setLoading(false);
+    }
+  }, [cycleId, employeeId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const indicators = data?.indicators || [];
+  const accepted = indicators.filter((i) => i.status !== "proposed" && i.status !== "rejected");
+  const totalWeight = accepted.reduce((s, i) => s + (Number(i.weight) || 0), 0);
+  const submitted = accepted.filter((i) => i.target?.status === "submitted").length;
+  const emp = data?.employee;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-sm" onMouseDown={onClose}>
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label="Employee appraisal"
+        className="flex h-full w-full max-w-2xl flex-col bg-card shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-line-soft px-6 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand/10 text-sm font-bold text-brand">
+              {initialsOf(emp?.name)}
+            </span>
+            <div className="min-w-0">
+              <h3 className="truncate text-base font-bold text-ink">{emp?.name || "Loading…"}</h3>
+              <p className="truncate text-xs text-ink-muted">
+                {[emp?.job_role_title, emp?.department_name].filter(Boolean).join(" · ") || emp?.email || ""}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-ink-faint hover:bg-sunken hover:text-ink" aria-label="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          {loading ? (
+            <Loading label="Loading appraisal…" />
+          ) : error ? (
+            <ErrorState message={error} onRetry={load} />
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <Metric label="Indicators" value={accepted.length} />
+                <Metric label="Targets submitted" value={`${submitted}/${accepted.length}`} />
+                <Metric label="Total weight" value={fmtNum(totalWeight)} />
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <StatusChip status={data.locks.indicators_locked ? "locked" : "unlocked"} label={data.locks.indicators_locked ? "Indicators locked" : "Indicators open"} />
+                <StatusChip status={data.locks.targets_locked ? "locked" : "unlocked"} label={data.locks.targets_locked ? "Targets locked" : "Targets open"} />
+                {emp?.is_direct_report && <StatusChip status="accepted" label="Your direct report" />}
+              </div>
+
+              <section>
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-faint">Indicators &amp; targets</h4>
+                {indicators.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-line p-6 text-center text-xs text-ink-muted">
+                    No indicators apply to this person in this cycle yet.
+                  </div>
+                ) : (
+                  <ul className="space-y-2">
+                    {indicators.map((i) => {
+                      const t = i.target;
+                      return (
+                        <li key={i.selection_id} className="rounded-xl border border-line-soft bg-card p-3.5">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-semibold text-ink">{i.name}</div>
+                              {i.description && <p className="mt-0.5 text-xs text-ink-muted">{i.description}</p>}
+                            </div>
+                            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                              <span className="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-ink-muted">{SCOPE_LABEL[i.scope]}</span>
+                              <span className="rounded-full bg-sunken px-2 py-0.5 text-[10px] font-semibold text-ink-muted">Weight {fmtNum(i.weight)}</span>
+                              {(i.status === "proposed" || i.status === "rejected") && <StatusChip status={i.status} />}
+                            </div>
+                          </div>
+                          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sunken/50 px-3 py-2">
+                            {t ? (
+                              <>
+                                <div className="text-sm">
+                                  <span className="text-ink-muted">Target: </span>
+                                  <span className="font-semibold text-ink">
+                                    {fmtNum(t.target_value)}
+                                    {i.measurement_unit ? ` ${i.measurement_unit}` : ""}
+                                  </span>
+                                  {t.target_description && <span className="text-ink-muted"> — {t.target_description}</span>}
+                                </div>
+                                <StatusChip status={t.status} />
+                              </>
+                            ) : (
+                              <span className="text-xs text-ink-faint">
+                                {i.status === "proposed" ? "Proposal awaiting a decision from the head of department" : "No target set yet"}
+                              </span>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-ink-faint">Reviews</h4>
+                  {onCallUp && submitted > 0 && (data.reviews || []).length === 0 && (
+                    <PrimaryBtn onClick={() => onCallUp(emp)}>
+                      <Plus className="h-4 w-4" /> Call up review
+                    </PrimaryBtn>
+                  )}
+                </div>
+                {(data.reviews || []).length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-line p-5 text-center text-xs text-ink-muted">
+                    {submitted > 0 ? "No review yet — call one up when you're ready." : "A review can be called up once targets are submitted."}
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-line-soft rounded-xl border border-line-soft">
+                    {data.reviews.map((r) => (
+                      <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <StatusChip status={r.status} />
+                          {r.session_type === "final" && (
+                            <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand">Final</span>
+                          )}
+                          {r.overall_rating != null && <span className="text-sm font-semibold text-ink">{pct(r.overall_rating)}</span>}
+                        </div>
+                        <GhostBtn onClick={() => onOpenReview(r.id)}>
+                          {r.status === "in_progress" ? "Score" : "Open"} <ChevronRight className="h-3.5 w-3.5" />
+                        </GhostBtn>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}
 
 /* ============================================================ Team Reviews */
 
-function TeamReviewsSection({ myEmployeeId, isAdmin, headedDeptIds, managedEmployeeIds = [], currentCycle }) {
+function TeamReviewsSection({ myEmployeeId, isAdmin, context, currentCycle }) {
   const toast = useToast();
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -331,8 +873,10 @@ function TeamReviewsSection({ myEmployeeId, isAdmin, headedDeptIds, managedEmplo
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-4">
           <div>
-            <h2 className="text-sm font-bold text-ink">Team Reviews</h2>
-            <p className="text-xs text-ink-muted">Call up, score, and complete reviews for your team.</p>
+            <h2 className="text-sm font-bold text-ink">Reviews</h2>
+            <p className="text-xs text-ink-muted">
+              {isAdmin ? "Every review in the organization." : "Reviews where you are the reviewer."} Open one to score each indicator and complete it.
+            </p>
           </div>
           <PrimaryBtn onClick={() => setCallUpOpen(true)}>
             <Plus className="h-4 w-4" /> Call up review
@@ -344,7 +888,7 @@ function TeamReviewsSection({ myEmployeeId, isAdmin, headedDeptIds, managedEmplo
         ) : error ? (
           <ErrorState message={error} onRetry={load} />
         ) : reviews.length === 0 ? (
-          <EmptyState Icon={Users} title="No reviews yet" hint="Call up a review for an employee who has submitted their targets for the current cycle." />
+          <EmptyState Icon={Users} title="No reviews yet" hint="Call up a review from My Team once someone has submitted their targets, or use the button above." />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
@@ -392,8 +936,7 @@ function TeamReviewsSection({ myEmployeeId, isAdmin, headedDeptIds, managedEmplo
         <CallUpModal
           isAdmin={isAdmin}
           myEmployeeId={myEmployeeId}
-          headedDeptIds={headedDeptIds}
-          managedEmployeeIds={managedEmployeeIds}
+          context={context}
           defaultCycle={currentCycle}
           onClose={() => setCallUpOpen(false)}
           onDone={(newId) => {
@@ -410,36 +953,58 @@ function TeamReviewsSection({ myEmployeeId, isAdmin, headedDeptIds, managedEmplo
   );
 }
 
-function CallUpModal({ isAdmin, myEmployeeId, headedDeptIds, managedEmployeeIds = [], defaultCycle, onClose, onDone, onToast }) {
+function CallUpModal({ isAdmin, myEmployeeId, context, defaultCycle, presetEmployee = null, onClose, onDone, onToast }) {
   const [cycles, setCycles] = useState([]);
-  const [dir, setDir] = useState([]);
   const [cycleId, setCycleId] = useState(
     defaultCycle && (defaultCycle.status === "active" || defaultCycle.status === "reviewing") ? defaultCycle.id : ""
   );
-  const [employeeId, setEmployeeId] = useState("");
+  const [employeeId, setEmployeeId] = useState(presetEmployee?.id || "");
+  const [team, setTeam] = useState([]);
+  const [teamLoading, setTeamLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let stale = false;
-    (async () => {
-      try {
-        const [cyc, people] = await Promise.all([
-          appraisalCycleService.list().catch(() => []),
-          orgService.listDirectory().catch(() => []),
-        ]);
-        if (stale) return;
-        setCycles(Array.isArray(cyc) ? cyc : []);
-        setDir(Array.isArray(people) ? people : []);
-      } finally {
+    appraisalCycleService
+      .list()
+      .catch(() => [])
+      .then((cyc) => {
+        if (!stale) setCycles(Array.isArray(cyc) ? cyc : []);
+      })
+      .finally(() => {
         if (!stale) setLoading(false);
-      }
-    })();
+      });
     return () => {
       stale = true;
     };
   }, []);
+
+  // The server decides who this user oversees in the chosen cycle (direct
+  // reports, their departments, or everyone for admins/designated reviewers).
+  useEffect(() => {
+    if (!cycleId) {
+      setTeam([]);
+      return;
+    }
+    let stale = false;
+    setTeamLoading(true);
+    appraisalTeamService
+      .team(cycleId)
+      .then((res) => {
+        if (!stale) setTeam(res?.members || []);
+      })
+      .catch(() => {
+        if (!stale) setTeam([]);
+      })
+      .finally(() => {
+        if (!stale) setTeamLoading(false);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [cycleId]);
 
   // Only cycles that actually accept call-ups are selectable (backend rejects
   // draft/closed/archived).
@@ -449,23 +1014,22 @@ function CallUpModal({ isAdmin, myEmployeeId, headedDeptIds, managedEmployeeIds 
   );
   const selectedCycle = useMemo(() => cycles.find((c) => c.id === cycleId) || null, [cycles, cycleId]);
 
-  // Eligible employees mirror the backend's assertConfiguredReviewer for the
-  // chosen cycle's reviewer_assignment_type — so we never offer a call-up the
-  // backend would reject, nor hide one it permits.
+  // Mirror the backend's assertConfiguredReviewer for the cycle's reviewer
+  // assignment, so we never offer a call-up it would reject.
   const employees = useMemo(() => {
-    const people = dir.filter((p) => p.id !== myEmployeeId); // never self
-    if (isAdmin) return people;
-    if (!selectedCycle) return []; // pick a cycle first — eligibility depends on it
+    const people = team.filter((p) => p.id !== myEmployeeId);
+    if (isAdmin || context?.capabilities?.can_view_all_reviews) return people;
+    if (!selectedCycle) return [];
     const type = selectedCycle.reviewer_assignment_type || "relationship";
-    const heads = new Set(headedDeptIds);
-    const reports = new Set(managedEmployeeIds);
-    if (type === "manager") return people.filter((p) => reports.has(p.id));
+    const heads = new Set((context?.headed_departments || []).map((d) => d.id));
+    if (type === "manager") return people.filter((p) => p.manager_id === myEmployeeId);
     if (type === "department_head") return people.filter((p) => heads.has(p.department_id));
     if (type === "specific_employee" || type === "hr")
       return selectedCycle.reviewer_employee_id === myEmployeeId ? people : [];
-    // relationship (default): manager OR department head
-    return people.filter((p) => heads.has(p.department_id) || reports.has(p.id));
-  }, [dir, isAdmin, myEmployeeId, selectedCycle, headedDeptIds, managedEmployeeIds]);
+    return people; // relationship: anyone you oversee
+  }, [team, isAdmin, context, myEmployeeId, selectedCycle]);
+
+  const chosen = employees.find((p) => p.id === employeeId) || null;
 
   const submit = async () => {
     setError(null);
@@ -486,7 +1050,11 @@ function CallUpModal({ isAdmin, myEmployeeId, headedDeptIds, managedEmployeeIds 
   };
 
   return (
-    <Modal title="Call up a review" subtitle="Snapshots the employee's submitted targets into a new review." onClose={onClose}>
+    <Modal
+      title={presetEmployee?.name ? `Call up a review for ${presetEmployee.name}` : "Call up a review"}
+      subtitle="Snapshots the employee's submitted targets into a new review you can then score."
+      onClose={onClose}
+    >
       {error ? <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div> : null}
       {loading ? (
         <Loading label="Loading…" />
@@ -498,7 +1066,7 @@ function CallUpModal({ isAdmin, myEmployeeId, headedDeptIds, managedEmployeeIds 
               <option value="">Select a cycle…</option>
               {selectableCycles.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name || fmtDate(c.created_at)} {c.indicators_locked ? "" : "(unlocked)"}
+                  {c.name || fmtDate(c.created_at)}
                 </option>
               ))}
             </select>
@@ -508,25 +1076,36 @@ function CallUpModal({ isAdmin, myEmployeeId, headedDeptIds, managedEmployeeIds 
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-ink-muted">Employee</label>
-            <select className={inputCls} value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} disabled={!isAdmin && !cycleId}>
-              <option value="">{!isAdmin && !cycleId ? "Select a cycle first…" : "Select an employee…"}</option>
+            <select
+              className={inputCls}
+              value={employeeId}
+              onChange={(e) => setEmployeeId(e.target.value)}
+              disabled={!cycleId || teamLoading}
+            >
+              <option value="">{!cycleId ? "Select a cycle first…" : teamLoading ? "Loading your team…" : "Select an employee…"}</option>
               {employees.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {getEmployeeName(p, p.email || p.id)}
+                  {p.name}
+                  {p.department_name ? ` — ${p.department_name}` : ""}
+                  {p.targets?.submitted ? "" : " (no submitted targets)"}
                 </option>
               ))}
             </select>
             <p className="mt-1 text-[11px] text-ink-faint">
-              {!isAdmin && cycleId && employees.length === 0
+              {cycleId && !teamLoading && employees.length === 0
                 ? "You are not the configured reviewer for anyone in this cycle."
-                : "The employee must have submitted at least one target for the cycle."}
+                : chosen && !chosen.targets?.submitted
+                  ? "This person hasn't submitted any targets yet, so the review can't be called up."
+                  : "The employee must have submitted at least one target for the cycle."}
             </p>
           </div>
         </div>
       )}
       <div className="mt-5 flex items-center justify-end gap-2">
         <GhostBtn onClick={onClose} disabled={busy}>Cancel</GhostBtn>
-        <PrimaryBtn onClick={submit} disabled={busy || loading}>{busy ? "Calling up…" : "Call up"}</PrimaryBtn>
+        <PrimaryBtn onClick={submit} disabled={busy || loading || !employeeId || (chosen && !chosen.targets?.submitted)}>
+          {busy ? "Calling up…" : "Call up"}
+        </PrimaryBtn>
       </div>
     </Modal>
   );
@@ -693,7 +1272,7 @@ function ReportsSection() {
 
 /* ============================================================ Cycles (admin) */
 
-function CyclesSection({ directory = [], isAdmin = false, headedDeptIds = [] }) {
+function CyclesSection({ directory = [], isAdmin = false, headedDeptIds = [], context = null, caps = {} }) {
   const toast = useToast();
   const [cycles, setCycles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -719,7 +1298,7 @@ function CyclesSection({ directory = [], isAdmin = false, headedDeptIds = [] }) 
   }, [load]);
 
   if (detailId) {
-    return <CycleDetail cycleId={detailId} directory={directory} isAdmin={isAdmin} headedDeptIds={headedDeptIds} onBack={() => { setDetailId(null); load(); }} />;
+    return <CycleDetail cycleId={detailId} directory={directory} isAdmin={isAdmin} headedDeptIds={headedDeptIds} context={context} caps={caps} onBack={() => { setDetailId(null); load(); }} />;
   }
 
   return (
@@ -734,8 +1313,8 @@ function CyclesSection({ directory = [], isAdmin = false, headedDeptIds = [] }) 
                 : "Select your department's performance indicators, follow your team's target progress, and lock in targets when everyone has submitted."}
             </p>
           </div>
-          {/* Opening/locking a cycle is admin-only; a department head only manages its indicator selection. */}
-          {isAdmin && (
+          {/* Opening a cycle needs Appraisal Cycle -> Create; a department head only manages its indicator selection. */}
+          {(isAdmin || caps.can_open_cycle) && (
             <PrimaryBtn onClick={() => setOpenModal(true)}>
               <Plus className="h-4 w-4" /> Open cycle
             </PrimaryBtn>
@@ -869,7 +1448,7 @@ function OpenCycleModal({ onClose, onDone, onToast }) {
   );
 }
 
-function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds = [], onBack }) {
+function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds = [], context = null, caps = {}, onBack }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [cycle, setCycle] = useState(null);
@@ -910,8 +1489,10 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
         appraisalSessionService.list(cycleId).catch(() => []),
       ]);
       setCycle(c);
-      setDepartments(Array.isArray(depts) ? depts : []);
-      setJobRoles(Array.isArray(roles) ? roles : []);
+      // Users without Department / Job Role read access (e.g. a head of
+      // department on a basic role) still get the ones they may manage.
+      setDepartments(Array.isArray(depts) && depts.length ? depts : context?.manageable_departments || []);
+      setJobRoles(Array.isArray(roles) && roles.length ? roles : context?.job_roles || []);
       setCatalog(Array.isArray(cat) ? cat : []);
       setSessions(Array.isArray(sess) ? sess : []);
     } catch (err) {
@@ -919,7 +1500,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
     } finally {
       setLoading(false);
     }
-  }, [cycleId]);
+  }, [cycleId, context]);
 
   useEffect(() => {
     loadCycle();
@@ -935,7 +1516,10 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
   }, [cycleId]);
 
   // Target progress for the selected department (dept head or admin view).
-  const canSeeProgress = isAdmin || headedDeptIds.includes(deptId);
+  // Admins and roles granted Department Performance Indicator access act on
+  // every department; a head of department only on the ones they head.
+  const canManageAllDepts = isAdmin || !!caps.can_manage_all_department_indicators;
+  const canSeeProgress = canManageAllDepts || headedDeptIds.includes(deptId);
   const loadProgress = useCallback(async () => {
     if (!deptId || !canSeeProgress) {
       setProgress(null);
@@ -1286,7 +1870,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
   // A department head may manage indicator selections only for departments they
   // head (the backend enforces the same via assertDepartmentHeadOrAdmin); an
   // admin sees them all.
-  const visibleDepartments = isAdmin ? departments : departments.filter((d) => headedDeptIds.includes(d.id));
+  const visibleDepartments = canManageAllDepts ? departments : departments.filter((d) => headedDeptIds.includes(d.id));
 
   return (
     <div className="space-y-4">
@@ -1306,15 +1890,15 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
               {cycle.closed_at ? <span className="text-[11px] text-ink-faint">Closed {fmtDate(cycle.closed_at)}</span> : null}
             </div>
           </div>
-          {/* Lock + lifecycle transitions are admin-only (backend gates them on isAdmin). */}
-          {isAdmin && (
+          {/* Lock + lifecycle transitions follow the Appraisal Cycle permissions (lock / update). */}
+          {(isAdmin || caps.can_lock || caps.can_change_cycle_status) && (
             <div className="flex flex-wrap items-center gap-2">
-              {!locked && !isBottomUp ? (
+              {(isAdmin || caps.can_lock) && !locked && !isBottomUp ? (
                 <PrimaryBtn onClick={lock} disabled={locking}>
                   <Lock className="h-4 w-4" /> {locking ? "Locking…" : "Lock indicators"}
                 </PrimaryBtn>
               ) : null}
-              {(NEXT_STATUS[cycle.status || "draft"] || []).map((s) => (
+              {(isAdmin || caps.can_change_cycle_status ? NEXT_STATUS[cycle.status || "draft"] || [] : []).map((s) => (
                 <GhostBtn key={s} onClick={() => transition(s)}>
                   {s === "reviewing" ? "Start reviewing" : s === "closed" ? "Close cycle" : s === "archived" ? "Archive" : s === "active" ? "Reopen to active" : s}
                 </GhostBtn>
@@ -1323,7 +1907,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
           )}
         </div>
 
-        {isAdmin && cycle.status !== "closed" && cycle.status !== "archived" && (
+        {(isAdmin || caps.can_assign_reviewer) && cycle.status !== "closed" && cycle.status !== "archived" && (
           <div className="flex flex-wrap items-end gap-3 border-b border-line-soft bg-sunken/20 px-5 py-4">
             <div className="w-full max-w-xs">
               <label className="mb-1 block text-xs font-semibold text-ink-muted">Reviewer assignment</label>
@@ -1408,7 +1992,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
           {isBottomUp && deptId && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <StatusChip status={deptIndicatorLock ? "locked" : "unlocked"} label={deptIndicatorLock ? `Indicators locked ${deptIndicatorLock.locked_at ? fmtDate(deptIndicatorLock.locked_at) : ""}` : "Under review"} />
-              {deptIndicatorLock && isAdmin && (
+              {deptIndicatorLock && (isAdmin || caps.can_unlock) && (
                 <GhostBtn onClick={unlockDeptIndicators} disabled={indicatorLockBusy} className="border-amber-300 text-amber-700 hover:bg-amber-50">
                   {indicatorLockBusy ? "Unlocking…" : "Unlock"}
                 </GhostBtn>
@@ -1558,7 +2142,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
                   {progress?.locked ? (
                     <>
                       <StatusChip status="locked" label={`Targets locked ${progress.lock?.locked_at ? fmtDate(progress.lock.locked_at) : ""}`} />
-                      {isAdmin && (
+                      {(isAdmin || caps.can_unlock) && (
                         <GhostBtn onClick={unlockTargets} disabled={lockBusy} className="border-amber-300 text-amber-700 hover:bg-amber-50">
                           Unlock
                         </GhostBtn>
@@ -1616,12 +2200,12 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
           <div>
             <h2 className="text-sm font-bold text-ink">Performance reviews</h2>
             <p className="text-xs text-ink-muted">
-              {isAdmin
+              {isAdmin || caps.can_manage_sessions
                 ? "Call up a review at any time during the period; the final review ends the appraisal and computes the main ratings."
                 : "Reviews the administrator has called up for this cycle."}
             </p>
           </div>
-          {isAdmin && !openSession && cycle.status !== "closed" && cycle.status !== "archived" && (
+          {(isAdmin || caps.can_manage_sessions) && !openSession && cycle.status !== "closed" && cycle.status !== "archived" && (
             <div className="flex flex-wrap items-center gap-2">
               <PrimaryBtn onClick={() => callUpSession("interim")} disabled={sessionBusy}>
                 <Plus className="h-4 w-4" /> Call up review
@@ -1673,7 +2257,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
                     </td>
                     <td className="px-4 py-3 text-ink-muted">{fmtDate(s.opened_at)}</td>
                     <td className="px-4 py-3 text-right">
-                      {isAdmin && s.status === "open" ? (
+                      {(isAdmin || caps.can_manage_sessions) && s.status === "open" ? (
                         <GhostBtn onClick={() => closeSessionAction(s)} disabled={sessionBusy} className="border-red-200 text-red-600 hover:bg-red-50">
                           {s.session_type === "final" ? "Close final review" : "Close session"}
                         </GhostBtn>

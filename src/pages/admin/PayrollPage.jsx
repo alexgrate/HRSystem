@@ -32,6 +32,88 @@ const lineItemsTooltip = (lineItems, itemType, currency) => {
   return matches.map((li) => `${li.name}: ${fmtMoney(li.amount, currency)}`).join("\n");
 };
 
+// ── Payroll schedule export ────────────────────────────────────────────────
+// One row per employee in the same layout finance reconciles: days, annual
+// gross, every earning component, gross pay, every employer cost, staff cost,
+// every deduction, total deduction, net pay, then bank and statutory IDs.
+// Columns come from the line items actually on the run (in configured order),
+// so a pay grade with extra items gets extra columns.
+const csvCell = (v) => {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "number") return Number.isFinite(v) ? v.toFixed(2) : "";
+  const t = String(v);
+  return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+};
+
+function buildPayrollScheduleCsv(lines) {
+  const order = { remuneration: [], employer_contribution: [], deduction: [] };
+  const seen = new Set();
+  lines.forEach((l) =>
+    (l.snapshot?.line_items || []).forEach((li) => {
+      if (li.is_subtotal || li.is_balance) return;
+      const bucket = order[li.item_type];
+      const key = `${li.item_type}:${li.name}`;
+      if (bucket && !seen.has(key)) { seen.add(key); bucket.push(li.name); }
+    }),
+  );
+  const hasBalance = lines.some((l) => (l.snapshot?.line_items || []).some((li) => li.is_balance && Number(li.amount) > 0));
+  const hasAllowance = lines.some((l) => Number(l.allowances_total) > 0);
+  const hasLoans = lines.some((l) => Number(l.snapshot?.loan_deductions) > 0);
+  const hasAdjust = lines.some((l) => Number(l.adjustments_total) !== 0 && l.adjustments_total != null);
+
+  const header = [
+    "S/N", "Name", "Staff ID", "Residence", "No. days worked", "No. working days in the month", "Annual gross",
+    ...order.remuneration, ...(hasBalance ? ["Balance of base salary"] : []), ...(hasAllowance ? ["Benefit allowances"] : []),
+    "Gross pay",
+    ...order.employer_contribution, "Staff cost",
+    ...order.deduction, ...(hasLoans ? ["Loan repayment"] : []), ...(hasAdjust ? ["Adjustments"] : []),
+    "Total deduction", "Net pay", "Bank", "Account number", "PAYE ID", "Pension ID", "PFA",
+  ];
+
+  const rows = lines.map((l, i) => {
+    const sn = l.snapshot || {};
+    const amt = (type, name) =>
+      (sn.line_items || []).filter((li) => li.item_type === type && li.name === name && !li.is_subtotal).reduce((a, li) => a + (Number(li.amount) || 0), 0);
+    const gross = Number(l.gross_salary ?? sn.gross_pay ?? 0);
+    const employer = Number(sn.employer_contributions ?? 0);
+    const balance = (sn.line_items || []).filter((li) => li.is_balance).reduce((a, li) => a + (Number(li.amount) || 0), 0);
+    return [
+      i + 1,
+      sn.employee_name || l.employee_name || "",
+      sn.staff_id || "",
+      sn.residence || "",
+      sn.days_worked ?? "",
+      sn.working_days ?? "",
+      sn.annual_gross != null ? Number(sn.annual_gross) : Number(l.base_salary || 0) * 12,
+      ...order.remuneration.map((n) => amt("remuneration", n)),
+      ...(hasBalance ? [balance] : []),
+      ...(hasAllowance ? [Number(l.allowances_total) || 0] : []),
+      gross,
+      ...order.employer_contribution.map((n) => amt("employer_contribution", n)),
+      sn.staff_cost != null ? Number(sn.staff_cost) : gross + employer,
+      ...order.deduction.map((n) => amt("deduction", n)),
+      ...(hasLoans ? [Number(sn.loan_deductions) || 0] : []),
+      ...(hasAdjust ? [Number(l.adjustments_total) || 0] : []),
+      Number(l.deductions_total ?? 0),
+      Number(l.net_salary ?? 0),
+      sn.bank_name || "",
+      sn.account_number ? `'${sn.account_number}` : "",
+      sn.paye_id || "",
+      sn.pension_id || "",
+      sn.pfa || "",
+    ];
+  });
+
+  const total = (idx) => rows.reduce((a, r) => a + (typeof r[idx] === "number" ? r[idx] : 0), 0);
+  const totalsRow = header.map((h, idx) => {
+    if (idx === 1) return "TOTAL";
+    if (idx < 6 || idx >= header.length - 5) return "";
+    return total(idx);
+  });
+
+  return [header, ...rows, totalsRow].map((r) => r.map(csvCell).join(",")).join("\r\n");
+}
+
 const actionsForStatus = (status) => {
   switch (status) {
     case "draft":
@@ -293,6 +375,74 @@ const PayrollPage = () => {
 
   const runLines = useMemo(() => extractRunLines(detail), [detail]);
 
+  // Days worked can be changed per person while the run is still a preview;
+  // recalculating re-generates the preview with those days.
+  const [daysEdits, setDaysEdits] = useState({});
+  useEffect(() => { setDaysEdits({}); }, [selectedId]);
+  const daysEditable = !!selectedRun && canCreate && ["draft", "preview_generated"].includes(selectedRun.status);
+  const workingDaysForRun = runLines.find((l) => l.snapshot?.working_days != null)?.snapshot?.working_days ?? null;
+  const pendingDayEdits = Object.keys(daysEdits).length;
+
+  const recalculateDays = async () => {
+    if (!selectedRun) return;
+    const days_worked = {};
+    runLines.forEach((l) => {
+      const current = l.snapshot?.days_worked;
+      if (current != null) days_worked[l.employee_id] = Number(current);
+    });
+    for (const [id, v] of Object.entries(daysEdits)) {
+      const n = Number(v);
+      if (v === "" || !Number.isFinite(n) || n < 0) {
+        toast.error("Days worked must be a number of 0 or more.");
+        return;
+      }
+      if (workingDaysForRun != null && n > Number(workingDaysForRun)) {
+        toast.error(`Days worked can't be more than the ${workingDaysForRun} working days in the month.`);
+        return;
+      }
+      days_worked[id] = n;
+    }
+    setBusy(true);
+    try {
+      await payrollService.preview({
+        month: selectedRun.month,
+        year: selectedRun.year,
+        pay_group: selectedRun.pay_group,
+        currency: selectedRun.currency,
+        working_days: workingDaysForRun ?? undefined,
+        days_worked,
+      });
+      setDaysEdits({});
+      await refreshAfterAction();
+      toast.success("Payroll recalculated with the new days worked.");
+    } catch (err) {
+      toast.error(err?.message || "Couldn't recalculate the payroll.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadSchedule = () => {
+    if (!selectedRun || runLines.length === 0) return;
+    const csv = "\uFEFF" + buildPayrollScheduleCsv(runLines);
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `payroll-schedule-${selectedRun.year}-${String(selectedRun.month).padStart(2, "0")}-${String(payGroupName(selectedRun.pay_group) || "group").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const staffCostTotal = useMemo(
+    () =>
+      runLines.reduce(
+        (a, l) =>
+          a + (l.snapshot?.staff_cost != null ? Number(l.snapshot.staff_cost) : Number(l.gross_salary || 0) + Number(l.snapshot?.employer_contributions || 0)),
+        0,
+      ),
+    [runLines],
+  );
+
   const staffName = (employeeId) => {
     const s = staff.find((u) => u.id === employeeId);
     if (s) return getEmployeeName(s);
@@ -504,11 +654,12 @@ const PayrollPage = () => {
                 </div>
 
                 {/* Totals */}
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {[
                     ["Employees", selectedRun.total_employees ?? "—"],
                     ["Total gross", fmtMoney(selectedRun.total_gross, selectedRun.currency)],
                     ["Total net", fmtMoney(selectedRun.total_net, selectedRun.currency)],
+                    ["Total staff cost", runLines.length ? fmtMoney(staffCostTotal, selectedRun.currency) : "—"],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-xl border border-line p-3">
                       <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint">{label}</div>
@@ -522,25 +673,50 @@ const PayrollPage = () => {
                   <div className="p-6 text-center text-xs text-ink-faint">Loading run details…</div>
                 ) : runLines.length > 0 ? (
                   <div className="space-y-2">
-                    {canColCreate && adjustable && (
-                      <div className="flex justify-end">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] text-ink-muted">
+                        {workingDaysForRun != null ? `${workingDaysForRun} working days in the month. ` : ""}
+                        {daysEditable ? "Change days worked for anyone who didn't work the full month, then recalculate." : ""}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {pendingDayEdits > 0 && (
+                          <>
+                            <button onClick={() => setDaysEdits({})} disabled={busy} className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-muted hover:bg-sunken">
+                              Discard
+                            </button>
+                            <button onClick={recalculateDays} disabled={busy} className="rounded-lg bg-brand px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
+                              {busy ? "Recalculating…" : `Recalculate (${pendingDayEdits} change${pendingDayEdits === 1 ? "" : "s"})`}
+                            </button>
+                          </>
+                        )}
                         <button
-                          onClick={() => setShowColumnModal(true)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-sunken"
+                          onClick={downloadSchedule}
+                          className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-sunken"
+                          title="Every employee with earnings, employer costs, deductions, net pay, account number, PAYE ID and pension details"
                         >
-                          <Plus className="h-3.5 w-3.5" /> Add column
+                          Download schedule (CSV)
                         </button>
+                        {canColCreate && adjustable && (
+                          <button
+                            onClick={() => setShowColumnModal(true)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-sunken"
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Add column
+                          </button>
+                        )}
                       </div>
-                    )}
+                    </div>
                     <div className="overflow-x-auto rounded-xl border border-line">
                       <table className="w-full min-w-[560px] text-sm">
                         <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
                           <tr>
                             <th className="px-3 py-2 text-left font-semibold">Employee</th>
-                            <th className="px-3 py-2 text-right font-semibold">Base</th>
-                            <th className="px-3 py-2 text-right font-semibold">Allowances</th>
+                            <th className="px-3 py-2 text-right font-semibold">Days</th>
+                            <th className="px-3 py-2 text-right font-semibold">Gross pay</th>
                             <th className="px-3 py-2 text-right font-semibold">Deductions</th>
-                            <th className="px-3 py-2 text-right font-semibold">Net</th>
+                            <th className="px-3 py-2 text-right font-semibold">Net pay</th>
+                            <th className="px-3 py-2 text-right font-semibold">Employer cost</th>
+                            <th className="px-3 py-2 text-right font-semibold">Staff cost</th>
                             {customColumns.map((col) => (
                               <th key={col.id} className="px-3 py-2 text-right font-semibold">
                                 <span className={col.item_type === "deduction" ? "text-red-500" : "text-emerald-600"}>{col.name}</span>
@@ -564,15 +740,41 @@ const PayrollPage = () => {
                               <td className="px-3 py-2 font-medium text-ink-2">
                                 {l.snapshot?.employee_name || l.employee_name || getEmployeeName(l.employee, null) || staffName(l.employee_id)}
                               </td>
-                              {/* Base salary is the whole fixed pay; the tooltip shows the components it splits into (they sum to it). */}
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {daysEditable && l.snapshot?.days_worked != null ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={workingDaysForRun ?? undefined}
+                                    step="0.5"
+                                    aria-label="Days worked"
+                                    value={daysEdits[l.employee_id] ?? l.snapshot.days_worked}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setDaysEdits((prev) => {
+                                        const next = { ...prev };
+                                        if (String(v) === String(l.snapshot.days_worked)) delete next[l.employee_id];
+                                        else next[l.employee_id] = v;
+                                        return next;
+                                      });
+                                    }}
+                                    className={`w-16 rounded-md border px-1.5 py-1 text-right text-xs ${daysEdits[l.employee_id] != null ? "border-brand bg-brand/5" : "border-line"}`}
+                                  />
+                                ) : l.snapshot?.days_worked != null ? (
+                                  `${l.snapshot.days_worked}/${l.snapshot.working_days}`
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                              {/* Gross pay = the earning components (they split the base salary) plus any benefit allowances. */}
                               <td
                                 className="px-3 py-2 text-right"
-                                title={lineItemsTooltip(l.snapshot?.line_items, "remuneration", selectedRun.currency)}
+                                title={[
+                                  lineItemsTooltip(l.snapshot?.line_items, "remuneration", selectedRun.currency),
+                                  Number(l.allowances_total) > 0 ? `Benefit allowances: ${fmtMoney(l.allowances_total, selectedRun.currency)}` : null,
+                                ].filter(Boolean).join("\n") || undefined}
                               >
-                                {fmtMoney(l.base_salary ?? l.base, selectedRun.currency)}
-                              </td>
-                              <td className="px-3 py-2 text-right text-emerald-600" title="Benefit-level allowances paid on top of base salary">
-                                {fmtMoney(l.allowances_total ?? l.allowances, selectedRun.currency)}
+                                {fmtMoney(l.gross_salary ?? l.gross, selectedRun.currency)}
                               </td>
                               <td
                                 className="px-3 py-2 text-right text-red-600"
@@ -585,6 +787,15 @@ const PayrollPage = () => {
                                 {Number(l.snapshot?.loan_deductions) > 0 && <span className="ml-1 align-middle text-[9px] font-bold uppercase text-ink-faint">incl. loan</span>}
                               </td>
                               <td className="px-3 py-2 text-right font-semibold">{fmtMoney(l.net_salary ?? l.net_pay ?? l.net ?? l.total_net, selectedRun.currency)}</td>
+                              <td
+                                className="px-3 py-2 text-right text-sky-700"
+                                title={lineItemsTooltip(l.snapshot?.line_items, "employer_contribution", selectedRun.currency)}
+                              >
+                                {l.snapshot?.employer_contributions != null ? fmtMoney(l.snapshot.employer_contributions, selectedRun.currency) : "—"}
+                              </td>
+                              <td className="px-3 py-2 text-right text-ink-muted">
+                                {l.snapshot?.staff_cost != null ? fmtMoney(l.snapshot.staff_cost, selectedRun.currency) : "—"}
+                              </td>
                               {customColumns.map((col) => {
                                 const owner = col.values?.[0]?.employee_id;
                                 const editable = canColUpdate && adjustable && (col.is_global || owner === l.employee_id);
@@ -793,14 +1004,28 @@ const PayrollPage = () => {
 const inputCls = "w-full h-11 border border-line bg-card rounded-xl px-3 outline-none mt-1 focus:border-brand";
 const labelCls = "text-xs font-semibold text-ink-muted uppercase tracking-wider";
 
+// Weekdays (Mon–Fri) in a month — the default "working days in the month",
+// same rule the server uses when none is given.
+const weekdaysInMonth = (year, month) => {
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  let n = 0;
+  for (let d = 1; d <= days; d += 1) {
+    const dow = new Date(Date.UTC(year, month - 1, d)).getUTCDay();
+    if (dow !== 0 && dow !== 6) n += 1;
+  }
+  return n;
+};
+
 function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [payGroup, setPayGroup] = useState("");
   const [currency, setCurrency] = useState(defaultCurrency);
+  const [workingDays, setWorkingDays] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const suggestedDays = Number.isInteger(Number(year)) ? weekdaysInMonth(Number(year), Number(month)) : 22;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -813,11 +1038,18 @@ function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
     setError("");
     setSaving(true);
     try {
+      const days = workingDays === "" ? undefined : Number(workingDays);
+      if (days !== undefined && (!Number.isFinite(days) || days <= 0 || days > 31)) {
+        setError("Working days must be between 1 and 31.");
+        setSaving(false);
+        return;
+      }
       const created = await payrollService.preview({
         month: Number(month),
         year: y,
         pay_group: payGroup,
         currency: currency || undefined,
+        working_days: days,
       });
       await onCreated(created);
     } catch (err) {
@@ -863,6 +1095,22 @@ function NewRunModal({ defaultCurrency, payGroups = [], onClose, onCreated }) {
             {payGroups.length === 0 && (
               <p className="mt-1 text-[11px] text-amber-700">No pay groups yet — create one under Directory → Pay Groups first.</p>
             )}
+          </div>
+          <div>
+            <label className={labelCls}>Working days in the month</label>
+            <input
+              type="number"
+              min="1"
+              max="31"
+              step="0.5"
+              value={workingDays}
+              onChange={(e) => setWorkingDays(e.target.value)}
+              placeholder={`${suggestedDays} (weekdays in ${MONTHS[Number(month) - 1] || "the month"})`}
+              className={inputCls}
+            />
+            <p className="mt-1 text-[11px] text-ink-faint">
+              Leave blank to use {suggestedDays}. Everyone is paid for all working days; change days worked per person on the preview.
+            </p>
           </div>
           <div>
             <label className={labelCls}>Currency</label>
@@ -1175,7 +1423,50 @@ function LineItemsModal({ payGrades = [], onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payGradeId]);
 
+  // Remuneration items split the base salary, so their percentages must not
+  // exceed 100% (payroll refuses to run otherwise). Work out each active
+  // item's share of base: % of base directly, % of another item via that
+  // item's share, sums via their parts. Fixed amounts can't be expressed as
+  // a share without a salary, so they're totalled separately.
+  const split = useMemo(() => {
+    const active = items.filter((i) => i.is_active !== false);
+    const byId = new Map(active.map((i) => [i.id, i]));
+    const memo = new Map();
+    const share = (item, seen = new Set()) => {
+      if (memo.has(item.id)) return memo.get(item.id);
+      if (seen.has(item.id)) return null;
+      seen.add(item.id);
+      const v = Number(item.value) || 0;
+      let r = null;
+      if (item.calculation_method === "percentage") r = v;
+      else if (item.calculation_method === "percentage_of") {
+        const base = byId.get(item.base_line_item_id);
+        const b = base ? share(base, seen) : null;
+        r = b == null ? null : (v / 100) * b;
+      } else if (item.calculation_method === "sum_of") {
+        const parts = (item.component_line_item_ids || []).map((id) => byId.get(id));
+        if (parts.length && parts.every(Boolean)) {
+          const vals = parts.map((p) => share(p, seen));
+          r = vals.every((x) => x != null) ? vals.reduce((a, b) => a + b, 0) : null;
+        }
+      }
+      memo.set(item.id, r);
+      return r;
+    };
+    const isSubtotal = (i) =>
+      i.calculation_method === "sum_of" &&
+      (i.component_line_item_ids || []).length > 0 &&
+      (i.component_line_item_ids || []).every((id) => byId.get(id)?.item_type === i.item_type);
+    const rows = active
+      .filter((i) => i.item_type === "remuneration" && !isSubtotal(i))
+      .map((i) => ({ id: i.id, name: i.name, method: i.calculation_method, pct: share(i), fixed: i.calculation_method === "fixed" ? Number(i.value) || 0 : 0 }));
+    const pctTotal = rows.reduce((a, r) => a + (r.pct || 0), 0);
+    const fixedTotal = rows.reduce((a, r) => a + r.fixed, 0);
+    return { rows, pctTotal: Math.round(pctTotal * 100) / 100, fixedTotal };
+  }, [items]);
+
   const describeCalc = (item) => {
+    if (item.calculation_method === "paye") return "PAYE — Nigeria Tax Act 2025 bands";
     if (item.calculation_method === "percentage") return `${Number(item.value).toLocaleString()}% of base`;
     if (item.calculation_method === "percentage_of") {
       return `${Number(item.value).toLocaleString()}% of ${itemName(item.base_line_item_id)}`;
@@ -1296,11 +1587,24 @@ function LineItemsModal({ payGrades = [], onClose }) {
                   <tr key={item.id} className="border-t border-line-soft">
                     <td className="px-3 py-2 font-medium text-ink-2">{item.name}</td>
                     <td className="px-3 py-2">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${item.item_type === "deduction" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
-                        {item.item_type}
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          item.item_type === "deduction"
+                            ? "bg-red-50 text-red-700"
+                            : item.item_type === "employer_contribution"
+                              ? "bg-sky-50 text-sky-700"
+                              : "bg-emerald-50 text-emerald-700"
+                        }`}
+                      >
+                        {item.item_type === "employer_contribution" ? "employer cost" : item.item_type === "remuneration" ? "earning" : "deduction"}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-ink-muted">{describeCalc(item)}</td>
+                    <td className="px-3 py-2 text-ink-muted">
+                      {describeCalc(item)}
+                      {item.is_tax_relief && (
+                        <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">tax relief</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${item.is_active !== false ? "bg-emerald-50 text-emerald-700" : "bg-sunken text-ink-muted"}`}>
                         {item.is_active !== false ? "Active" : "Inactive"}
@@ -1326,14 +1630,45 @@ function LineItemsModal({ payGrades = [], onClose }) {
             </table>
           )}
         </div>
+
+        {payGradeId && !loading && split.rows.length > 0 && (
+          <div
+            className={`mt-3 rounded-xl border px-4 py-3 text-xs ${
+              split.pctTotal > 100.005 ? "border-red-200 bg-red-50 text-red-800" : "border-line-soft bg-sunken/40 text-ink-muted"
+            }`}
+            role={split.pctTotal > 100.005 ? "alert" : undefined}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-ink">How base salary is split on this grade</span>
+              <span className={`font-bold tabular-nums ${split.pctTotal > 100.005 ? "text-red-700" : "text-ink"}`}>
+                {split.pctTotal}% of base{split.fixedTotal ? ` + ₦${split.fixedTotal.toLocaleString()} fixed` : ""}
+              </span>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {split.rows.map((r) => (
+                <span key={r.id} className="rounded-full bg-card px-2 py-0.5 ring-1 ring-line-soft">
+                  {r.name}: {r.method === "fixed" ? `₦${r.fixed.toLocaleString()}` : r.pct == null ? "—" : `${Math.round(r.pct * 100) / 100}%`}
+                </span>
+              ))}
+            </div>
+            <p className="mt-1.5">
+              {split.pctTotal > 100.005
+                ? `These items add up to more than the whole base salary, so payroll will refuse to run for anyone on this grade. Reduce or remove items worth ${Math.round((split.pctTotal - 100) * 100) / 100}% of base.`
+                : split.pctTotal < 99.995
+                  ? `The remaining ${Math.round((100 - split.pctTotal) * 100) / 100}% (less any fixed amounts) is paid as "Balance of base salary".`
+                  : "The items cover exactly 100% of base salary."}
+            </p>
+          </div>
+        )}
       </div>
       {bulk && (
         <BulkUploadModal
           payGrades={payGrades}
           defaultPayGradeId={payGradeId}
           onClose={() => setBulk(false)}
-          onUploaded={async () => {
-            setBulk(false);
+          onUploaded={async (opts) => {
+            // Partial failures keep the dialog open so the errors stay visible.
+            if (!opts?.keepOpen) setBulk(false);
             await load(payGradeId);
           }}
         />
@@ -1342,6 +1677,33 @@ function LineItemsModal({ payGrades = [], onClose }) {
   );
 }
 
+// The organization's standard salary structure (the Dash MFB payroll
+// schedule), as a ready-to-upload starting point for any pay grade.
+const LINE_ITEM_TEMPLATE_CSV = [
+  "name,item_type,calculation_method,value,base_line_item,components,is_tax_relief,description",
+  "Basic,earning,percentage,15,,,,",
+  "Housing,earning,percentage,10,,,,",
+  "Transport/Passage,earning,percentage,10,,,,",
+  "Meal Allowance,earning,percentage,15,,,,",
+  "Utility,earning,percentage,20,,,,",
+  "Leave Allowance,earning,percentage,30,,,,",
+  "BHT,earning,sum_of,,,Basic|Housing|Transport/Passage,,Basic + Housing + Transport (pension base)",
+  "Pension Contribution - DashMFB,employer_cost,percentage_of,10,BHT,,,10% of BHT",
+  "NSITF,employer_cost,percentage,1,,,,",
+  "ITF,employer_cost,percentage,1,,,,",
+  "Pension Contribution - Staff,deduction,percentage_of,8,BHT,,true,8% of BHT",
+  "National Housing Fund,deduction,percentage_of,2.5,Basic,,true,2.5% of Basic",
+  "PAYE,deduction,paye,,,,,Nigeria Tax Act 2025",
+].join("\n");
+
+const ITEM_TYPE_ALIASES = {
+  remuneration: "remuneration", earning: "remuneration", earnings: "remuneration", allowance: "remuneration",
+  deduction: "deduction",
+  employer_contribution: "employer_contribution", employer_cost: "employer_contribution", "employer cost": "employer_contribution", employer: "employer_contribution",
+};
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const truthy = (v) => /^(true|yes|y|1)$/i.test(String(v || "").trim());
+
 function BulkUploadModal({ payGrades = [], defaultPayGradeId, onClose, onUploaded }) {
   const toast = useToast();
   const [file, setFile] = useState(null);
@@ -1349,67 +1711,93 @@ function BulkUploadModal({ payGrades = [], defaultPayGradeId, onClose, onUploade
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState([]);
 
+  const downloadTemplate = () => {
+    const url = URL.createObjectURL(new Blob([LINE_ITEM_TEMPLATE_CSV], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "payroll-line-items-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const parseCSV = (text) => {
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    if (lines.length === 0) return { items: [] };
-    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
-    const items = [];
+    if (lines.length === 0) return { rows: [], errors: [] };
+    const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
+    const rows = [];
     const errs = [];
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',').map(c => c.trim());
-      if (cols.length < header.length) {
-        errs.push(`Line ${i+1}: wrong column count`);
-        continue;
-      }
+      const cols = lines[i].split(",").map((c) => c.trim());
       const obj = {};
-      for (let j = 0; j < header.length; j++) obj[header[j]] = cols[j];
-      // Basic validation
-      if (!obj.name) { errs.push(`Line ${i+1}: missing name`); continue; }
-      if (!obj.item_type) { errs.push(`Line ${i+1}: missing item_type`); continue; }
-      // normalize fields expected by API
-      items.push({
-        name: obj.name,
-        pay_grade_id: payGradeId,
-        item_type: obj.item_type,
-        calculation_method: obj.calculation_method || 'fixed',
-        value: obj.value ? Number(obj.value) : 0,
-        base_line_item_id: obj.base_line_item_id || null,
-        component_line_item_ids: obj.component_line_item_ids ? obj.component_line_item_ids.split('|').map(x=>x.trim()) : [],
-        description: obj.description || '',
-        is_active: obj.is_active === 'false' ? false : true,
-      });
+      for (let j = 0; j < header.length; j++) obj[header[j]] = cols[j] ?? "";
+      if (!obj.name) { errs.push(`Line ${i + 1}: missing name`); continue; }
+      const type = ITEM_TYPE_ALIASES[String(obj.item_type || "").trim().toLowerCase()];
+      if (!type) { errs.push(`Line ${i + 1}: item_type must be earning, deduction or employer_cost`); continue; }
+      rows.push({ line: i + 1, obj, type });
     }
-    return { items, errors: errs };
+    return { rows, errors: errs };
   };
 
   const submit = async () => {
-    if (!payGradeId) return toast.error('Pick a pay grade first.');
-    if (!file) return toast.error('Select a CSV file to upload.');
+    if (!payGradeId) return toast.error("Pick a pay grade first.");
+    if (!file) return toast.error("Select a CSV file to upload.");
     setBusy(true);
     try {
-      const text = await file.text();
-      const { items, errors: parseErrors } = parseCSV(text);
-      if (parseErrors.length) { setErrors(parseErrors); setBusy(false); return; }
-      if (items.length === 0) { toast.error('No items parsed from file.'); setBusy(false); return; }
+      const { rows, errors: parseErrors } = parseCSV(await file.text());
+      if (parseErrors.length) { setErrors(parseErrors); return; }
+      if (rows.length === 0) { toast.error("No items found in the file."); return; }
+
+      // "percentage of" / "sum of" can name the item they build on — one
+      // already on this pay grade or one earlier in this same file.
+      const existing = await payrollService.listLineItems(payGradeId).catch(() => []);
+      const idByName = new Map((Array.isArray(existing) ? existing : []).map((i) => [i.name.trim().toLowerCase(), i.id]));
+      const resolve = (ref) => {
+        const r = String(ref || "").trim();
+        if (!r) return null;
+        return UUID_RE.test(r) ? r : idByName.get(r.toLowerCase()) || null;
+      };
+
       const failures = [];
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
+      for (const { line, obj, type } of rows) {
         try {
-          await payrollService.createLineItem(it);
+          const method = String(obj.calculation_method || "fixed").trim().toLowerCase();
+          const baseRef = obj.base_line_item || obj.base_line_item_id;
+          const compRefs = String(obj.components || obj.component_line_item_ids || "")
+            .split("|")
+            .map((x) => x.trim())
+            .filter(Boolean);
+          const baseId = method === "percentage_of" ? resolve(baseRef) : null;
+          if (method === "percentage_of" && !baseId) throw new Error(`"${baseRef}" isn't a line item on this pay grade (list it earlier in the file)`);
+          const compIds = method === "sum_of" ? compRefs.map(resolve) : [];
+          if (method === "sum_of" && compIds.some((x) => !x)) throw new Error(`one of "${compRefs.join(" | ")}" isn't a line item on this pay grade`);
+
+          const created = await payrollService.createLineItem({
+            name: obj.name,
+            pay_grade_id: payGradeId,
+            item_type: type,
+            calculation_method: method,
+            value: obj.value ? Number(obj.value) : 0,
+            base_line_item_id: baseId,
+            component_line_item_ids: method === "sum_of" ? compIds : null,
+            is_tax_relief: type === "deduction" && method !== "paye" && truthy(obj.is_tax_relief),
+            description: obj.description || "",
+            is_active: String(obj.is_active || "").toLowerCase() === "false" ? false : true,
+          });
+          if (created?.id) idByName.set(obj.name.trim().toLowerCase(), created.id);
         } catch (err) {
-          failures.push({ line: i + 2, message: err?.message || String(err) });
+          failures.push(`Line ${line} (${obj.name}): ${err?.error?.message || err?.message || String(err)}`);
         }
       }
       if (failures.length) {
-        const msgs = failures.map((f) => `Line ${f.line}: ${f.message}`);
-        setErrors(msgs);
+        setErrors(failures);
         toast.error(`Uploaded with ${failures.length} error(s).`);
+        onUploaded?.({ keepOpen: true });
       } else {
-        toast.success('Bulk upload successful.');
+        toast.success(`${rows.length} line item${rows.length === 1 ? "" : "s"} added.`);
         onUploaded();
       }
     } catch (err) {
-      toast.error(err?.message || 'Bulk upload failed.');
+      toast.error(err?.message || "Bulk upload failed.");
     } finally {
       setBusy(false);
     }
@@ -1417,7 +1805,7 @@ function BulkUploadModal({ payGrades = [], defaultPayGradeId, onClose, onUploade
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-card p-6 shadow-xl">
         <div className="flex items-center justify-between border-b pb-3">
           <h3 className="text-lg font-bold text-ink">Bulk upload line items</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-ink-faint hover:bg-sunken"><X className="h-4 w-4" /></button>
@@ -1430,22 +1818,38 @@ function BulkUploadModal({ payGrades = [], defaultPayGradeId, onClose, onUploade
               {payGrades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           </div>
+          <div className="rounded-xl border border-line-soft bg-sunken/40 p-3 text-xs text-ink-muted">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-ink">Start from the standard salary structure</span>
+              <button type="button" onClick={downloadTemplate} className="rounded-lg border border-line bg-card px-2.5 py-1 text-xs font-semibold text-brand hover:bg-sunken">
+                Download template
+              </button>
+            </div>
+            <p className="mt-1">
+              Basic, Housing, Transport, Meal, Utility and Leave (100% of gross); employer pension, NSITF and ITF; staff
+              pension, NHF and PAYE. Adjust the percentages, then upload it for each pay grade.
+            </p>
+          </div>
           <div>
             <label className={labelCls}>CSV file</label>
-            <input type="file" accept="text/csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            <p className="text-xs text-ink-faint">Columns: name,item_type,calculation_method,value,base_line_item_id,component_line_item_ids (pipe-separated),description,is_active</p>
+            <input type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <p className="mt-1 text-xs text-ink-faint">
+              Columns: name, item_type (earning / deduction / employer_cost), calculation_method (fixed / percentage /
+              percentage_of / sum_of / paye), value, base_line_item (a name), components (names separated by |),
+              is_tax_relief (true/false), description. List an item before anything that builds on it.
+            </p>
           </div>
           {errors.length > 0 && (
             <div className="rounded-xl bg-red-50 p-3 text-xs text-red-800 border border-red-200">
-              <strong>Parse errors:</strong>
+              <strong>These rows weren't added:</strong>
               <ul className="mt-2 list-disc list-inside">
                 {errors.map((e, i) => <li key={i}>{e}</li>)}
               </ul>
             </div>
           )}
           <div className="flex gap-2 justify-end pt-1">
-            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Cancel</button>
-            <button type="button" disabled={busy} onClick={submit} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">{busy ? 'Uploading…' : 'Upload'}</button>
+            <button type="button" onClick={onClose} className="h-11 border border-line rounded-xl px-4 text-sm font-semibold text-ink-muted">Close</button>
+            <button type="button" disabled={busy} onClick={submit} className="h-11 bg-brand text-white rounded-xl px-4 text-sm font-semibold disabled:opacity-70">{busy ? "Uploading…" : "Upload"}</button>
           </div>
         </div>
       </div>
@@ -1463,11 +1867,14 @@ function LineItemForm({ payGrades = [], existingItems = [], defaultPayGradeId, i
   const [componentIds, setComponentIds] = useState(item?.component_line_item_ids || []);
   const [description, setDescription] = useState(item?.description || "");
   const [isActive, setIsActive] = useState(item?.is_active !== false);
+  const [isTaxRelief, setIsTaxRelief] = useState(!!item?.is_tax_relief);
   const [error, setError] = useState("");
 
-  // Other items on this pay grade an item can be derived from — never itself.
-  const referenceable = existingItems.filter((i) => i.id !== item?.id);
-  const isDerived = calcMethod === "percentage_of" || calcMethod === "sum_of";
+  // Other items on this pay grade an item can be derived from — never itself,
+  // and never PAYE (it's computed last, from everything else).
+  const referenceable = existingItems.filter((i) => i.id !== item?.id && i.calculation_method !== "paye");
+  const isDerived = calcMethod === "percentage_of" || calcMethod === "sum_of" || calcMethod === "paye";
+  const hasOtherPaye = existingItems.some((i) => i.calculation_method === "paye" && i.id !== item?.id);
 
   const toggleComponent = (id) => {
     setComponentIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -1493,12 +1900,17 @@ function LineItemForm({ payGrades = [], existingItems = [], defaultPayGradeId, i
       return setError("Pick at least two line items to sum.");
     }
 
+    if (calcMethod === "paye" && itemType !== "deduction") {
+      return setError("PAYE can only be a deduction.");
+    }
+
     setError("");
     onSubmit({
       name: name.trim(),
       pay_grade_id: payGradeId,
       item_type: itemType,
       calculation_method: calcMethod,
+      is_tax_relief: itemType === "deduction" && calcMethod !== "paye" ? isTaxRelief : false,
       value: numeric,
       base_line_item_id: calcMethod === "percentage_of" ? baseLineItemId : null,
       component_line_item_ids: calcMethod === "sum_of" ? componentIds : null,
@@ -1530,9 +1942,17 @@ function LineItemForm({ payGrades = [], existingItems = [], defaultPayGradeId, i
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={labelCls}>Type</label>
-          <select value={itemType} onChange={(e) => setItemType(e.target.value)} className={inputCls}>
-            <option value="remuneration">Remuneration (adds)</option>
-            <option value="deduction">Deduction (removes)</option>
+          <select
+            value={itemType}
+            onChange={(e) => {
+              setItemType(e.target.value);
+              if (e.target.value !== "deduction" && calcMethod === "paye") setCalcMethod("percentage");
+            }}
+            className={inputCls}
+          >
+            <option value="remuneration">Earning — part of gross pay</option>
+            <option value="deduction">Deduction — taken off the employee's pay</option>
+            <option value="employer_contribution">Employer cost — paid by the company (e.g. employer pension, NSITF, ITF)</option>
           </select>
         </div>
         <div>
@@ -1542,6 +1962,9 @@ function LineItemForm({ payGrades = [], existingItems = [], defaultPayGradeId, i
             <option value="percentage">Percentage of base salary</option>
             <option value="percentage_of">Percentage of another line item</option>
             <option value="sum_of">Sum of other line items</option>
+            {itemType === "deduction" && (!hasOtherPaye || calcMethod === "paye") && (
+              <option value="paye">PAYE — calculated automatically</option>
+            )}
           </select>
         </div>
       </div>
@@ -1593,6 +2016,24 @@ function LineItemForm({ payGrades = [], existingItems = [], defaultPayGradeId, i
             </div>
           )}
         </div>
+      )}
+
+      {calcMethod === "paye" && (
+        <p className="rounded-lg bg-sunken/60 px-3 py-2 text-xs text-ink-muted">
+          PAYE is worked out for each employee under the Nigeria Tax Act 2025 bands: their monthly gross pay, less every
+          deduction marked as a tax relief, is annualised, taxed (0% to ₦800k, then 15%, 18%, 21%, 23% and 25%), and
+          divided by 12.
+        </p>
+      )}
+
+      {itemType === "deduction" && calcMethod !== "paye" && (
+        <label className="flex items-start gap-2 text-xs font-semibold text-ink-muted">
+          <input type="checkbox" className="mt-0.5" checked={isTaxRelief} onChange={(e) => setIsTaxRelief(e.target.checked)} />
+          <span>
+            Tax relief — taken out of taxable income before PAYE
+            <span className="block font-normal text-ink-faint">Tick for the staff pension contribution, National Housing Fund and NHIS.</span>
+          </span>
+        </label>
       )}
 
       <div>

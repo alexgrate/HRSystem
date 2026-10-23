@@ -19,6 +19,7 @@ import {
   appraisalTargetService,
   appraisalReviewService,
   appraisalSessionService,
+  appraisalTeamService,
 } from "../../services/appraisalService";
 import { administrationPeriodService } from "../../services/administrationPeriodService";
 
@@ -1157,6 +1158,112 @@ export function ReviewDetailModal({ reviewId, editable, selfAssess = false, asEm
 /* ================================================= Self-service entry point */
 
 /**
+ * "Where am I, and what do I do next?" — the employee's own progress for the
+ * current cycle (indicators, targets, review) with a single next step, so
+ * nobody has to work out the process from the tabs below.
+ */
+function MyAppraisalSummary({ cycle, myEmployeeId, onGo }) {
+  const [data, setData] = useState(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!cycle?.id || !myEmployeeId) return;
+    let stale = false;
+    appraisalTeamService
+      .employeeOverview(cycle.id, myEmployeeId)
+      .then((res) => {
+        if (!stale) setData(res);
+      })
+      .catch(() => {
+        if (!stale) setFailed(true);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [cycle?.id, myEmployeeId]);
+
+  if (!cycle) {
+    return (
+      <div className="rounded-2xl border border-dashed border-line bg-card px-5 py-4 text-sm text-ink-muted">
+        No appraisal is running right now. You'll be able to set targets here once your organization opens an appraisal cycle.
+      </div>
+    );
+  }
+  if (failed || !data) return null;
+
+  const indicators = data.indicators || [];
+  const accepted = indicators.filter((i) => i.status !== "proposed" && i.status !== "rejected");
+  const proposed = indicators.filter((i) => i.status === "proposed");
+  const withTarget = accepted.filter((i) => i.target).length;
+  const submitted = accepted.filter((i) => i.target?.status === "submitted").length;
+  const review = (data.reviews || [])[0] || null;
+  const bottomUp = data.cycle?.workflow_type === "bottom_up";
+  const done = ["completed", "published", "acknowledged", "appealed", "resolved"];
+
+  let next;
+  if (review && review.status === "in_progress") {
+    next = { text: "Your review is open — record what you achieved against each target.", action: "Go to My Reviews", tab: "reviews" };
+  } else if (review && review.status === "published") {
+    next = { text: "Your review has been published — read it and acknowledge it.", action: "Go to My Reviews", tab: "reviews" };
+  } else if (review && done.includes(review.status)) {
+    next = { text: `Your review is complete${review.overall_rating != null ? ` — overall score ${Number(review.overall_rating).toFixed(2)}%` : ""}.`, action: "View review", tab: "reviews" };
+  } else if (accepted.length === 0 && proposed.length > 0) {
+    next = { text: `${proposed.length} indicator${proposed.length === 1 ? "" : "s"} you proposed ${proposed.length === 1 ? "is" : "are"} waiting for your head of department to review.`, action: null };
+  } else if (accepted.length === 0) {
+    next = bottomUp && !data.locks.indicators_locked
+      ? { text: "Propose the indicators you'll be measured on, for your head of department to review.", action: "Propose indicators", tab: "targets" }
+      : { text: "Your department hasn't set your indicators for this cycle yet. Nothing to do for now.", action: null };
+  } else if (submitted < accepted.length) {
+    const remaining = accepted.length - submitted;
+    next = data.locks.targets_locked
+      ? { text: "Targets are locked for your department.", action: null }
+      : { text: `Set and submit targets for ${remaining} more indicator${remaining === 1 ? "" : "s"}.`, action: "Go to My Targets", tab: "targets" };
+  } else {
+    next = { text: "All your targets are submitted. Your reviewer will call up your review when it's time.", action: null };
+  }
+
+  const steps = [
+    { label: "Indicators", value: accepted.length ? `${accepted.length} set` : proposed.length ? `${proposed.length} proposed` : "Not yet", ok: accepted.length > 0 },
+    { label: "Targets", value: accepted.length ? `${submitted}/${accepted.length} submitted` : "—", ok: accepted.length > 0 && submitted === accepted.length },
+    { label: "Review", value: review ? String(review.status).replace(/_/g, " ") : "Not called up", ok: !!review && done.includes(review.status) },
+  ];
+
+  return (
+    <div className="rounded-2xl border border-line/80 bg-gradient-to-br from-brand/5 to-card px-5 py-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">{cycle.name || "Current appraisal"}</div>
+          <p className="mt-1 text-sm font-semibold text-ink">{next.text}</p>
+          {withTarget > submitted && submitted < accepted.length && !data.locks.targets_locked ? (
+            <p className="mt-0.5 text-xs text-amber-700">
+              {withTarget - submitted} target{withTarget - submitted === 1 ? " is" : "s are"} saved as draft — submit {withTarget - submitted === 1 ? "it" : "them"} so your reviewer can see {withTarget - submitted === 1 ? "it" : "them"}.
+            </p>
+          ) : null}
+        </div>
+        {next.action && next.tab ? (
+          <PrimaryBtn onClick={() => onGo(next.tab)}>
+            {next.action} <ChevronRight className="h-4 w-4" />
+          </PrimaryBtn>
+        ) : null}
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {steps.map((st) => (
+          <div key={st.label} className="flex items-center gap-2 rounded-xl border border-line-soft bg-card px-3 py-2">
+            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${st.ok ? "bg-emerald-50 text-emerald-600" : "bg-sunken text-ink-faint"}`}>
+              {st.ok ? <Check className="h-3.5 w-3.5" /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+            </span>
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint">{st.label}</div>
+              <div className="truncate text-xs font-semibold capitalize text-ink">{st.value}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Self-booting wrapper for the Self-Service page: loads the current cycle,
  * administration period, department target locks, and review sessions, then
  * offers the two employee views (targets + reviews) behind inner tabs.
@@ -1215,6 +1322,7 @@ export default function EmployeeAppraisalTab() {
 
   return (
     <div className="space-y-4">
+      <MyAppraisalSummary cycle={currentCycle} myEmployeeId={myEmployeeId} onGo={setInner} />
       <TabPills
         layoutId="ess-appraisal-tab"
         active={inner}

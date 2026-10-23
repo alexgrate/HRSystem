@@ -210,3 +210,14 @@ export const appraisalCycleLifecycleService = {
       reviewer_employee_id: reviewer_employee_id || null,
     }),
 };
+
+// Who the signed-in user oversees and what they may do — computed server-side
+// from reporting relationships (line manager, head of department, designated
+// reviewer) AND the permissions their roles hold in Access Management, so the
+// page never has to read the whole staff directory to decide what to show.
+export const appraisalTeamService = {
+  context: () => api.get('/api/appraisal-cycles/context'),
+  team: (cycleId) => api.get(`/api/appraisal-cycles/${cycleId}/team`),
+  employeeOverview: (cycleId, employeeId) =>
+    api.get(`/api/appraisal-cycles/${cycleId}/employees/${employeeId}/overview`),
+};
