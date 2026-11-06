@@ -9,6 +9,7 @@ const todo = (text) => ({ todo: text });
 export const TERMS = {
   path: "/terms",
   docName: "Terms of service",
+  description: "The terms for using dashhr, the HR and payroll software at dashhr.app, written in plain words.",
   title: ["The rules of", "the workspace."],
   hand: "every section comes with a plain-words note",
   clauses: [
@@ -118,6 +119,7 @@ export const TERMS = {
 export const PRIVACY = {
   path: "/privacy",
   docName: "Privacy policy",
+  description: "What personal data dashhr holds and why, who can see it, how it's kept safe, and your rights under the Nigeria Data Protection Act 2023.",
   title: ["What we keep,", "and why."],
   hand: "the short version comes first",
   extraMeta: "Nigeria Data Protection Act 2023",

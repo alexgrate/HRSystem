@@ -8,6 +8,7 @@ import SectionTabs from "./components/SectionTabs";
 import Article from "./components/Article";
 import DocsHome from "./components/DocsHome";
 import { ROLES, guideBySlug } from "./data/guides";
+import usePageMeta from "../site/usePageMeta";
 
 const ROLE_KEY = "dashhr_docs_role";
 
@@ -33,8 +34,15 @@ export default function Docs() {
     }
   }, [role]);
 
+  usePageMeta({
+    title: guide ? `${guide.title} · dashhr handbook` : "The dashhr handbook · How to use dashhr",
+    description: guide
+      ? guide.summary
+      : "Step-by-step guides for dashhr: setting up your workspace, payroll, leave, loans, appraisals, approvals and the self-service portal.",
+    path: guide ? `/docs/${guide.slug}` : "/docs",
+  });
+
   useEffect(() => {
-    document.title = guide ? `${guide.title} · dashhr handbook` : "The dashhr handbook";
     window.scrollTo(0, 0);
   }, [guide]);
 

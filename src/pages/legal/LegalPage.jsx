@@ -6,6 +6,7 @@ import SiteHeader from "../site/SiteHeader";
 import SiteFooter from "../site/SiteFooter";
 import { paper } from "../landing/styles";
 import { LEGAL_STATUS } from "./data/legal";
+import usePageMeta from "../site/usePageMeta";
 
 const num = (i) => String(i + 1).padStart(2, "0");
 
@@ -117,8 +118,9 @@ export default function LegalPage({ doc }) {
   const active = useActiveSection(ids);
   const stripRef = useRef(null);
 
+  usePageMeta({ title: `${doc.docName} · dashhr`, description: doc.description, path: doc.path });
+
   useEffect(() => {
-    document.title = `${doc.docName} · dashhr`;
     window.scrollTo(0, 0);
   }, [doc]);
 

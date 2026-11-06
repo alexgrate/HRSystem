@@ -26,6 +26,7 @@ import Footer from "./components/Footer";
 import "./landing.css";
 import "lenis/dist/lenis.css";
 import useLandingMotion from "./hooks/useLandingMotion";
+import usePageMeta from "../site/usePageMeta";
 
 export default function Landing() {
     const { user, loading } = useAuth()
@@ -37,6 +38,11 @@ export default function Landing() {
 function LandingPage() {
     const rootRef = useRef(null)
     useLandingMotion(rootRef)
+    usePageMeta({
+        title: "dashhr · HR and payroll software for growing African businesses",
+        description: "Payroll with PAYE worked out under the Nigeria Tax Act 2025, plus leave, loans, appraisals and approvals, in one workspace your whole team can use.",
+        path: "/",
+    })
 
     return (
         <div ref={rootRef} className="min-h-screen overflow-x-clip bg-lp-paper font-grotesk text-lp-ink antialiased">
