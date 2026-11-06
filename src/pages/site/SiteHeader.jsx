@@ -11,8 +11,8 @@ export default function SiteHeader() {
   return (
     <header className="sticky top-0 z-30 border-b-[1.5px] border-lp-ink bg-lp-paper">
       <div className="mx-auto flex h-[68px] max-w-[1280px] items-center justify-between gap-4 px-4 sm:px-10">
-        <Link to="/" aria-label="dashhr home" className="font-news text-[30px] font-semibold italic tracking-tight text-lp-ink">
-          dash<span className="not-italic text-lp-plum">hr</span>
+        <Link to="/" aria-label="DashHR home" className="font-news text-[30px] font-semibold italic tracking-tight text-lp-ink">
+          Dash<span className="not-italic text-lp-plum">HR</span>
         </Link>
 
         <nav aria-label="Site" className="hidden items-center gap-7 md:flex">

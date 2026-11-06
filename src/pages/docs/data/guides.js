@@ -34,7 +34,7 @@ export const GUIDES = [
     roles: ["admin"],
     title: "Create your organisation's workspace",
     summary:
-      "Sign your organisation up for dashhr. You become its first administrator, and your team gets its own address to sign in at, such as acme.dashhr.app.",
+      "Sign your organisation up for DashHR. You become its first administrator, and your team gets its own address to sign in at, such as acme.dashhr.app.",
     opensFrom: "dashhr.app",
     steps: [
       {
@@ -59,7 +59,7 @@ export const GUIDES = [
         title: "Verify your email",
         where: ["Your inbox"],
         actions: [
-          "You'll see **Check your email**. Open the email dashhr sent you.",
+          "You'll see **Check your email**. Open the email DashHR sent you.",
           "Click the verification link in it. Your workspace is activated and you're signed in.",
         ],
       },
@@ -86,7 +86,7 @@ export const GUIDES = [
         where: ["your-company.dashhr.app", "Log in"],
         actions: [
           "Open your company's address, for example **dmfb.dashhr.app**.",
-          "Don't know it? Go to **dashhr.app**, click **Log in**, type your workspace name and click **Continue**. dashhr takes you to the right address.",
+          "Don't know it? Go to **dashhr.app**, click **Log in**, type your workspace name and click **Continue**. DashHR takes you to the right address.",
         ],
         tip: "it's in your onboarding email, or ask HR.",
       },
@@ -104,7 +104,7 @@ export const GUIDES = [
         where: ["Log in", "Continue with single sign-on"],
         actions: [
           "If your company uses single sign-on, you'll see **Continue with single sign-on** instead of a password box. Click it.",
-          "Sign in on your company's page. You're brought back to dashhr, signed in.",
+          "Sign in on your company's page. You're brought back to DashHR, signed in.",
         ],
       },
       {
@@ -114,7 +114,7 @@ export const GUIDES = [
       },
     ],
     notes: [
-      "Your account can be signed in on one browser or device at a time. If it's already signed in somewhere else, dashhr asks whether to sign out that session. Click **Sign out & continue** to carry on here.",
+      "Your account can be signed in on one browser or device at a time. If it's already signed in somewhere else, DashHR asks whether to sign out that session. Click **Sign out & continue** to carry on here.",
       "Accounts set to Inactive, Suspended or Terminated can't sign in.",
     ],
     related: ["set-or-reset-your-password", "find-your-way-around"],
@@ -125,7 +125,7 @@ export const GUIDES = [
     roles: ["admin", "approver", "employee"],
     title: "Set or reset your password",
     summary:
-      "New to dashhr? Set your password from your onboarding email. Forgotten it? Reset it with a code sent to your work email.",
+      "New to DashHR? Set your password from your onboarding email. Forgotten it? Reset it with a code sent to your work email.",
     opensFrom: "Log in",
     steps: [
       {
@@ -143,7 +143,7 @@ export const GUIDES = [
         where: ["Log in", "Forgot password?"],
         actions: [
           "On your workspace's sign-in page, click **Forgot password?**",
-          "Enter your **Work email** and send. dashhr emails you a **Verification code**.",
+          "Enter your **Work email** and send. DashHR emails you a **Verification code**.",
         ],
       },
       {
@@ -158,7 +158,7 @@ export const GUIDES = [
       },
     ],
     notes: [
-      "If your organisation uses single sign-on, you don't have a dashhr password. Your password is managed by your company's identity provider.",
+      "If your organisation uses single sign-on, you don't have a DashHR password. Your password is managed by your company's identity provider.",
     ],
     related: ["sign-in"],
   },
@@ -168,7 +168,7 @@ export const GUIDES = [
     roles: ["admin", "approver", "employee"],
     title: "Find your way around",
     summary:
-      "The side menu holds every part of dashhr. You only see the pages your role allows, so your menu may be shorter than this list.",
+      "The side menu holds every part of DashHR. You only see the pages your role allows, so your menu may be shorter than this list.",
     opensFrom: "Side menu",
     glossary: [
       { term: "Dashboard", text: "Your home page: what needs your attention, your own leave, pay, loans and appraisal, and organisation figures if your role can see them. Everyone has it." },
@@ -237,7 +237,7 @@ export const GUIDES = [
     roles: ["admin", "approver", "employee"],
     title: "Notifications and emails",
     summary:
-      "dashhr keeps you posted in the app and by email. The bell at the top of every page shows how many notifications you haven't read.",
+      "DashHR keeps you posted in the app and by email. The bell at the top of every page shows how many notifications you haven't read.",
     opensFrom: "Bell",
     steps: [
       {
@@ -260,7 +260,7 @@ export const GUIDES = [
       { term: "Final approvals", text: "If your job title is set to Notify on final approval of any process, a notice whenever any request gets its last approval." },
       { term: "Emails", text: "Sent for things like a request waiting for your approval, a reminder about one, a payslip being available, and your onboarding and password codes." },
     ],
-    notes: ["Notifications refresh by themselves while dashhr is open."],
+    notes: ["Notifications refresh by themselves while DashHR is open."],
     related: ["your-dashboard", "directory-and-setups"],
   },
   {
@@ -590,7 +590,7 @@ export const GUIDES = [
         title: "Act for them while they're away",
         where: ["Approvals Inbox"],
         actions: [
-          "From the first to the last day of their approved leave, you get their access in dashhr.",
+          "From the first to the last day of their approved leave, you get their access in DashHR.",
           "Check your **Approvals Inbox**: requests that would go to them come to you as well.",
         ],
         tip: "it ends by itself when their leave does.",
@@ -668,7 +668,7 @@ export const GUIDES = [
         actions: [
           "Open **Payroll Processing** and click **Run payroll**.",
           "Choose the **Month**, **Year** and **Pay group**, and confirm the **Working days in the month**.",
-          "Confirm. dashhr works out everyone's pay as a preview.",
+          "Confirm. DashHR works out everyone's pay as a preview.",
         ],
       },
       {
@@ -795,7 +795,7 @@ export const GUIDES = [
     ],
     notes: [
       "Some leave types don't need approval. Those requests are approved as soon as you submit them.",
-      "dashhr won't accept a request that goes over the days allowed for the period, counting what's already approved or pending.",
+      "DashHR won't accept a request that goes over the days allowed for the period, counting what's already approved or pending.",
       "Dates can't overlap a leave request you've already made.",
     ],
     related: ["cover-as-relief-officer", "manage-leave-requests"],
@@ -1326,7 +1326,7 @@ export const GUIDES = [
     ],
     notes: [
       "Relationships also give access without a role: line managers see their direct reports' appraisals, department heads handle their department's indicators and targets, and approvers see their requests in the Approvals Inbox.",
-      "System roles come with dashhr. Their code is locked, but you can rename them and edit their description.",
+      "System roles come with DashHR. Their code is locked, but you can rename them and edit their description.",
       "Changing roles needs Manage rights on Roles & Permissions. Without them, the page is read-only.",
     ],
     related: ["audit-trail", "add-your-employees"],
@@ -1408,10 +1408,10 @@ export const GUIDES = [
     summary:
       "Let your team sign in through your own identity provider, such as Microsoft Entra ID, Okta or Keycloak, using OpenID Connect.",
     opensFrom: "Company Settings",
-    before: ["Your staff's emails in dashhr match the emails they sign in with at your company. That's how dashhr matches each person to their account."],
+    before: ["Your staff's emails in DashHR match the emails they sign in with at your company. That's how DashHR matches each person to their account."],
     steps: [
       {
-        title: "Register dashhr with your provider",
+        title: "Register DashHR with your provider",
         where: ["Company Settings", "Authentication"],
         actions: [
           "Open **Company Settings** and find **Authentication**.",

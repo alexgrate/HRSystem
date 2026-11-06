@@ -9,7 +9,7 @@ const todo = (text) => ({ todo: text });
 export const TERMS = {
   path: "/terms",
   docName: "Terms of service",
-  description: "The terms for using dashhr, the HR and payroll software at dashhr.app, written in plain words.",
+  description: "The terms for using DashHR, the HR and payroll software at dashhr.app, written in plain words.",
   title: ["The rules of", "the workspace."],
   hand: "every section comes with a plain-words note",
   clauses: [
@@ -19,8 +19,8 @@ export const TERMS = {
       inShort: "who you're agreeing with.",
       body: [
         [
-          "dashhr is HR and payroll software at dashhr.app, provided by Dash Microfinance Bank Ltd (“Dash”, “we”, “us”). ",
-          todo("legal entity that operates dashhr, its RC number and registered address"),
+          "DashHR is HR and payroll software at dashhr.app, provided by Dash Microfinance Bank Ltd (“Dash”, “we”, “us”). ",
+          todo("legal entity that operates DashHR, its RC number and registered address"),
         ],
       ],
     },
@@ -29,8 +29,8 @@ export const TERMS = {
       title: "Your workspace",
       inShort: "your company signs up. your people get invited.",
       body: [
-        ["When an organisation signs up, it gets its own dashhr workspace. The person who creates it confirms they're allowed to accept these terms for that organisation."],
-        ["The organisation decides who gets an account. Employees use dashhr through their employer, under these terms and their employer's own policies."],
+        ["When an organisation signs up, it gets its own DashHR workspace. The person who creates it confirms they're allowed to accept these terms for that organisation."],
+        ["The organisation decides who gets an account. Employees use DashHR through their employer, under these terms and their employer's own policies."],
       ],
     },
     {
@@ -48,7 +48,7 @@ export const TERMS = {
       inShort: "it's yours. we look after it.",
       body: [
         [
-          "Your organisation owns the information it puts into dashhr. We use it to run the service, as our ",
+          "Your organisation owns the information it puts into DashHR. We use it to run the service, as our ",
           { to: "/privacy", label: "privacy policy" },
           " explains.",
         ],
@@ -57,9 +57,9 @@ export const TERMS = {
     {
       id: "payroll",
       title: "Payroll figures",
-      inShort: "dashhr does the maths. you still sign it off.",
+      inShort: "DashHR does the maths. you still sign it off.",
       body: [
-        ["dashhr works out PAYE, pension, NHF and other deductions from the details you enter and the tax rules built into the app, including the Nigeria Tax Act 2025."],
+        ["DashHR works out PAYE, pension, NHF and other deductions from the details you enter and the tax rules built into the app, including the Nigeria Tax Act 2025."],
         ["Every payroll has an approval step. Check the figures before you approve them. Filing returns and paying deductions to the authorities stays your organisation's responsibility."],
       ],
     },
@@ -119,15 +119,15 @@ export const TERMS = {
 export const PRIVACY = {
   path: "/privacy",
   docName: "Privacy policy",
-  description: "What personal data dashhr holds and why, who can see it, how it's kept safe, and your rights under the Nigeria Data Protection Act 2023.",
+  description: "What personal data DashHR holds and why, who can see it, how it's kept safe, and your rights under the Nigeria Data Protection Act 2023.",
   title: ["What we keep,", "and why."],
   hand: "the short version comes first",
   extraMeta: "Nigeria Data Protection Act 2023",
   short: [
-    "Your employer decides what goes into dashhr. We run the software for them.",
+    "Your employer decides what goes into DashHR. We run the software for them.",
     "Salaries and bank details are only visible to the roles your organisation allows.",
-    "There are no advertising or analytics trackers on dashhr.",
-    "Dash's platform team can see loan requests made in dashhr, so it can run and oversee lending.",
+    "There are no advertising or analytics trackers on DashHR.",
+    "Dash's platform team can see loan requests made in DashHR, so it can run and oversee lending.",
   ],
   clauses: [
     {
@@ -135,7 +135,7 @@ export const PRIVACY = {
       title: "Who's responsible",
       inShort: "ask your HR team first. they hold the pen.",
       body: [
-        ["Your employer is the data controller for your employee record: they decide what's collected and why. Dash processes it on their behalf to run dashhr."],
+        ["Your employer is the data controller for your employee record: they decide what's collected and why. Dash processes it on their behalf to run DashHR."],
         ["If you apply for a loan funded by Dash, Dash Microfinance Bank is also a controller of that application and the agreement you sign."],
       ],
     },
@@ -177,8 +177,8 @@ export const PRIVACY = {
         {
           list: [
             [{ b: "People in your organisation" }, ", as far as their role allows, and approvers for the requests they approve."],
-            [{ b: "Dash's platform team" }, ", who can see each organisation's details and headcount, and every loan request made in dashhr, including the employee's name and email and the loan's details. That covers loans your organisation funds itself as well as loans funded by Dash."],
-            [{ b: "Microsoft" }, ", which delivers dashhr's emails through Microsoft 365."],
+            [{ b: "Dash's platform team" }, ", who can see each organisation's details and headcount, and every loan request made in DashHR, including the employee's name and email and the loan's details. That covers loans your organisation funds itself as well as loans funded by Dash."],
+            [{ b: "Microsoft" }, ", which delivers DashHR's emails through Microsoft 365."],
             [{ b: "Your identity provider" }, ", if your organisation uses single sign-on."],
             [todo("hosting provider, and the country your data is stored in")],
           ],
@@ -191,8 +191,8 @@ export const PRIVACY = {
       title: "Emails & your browser",
       inShort: "no cookie banner needed. nothing to track.",
       body: [
-        ["dashhr emails you when something needs you or is ready for you, such as a request to approve or a payslip being available."],
-        ["Your browser keeps your sign-in token and your display preferences in local storage. dashhr uses no advertising or analytics cookies."],
+        ["DashHR emails you when something needs you or is ready for you, such as a request to approve or a payslip being available."],
+        ["Your browser keeps your sign-in token and your display preferences in local storage. DashHR uses no advertising or analytics cookies."],
       ],
     },
     {

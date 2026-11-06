@@ -82,7 +82,7 @@ export default function Diary() {
             <div className="mx-auto max-w-[1280px] px-4 sm:px-10">
                 <div className="mb-12 flex flex-wrap items-end justify-between gap-6">
                     <h2 className="font-news text-[clamp(38px,5.2vw,72px)] font-medium leading-none tracking-[-0.025em]">
-                        A week with <i className="font-medium">dashhr.</i>
+                        A week with <i className="font-medium">DashHR.</i>
                     </h2>
                     <p className="font-plex text-xs uppercase tracking-[0.12em] text-lp-muted">
                         From the notebook of an HR manager

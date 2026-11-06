@@ -14,10 +14,10 @@ export default function Nav() {
       <div className="mx-auto flex h-[68px] max-w-[1280px] items-center justify-between gap-4 px-4 sm:px-10">
         <a
           href="#top"
-          aria-label="dashhr home"
+          aria-label="DashHR home"
           className="font-news text-[30px] font-semibold italic tracking-tight text-lp-ink"
         >
-          dash<span className="not-italic text-lp-plum">hr</span>
+          Dash<span className="not-italic text-lp-plum">HR</span>
         </a>
 
         <nav aria-label="Primary" className="hidden items-center gap-7 lg:flex">

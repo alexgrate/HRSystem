@@ -118,7 +118,7 @@ export default function LegalPage({ doc }) {
   const active = useActiveSection(ids);
   const stripRef = useRef(null);
 
-  usePageMeta({ title: `${doc.docName} · dashhr`, description: doc.description, path: doc.path });
+  usePageMeta({ title: `${doc.docName} · DashHR`, description: doc.description, path: doc.path });
 
   useEffect(() => {
     window.scrollTo(0, 0);

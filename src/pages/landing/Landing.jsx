@@ -39,7 +39,7 @@ function LandingPage() {
     const rootRef = useRef(null)
     useLandingMotion(rootRef)
     usePageMeta({
-        title: "dashhr · HR and payroll software for growing African businesses",
+        title: "DashHR · HR and payroll software for growing African businesses",
         description: "Payroll with PAYE worked out under the Nigeria Tax Act 2025, plus leave, loans, appraisals and approvals, in one workspace your whole team can use.",
         path: "/",
     })

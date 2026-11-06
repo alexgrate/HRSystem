@@ -35,10 +35,10 @@ export default function Docs() {
   }, [role]);
 
   usePageMeta({
-    title: guide ? `${guide.title} · dashhr handbook` : "The dashhr handbook · How to use dashhr",
+    title: guide ? `${guide.title} · DashHR handbook` : "The DashHR handbook · How to use DashHR",
     description: guide
       ? guide.summary
-      : "Step-by-step guides for dashhr: setting up your workspace, payroll, leave, loans, appraisals, approvals and the self-service portal.",
+      : "Step-by-step guides for DashHR: setting up your workspace, payroll, leave, loans, appraisals, approvals and the self-service portal.",
     path: guide ? `/docs/${guide.slug}` : "/docs",
   });
 
@@ -62,7 +62,7 @@ export default function Docs() {
               guide ? "mt-2 text-[30px] leading-none" : "mt-3 text-[clamp(44px,6.4vw,92px)] leading-[0.95]"
             }`}
           >
-            The dashhr <i className="font-medium text-lp-lilac">handbook.</i>
+            The DashHR <i className="font-medium text-lp-lilac">handbook.</i>
           </Heading>
           {!guide && (
             <p className="mt-4 inline-block -rotate-[1.5deg] font-hand text-[26px] font-semibold text-lp-lilac">

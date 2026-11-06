@@ -103,7 +103,7 @@ export default function Folder() {
                     <span className="text-lp-muted">To:</span> amaka@yourcompany.com
                 </p>
                 <p className="relative py-1 font-plex text-[9.5px] sm:text-[11.5px]">
-                    <span className="text-lp-muted">From:</span> dashhr
+                    <span className="text-lp-muted">From:</span> DashHR
                 </p>
                 <p className="relative mt-2.5 text-xs font-semibold sm:text-sm">Payslip available</p>
             </div>

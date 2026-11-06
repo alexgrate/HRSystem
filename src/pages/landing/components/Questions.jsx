@@ -70,7 +70,7 @@ export default function Questions() {
 
         <div>
           <p className="mb-4 ml-2 inline-block -rotate-2 font-hand text-[24px] font-semibold text-lp-plum sm:text-[28px]">
-            now they check dashhr themselves{"\u00A0"}
+            now they check DashHR themselves{"\u00A0"}
             <span className="lg:hidden">↓</span>
             <span className="hidden lg:inline">→</span>
           </p>

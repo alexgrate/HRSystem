@@ -38,7 +38,7 @@ export default function Hero() {
 
                     <p className="mt-7 max-w-[500px] text-[17px] leading-relaxed text-lp-muted lg:text-[19px]">
                         <strong className="font-semibold text-lp-ink">
-                            dashhr is HR software for growing African businesses.
+                            DashHR is HR software for growing African businesses.
                         </strong>{" "}
                         Payroll with PAYE worked out under the Nigeria Tax Act 2025, plus leave, loans, appraisals and approvals, in one workspace your whole team can use.
                     </p>

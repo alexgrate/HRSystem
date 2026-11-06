@@ -71,7 +71,7 @@ export default function Before() {
         </div>
 
         <p className="mt-20 max-w-[900px] font-news text-[clamp(30px,3.6vw,50px)] leading-[1.15] tracking-[-0.015em] lg:mt-24">
-          dashhr puts all of it in{" "}
+          DashHR puts all of it in{" "}
           <span className="relative whitespace-nowrap italic">
             one place
             <svg

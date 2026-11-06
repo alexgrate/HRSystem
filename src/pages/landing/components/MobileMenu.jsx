@@ -79,7 +79,7 @@ export default function MobileMenu({ open, setOpen, triggerRef }) {
         >
           <div className="flex h-[68px] shrink-0 items-center justify-between">
             <span className="font-news text-[30px] font-semibold italic tracking-tight">
-              dash<span className="not-italic text-lp-lilac">hr</span>
+              Dash<span className="not-italic text-lp-lilac">HR</span>
             </span>
             <button
               ref={closeRef}
