@@ -331,9 +331,11 @@ const Login = () => {
             )}
           </div>
 
-          <div className="text-center text-[9px] uppercase tracking-[0.24em] text-ink-faint shrink-0 mt-8">
-            MFA · ISO 27001 · SOC 2
-          </div>
+          <nav aria-label="Help and legal" className="mt-8 flex shrink-0 justify-center gap-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">
+            <Link to="/docs" className="hover:text-brand">Help</Link>
+            <Link to="/terms" className="hover:text-brand">Terms</Link>
+            <Link to="/privacy" className="hover:text-brand">Privacy</Link>
+          </nav>
         </div>
       </div>
     </div>

@@ -1,0 +1,109 @@
+.lp-perforated::before{
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: -6px;
+    height: 12px;
+    background: radial-gradient(circle at 8px 6px, var(--color-lp-kraft) 4.5px, transparent 5px) 0 0 / 16px 12px repeat-x;
+}
+
+.lp-clip{
+    position: absolute;
+    left: 14px;
+    top: -22px;
+    width: 16px;
+    height: 52px;
+    border: 2.5px solid #7d7a76;
+    border-radius: 9px;
+    z-index: 3;
+}
+
+.lp-clip::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  width: 6px;
+  height: 30px;
+  border: 2.5px solid #7d7a76;
+  border-top: 0;
+  border-radius: 0 0 6px 6px;
+}
+
+.lp-envelope::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 46%;
+  background:
+    linear-gradient(to bottom right, transparent 49.5%, rgb(31 26 23 / 0.12) 50%, transparent 51%) left / 50% 100% no-repeat,
+    linear-gradient(to bottom left, transparent 49.5%, rgb(31 26 23 / 0.12) 50%, transparent 51%) right / 50% 100% no-repeat;
+}
+
+.lp-stamp {
+  animation: lp-thunk 0.55s 0.7s both cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+@keyframes lp-thunk {
+  from { opacity: 0; scale: 1.9; }
+  to   { opacity: 0.88; scale: 1; }
+}
+
+.lp-sheet{
+    background:
+        repeating-linear-gradient(0deg, transparent 0 9px, rgb(47 122 74 / 0.35) 9px 10px),
+        repeating-linear-gradient(90deg, transparent 0 13px, rgb(47 122 74 / 0.35) 13px 14px),
+        #eef6ef;
+}
+
+.lp-ruled {
+  background:
+    linear-gradient(90deg, transparent 0 var(--margin), rgb(178 59 40 / 0.45) var(--margin) calc(var(--margin) + 1.5px), transparent 0),
+    repeating-linear-gradient(180deg, transparent 0 31px, #cfd8e3 31px 32px),
+    var(--color-lp-white);
+}
+
+.lp-coil {
+  background: repeating-linear-gradient(90deg, transparent 0 12px, #6b6259 12px 17px, transparent 17px 30px);
+  border-radius: 6px;
+}
+
+@media (min-width: 1024px) {
+  .lp-coil {
+    background: repeating-linear-gradient(180deg, transparent 0 12px, #6b6259 12px 17px, transparent 17px 30px);
+  }
+}
+
+.lp-torn {
+  clip-path: polygon(0 0, 100% 0, 100% 90%, 96% 100%, 91% 92%, 86% 99%, 80% 91%, 74% 100%, 68% 93%, 62% 100%, 56% 91%, 50% 99%, 44% 92%, 38% 100%, 32% 91%, 26% 99%, 20% 92%, 14% 100%, 8% 91%, 3% 98%, 0 92%);
+}
+
+.lp-grow {
+  transform-origin: left;
+  animation: lp-grow 6s linear both;
+}
+
+@keyframes lp-grow {
+  from { scale: 0 1; }
+  to   { scale: 1 1; }
+}
+
+.lp-photo{
+    background: repeating-linear-gradient(135deg, rgb(31 26 23 / 0.06) 0 8px, transparent 8px 16px), #d9c7b2;
+}
+
+.lp-receipt::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: -12px;
+  height: 12px;
+  background:
+    linear-gradient(135deg, var(--color-lp-white) 50%, transparent 50%) 0 0 / 16px 12px repeat-x,
+    linear-gradient(-135deg, var(--color-lp-white) 50%, transparent 50%) 0 0 / 16px 12px repeat-x;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-stamp { animation: none; }
+}

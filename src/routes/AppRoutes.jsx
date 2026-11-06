@@ -24,6 +24,11 @@ const PlatformOrganizationsPage = lazy(() => import("../pages/platform/PlatformO
 const PlatformLoansPage = lazy(() => import("../pages/platform/PlatformLoansPage"));
 const PlatformLoanAgreementPage = lazy(() => import("../pages/platform/PlatformLoanAgreementPage"));
 
+const Landing = lazy(() => import("../pages/landing/Landing"))
+const Terms = lazy(() => import("../pages/legal/Terms"))
+const Privacy = lazy(() => import("../pages/legal/Privacy"))
+const Docs = lazy(() => import("../pages/docs/Docs"))
+
 // Shown while a lazy route chunk downloads.
 function PageLoading() {
   return (
@@ -49,6 +54,18 @@ function OrgApp() {
       <PermissionProvider>
         <ConfigProvider>
           <Routes>
+            <Route 
+              path="/" 
+              element={
+                <Suspense fallback={null}>
+                  <Landing />
+                </Suspense>
+              }
+            />
+            <Route path="/docs" element={<Suspense fallback={null}><Docs /></Suspense>} />
+            <Route path="/docs/:slug" element={<Suspense fallback={null}><Docs /></Suspense>} />
+            <Route path="/terms" element={<Suspense fallback={null}><Terms /></Suspense>} />
+            <Route path="/privacy" element={<Suspense fallback={null}><Privacy /></Suspense>} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<SignUp />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
