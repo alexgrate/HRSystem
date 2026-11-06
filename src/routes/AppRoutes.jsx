@@ -12,6 +12,8 @@ import PlatformLayout from "../components/layout/PlatformLayout";
 import Login from "../pages/auth/Login";
 import SignUp from "../pages/auth/SignUp";
 import ForgotPassword from "../pages/auth/ForgotPassword";
+import FindWorkspace from "../pages/auth/FindWorkspace";
+import { isMainDomain } from "../utils/workspace";
 import SsoCallback from "../pages/auth/SsoCallback";
 import PlatformLoginPage from "../pages/platform/PlatformLoginPage";
 import { RESOURCES, pathFor } from "../config/resources";
@@ -66,9 +68,9 @@ function OrgApp() {
             <Route path="/docs/:slug" element={<Suspense fallback={null}><Docs /></Suspense>} />
             <Route path="/terms" element={<Suspense fallback={null}><Terms /></Suspense>} />
             <Route path="/privacy" element={<Suspense fallback={null}><Privacy /></Suspense>} />
-            <Route path="/login" element={<Login />} />
+            <Route path="/login" element={isMainDomain() ? <FindWorkspace /> : <Login />} />
             <Route path="/signup" element={<SignUp />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/forgot-password" element={isMainDomain() ? <FindWorkspace next="/forgot-password" /> : <ForgotPassword />} />
             <Route path="/sso-callback" element={<SsoCallback />} />
 
             <Route

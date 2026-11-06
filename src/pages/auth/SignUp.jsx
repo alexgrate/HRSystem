@@ -1,3 +1,4 @@
+
 import { useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -7,8 +8,7 @@ import {
 } from "lucide-react";
 import { authService } from "../../services/authService";
 import logoImg from "../../assets/dashIcon.jpg";
-
-const WORKSPACE_DOMAIN = import.meta.env.VITE_WORKSPACE_DOMAIN || "dashhr.app";
+import { WORKSPACE_DOMAIN } from "../../utils/workspace";
 
 const emailValid = (e) => /^\S+@\S+\.\S+$/.test(e);
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
