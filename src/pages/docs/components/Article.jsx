@@ -6,7 +6,7 @@ import { GUIDES, ROLE_NAMES, guideBySlug, guidesInSection, sectionById } from ".
 function Where({ path }) {
   return (
     <p className="mt-3 inline-flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded border-[1.5px] border-dashed border-lp-muted bg-lp-paper px-2.5 py-1.5 font-plex text-xs">
-      <span className="sr-only">Where: </span>
+      <span className="text-lp-muted">Where:</span>
       {path.map((part, i) => (
         <span key={part} className="inline-flex items-center gap-1.5">
           {i > 0 && <ChevronRight size={12} aria-hidden="true" className="text-lp-muted" />}
@@ -15,6 +15,19 @@ function Where({ path }) {
       ))}
     </p>
   );
+}
+
+export function Rich({ text }) {
+  return String(text)
+    .split(/(\*\*[^*]+\*\*)/g)
+    .filter(Boolean)
+    .map((part, i) =>
+      part.startsWith("**") && part.endsWith("**") ? (
+        <b key={i} className="font-semibold text-lp-ink">{part.slice(2, -2)}</b>
+      ) : (
+        part
+      )
+    );
 }
 
 function Step({ step, n }) {
@@ -31,8 +44,26 @@ function Step({ step, n }) {
           <span className="sr-only">Step {n}: </span>
           {step.title}
         </h3>
-        <p className="mt-1 max-w-[62ch] leading-relaxed">{step.body}</p>
         {step.where && <Where path={step.where} />}
+        {step.body && (
+          <p className="mt-2 max-w-[62ch] leading-relaxed">
+            <Rich text={step.body} />
+          </p>
+        )}
+        {step.actions && (
+          <ol className="mt-3 max-w-[62ch] space-y-2">
+            {step.actions.map((action, i) => (
+              <li key={i} className="grid grid-cols-[26px_1fr] gap-2 leading-relaxed">
+                <span aria-hidden="true" className="mt-[3px] grid size-[22px] place-items-center rounded-full bg-lp-lilac font-plex text-[11px] font-semibold text-lp-deep">
+                  {String.fromCharCode(97 + i)}
+                </span>
+                <span>
+                  <Rich text={action} />
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
         {step.link && (
           <p className="mt-3">
             <Link to={`/docs/${step.link.slug}`} className="font-semibold text-lp-plum underline decoration-[1.5px] underline-offset-4">
@@ -76,6 +107,17 @@ export default function Article({ guide }) {
         <span className="rounded-[3px] border-[1.5px] border-lp-ink bg-lp-white px-2.5 py-1">Opens from: {guide.opensFrom}</span>
       </div>
 
+      {guide.before && (
+        <aside className="mt-8 border-[1.5px] border-dashed border-lp-ink bg-lp-white/60 px-5 py-4">
+          <h2 className="font-plex text-xs font-semibold uppercase tracking-[0.12em] text-lp-plum">Before you start</h2>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {guide.before.map((item) => (
+              <li key={item} className="max-w-[62ch] leading-relaxed"><Rich text={item} /></li>
+            ))}
+          </ul>
+        </aside>
+      )}
+
       {guide.steps && (
         <ol className="mt-9 flex flex-col gap-5">
           {guide.steps.map((step, i) => (
@@ -89,7 +131,7 @@ export default function Article({ guide }) {
           {guide.glossary.map((item) => (
             <div key={item.term} className="grid gap-1 border-b border-dotted border-[#b9ad9c] py-4 last:border-b-0 sm:grid-cols-[180px_1fr] sm:gap-6">
               <dt className="font-semibold">{item.term}</dt>
-              <dd className="max-w-[62ch] leading-relaxed">{item.text}</dd>
+              <dd className="max-w-[62ch] leading-relaxed"><Rich text={item.text} /></dd>
             </div>
           ))}
         </dl>
@@ -100,7 +142,7 @@ export default function Article({ guide }) {
           <h2 className="font-hand text-[28px] font-bold">good to know</h2>
           <ul className="mt-1.5 list-disc space-y-1.5 pl-5">
             {guide.notes.map((note) => (
-              <li key={note} className="max-w-[62ch]">{note}</li>
+              <li key={note} className="max-w-[62ch]"><Rich text={note} /></li>
             ))}
           </ul>
         </aside>

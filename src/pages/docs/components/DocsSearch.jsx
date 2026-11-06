@@ -7,12 +7,14 @@ const textOf = (g) =>
   [
     g.title,
     g.summary,
-    ...(g.steps || []).flatMap((s) => [s.title, s.body, s.tip, ...(s.where || [])]),
+    ...(g.before || []),
+    ...(g.steps || []).flatMap((s) => [s.title, s.body, s.tip, ...(s.actions || []), ...(s.where || [])]),
     ...(g.glossary || []).flatMap((x) => [x.term, x.text]),
     ...(g.notes || []),
   ]
     .filter(Boolean)
     .join(" ")
+    .replace(/\*\*/g, "")
     .toLowerCase();
 
 const INDEX = GUIDES.map((g) => ({ guide: g, title: g.title.toLowerCase(), text: textOf(g) }));
