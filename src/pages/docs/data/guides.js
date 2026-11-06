@@ -392,7 +392,10 @@ export const GUIDES = [
         tip: "on single sign-on? staff skip this and just sign in.",
       },
     ],
-    related: ["view-and-edit-an-employee", "roles-and-permissions"],
+    notes: [
+      "Bank details aren't on the **New employee** form or in the bulk upload. Each employee adds their own in **Self-Service Portal → Profile → Financial Information**, and HR approves it. Ask new staff to do this before their first payroll.",
+    ],
+    related: ["view-and-edit-an-employee", "update-your-profile"],
   },
   {
     slug: "directory-and-setups",
@@ -476,6 +479,7 @@ export const GUIDES = [
     notes: [
       "**Employment status** (Probation, Confirmed, Suspended, Terminated, Resigned) records their employment. **Account status** controls sign-in: Inactive, Suspended and Terminated accounts can't sign in.",
       "You can't change your own account status.",
+      "Bank details show under **Financial Information** in **View details**, but HR can't type them in here. The employee enters them in Self-Service, and you approve the change in the **Approvals Inbox**.",
       "Changes people make to their own details in the Self-Service Portal come to HR as profile update requests and are saved only once approved.",
     ],
     related: ["add-your-employees", "approve-or-reject-a-request"],
@@ -1185,7 +1189,9 @@ export const GUIDES = [
         where: ["Self-Service Portal", "Profile"],
         actions: [
           "Go to **Self-Service Portal → Profile**.",
-          "Change the details you're allowed to, such as contact details, address, bank details or next of kin, and submit.",
+          "Change the details you're allowed to. They're grouped into sections such as **Personal Information**, **Contact Information**, **Address Information** and **Emergency Contacts**.",
+          "To add or change your bank account, go to **Financial Information** and fill in **Bank Name**, **Account Type**, **Account Name**, **Account Number** and **BVN**. It goes on the payroll schedule HR uses to pay your salary.",
+          "Click **Submit Requests**. Nothing changes on your record until HR approves it.",
           "Your employment details are shown for reference. HR manages those.",
         ],
       },
