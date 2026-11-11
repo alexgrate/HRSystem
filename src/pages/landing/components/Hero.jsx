@@ -44,8 +44,8 @@ export default function Hero() {
                     </p>
 
                     <div className="mt-8 flex flex-col gap-5 sm:flex-row sm:items-center">
-                        <Link to="/signup" className={`${btnPlum} h-12 px-6 text-[15px]`}>
-                            Start your workspace
+                        <Link to="/docs" className={`${btnPlum} h-12 px-6 text-[15px]`}>
+                            Read the handbook
                             <ArrowRight size={18} aria-hidden="true" />
                         </Link>
                         <Link to="/login" className={`${textLink} text-center sm:text-left`}>
