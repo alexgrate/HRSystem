@@ -20,6 +20,7 @@ import {
   appraisalReviewService,
   appraisalSessionService,
   appraisalTeamService,
+  performanceIndicatorService,
 } from "../../services/appraisalService";
 import { administrationPeriodService } from "../../services/administrationPeriodService";
 
@@ -134,6 +135,8 @@ const GhostBtn = ({ children, className = "", ...props }) => (
 
 export function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentPeriod, targetLocks = [], indicatorLocks = [] }) {
   const toast = useToast();
+  const { user } = useAuth();
+  const myEmployeeId = user?.id || null;
   const [indicators, setIndicators] = useState([]); // department indicator selections applicable to me (bottom-up: includes my own proposals, every status)
   const [targets, setTargets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -155,8 +158,18 @@ export function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentP
       // targets against. department_id/job_role_id come from the auth profile.
       if (myDeptId) {
         try {
-          const sel = await appraisalCycleService.listDepartmentIndicators(cycleId, myDeptId, myJobRoleId);
-          setIndicators(Array.isArray(sel) ? sel : []);
+          // Self-Service shows only what applies to ME: department-wide items,
+          // my job role's, and my own proposals — never colleagues'.
+          const sel = await appraisalCycleService.listDepartmentIndicators(cycleId, myDeptId, myJobRoleId, { selfOnly: true });
+          const me = myEmployeeId;
+          setIndicators(
+            (Array.isArray(sel) ? sel : []).filter(
+              (s) =>
+                (!s.employee_id || s.employee_id === me) &&
+                (!s.job_role_id || s.job_role_id === myJobRoleId) &&
+                (!s.department_id || s.department_id === myDeptId),
+            ),
+          );
         } catch {
           setIndicators([]);
         }
@@ -168,7 +181,7 @@ export function MyTargetsSection({ myDeptId, myJobRoleId, currentCycle, currentP
     } finally {
       setLoading(false);
     }
-  }, [cycleId, myDeptId, myJobRoleId]);
+  }, [cycleId, myDeptId, myJobRoleId, myEmployeeId]);
 
   useEffect(() => {
     load();
@@ -367,6 +380,27 @@ function ProposeIndicatorsPanel({ cycleId, myDeptId, proposals = [], loading, er
   const [weight, setWeight] = useState("");
   const [busy, setBusy] = useState(false);
   const [withdrawingId, setWithdrawingId] = useState(null);
+  // My department's library — colleagues share one indicator per name, so
+  // picking an existing one proposes that same indicator for me.
+  const [library, setLibrary] = useState([]);
+
+  useEffect(() => {
+    if (!showForm) return;
+    let cancelled = false;
+    performanceIndicatorService
+      .list(false)
+      .then((rows) => {
+        if (!cancelled) setLibrary(Array.isArray(rows) ? rows : rows?.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setLibrary([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showForm]);
+
+  const existingMatch = library.find((i) => i.name?.trim().toLowerCase() === name.trim().toLowerCase());
 
   const submit = async (e) => {
     e.preventDefault();
@@ -442,7 +476,24 @@ function ProposeIndicatorsPanel({ cycleId, myDeptId, proposals = [], loading, er
         <form onSubmit={submit} className="space-y-3 border-b border-line-soft px-5 py-4">
           <div>
             <label className="mb-1 block text-xs font-semibold text-ink-muted">Indicator name</label>
-            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Client response time" />
+            <input
+              className={inputCls}
+              list="dept-indicator-library"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Pick from your department's library or type a new one"
+            />
+            <datalist id="dept-indicator-library">
+              {library.map((i) => (
+                <option key={i.id} value={i.name} />
+              ))}
+            </datalist>
+            {existingMatch && (
+              <p className="mt-1 text-xs text-ink-muted">
+                Already in your department's library — you'll be measured on the same indicator as your colleagues
+                {existingMatch.measurement_unit ? ` (${existingMatch.measurement_unit})` : ""}.
+              </p>
+            )}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>

@@ -129,12 +129,15 @@ export function buildPersonalNotifications({ reviews = [], leave = [], loans = [
 // flagged "notify on final approval") into a bell item. Distinct id prefix
 // keeps it from colliding with audit-log/personal notification ids.
 export function formatFinalApprovalNotification(n) {
+  // Payroll stages (submission, lock-in, distribution, adjustments) are acted
+  // on from the Payroll page, not the Approvals Inbox.
+  const isPayroll = String(n.workflow_type || "").startsWith("PAYROLL");
   return {
     id: `fap-${n.id}`,
     title: n.title || "Request received final approval",
     description: n.message || "Approval workflow",
     iconKey: "approval",
-    route: "/app/approvals",
+    route: isPayroll ? "/app/payroll" : "/app/approvals",
     at: n.created_at,
   };
 }

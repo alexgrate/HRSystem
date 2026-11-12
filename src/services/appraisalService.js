@@ -17,10 +17,18 @@ import api, { unwrapList } from './api';
 // Auth: read = any authenticated; create/update/deactivate = admin or any dept head.
 // ---------------------------------------------------------------------------
 export const performanceIndicatorService = {
-  list: (includeInactive = false) =>
-    api
-      .get('/api/performance-indicators/', includeInactive ? { params: { include_inactive: 'true' } } : undefined)
-      .then((res) => unwrapList(res, ['indicators', 'performance_indicators'])),
+  // The server scopes the library to the caller: admins see every department
+  // (narrow with departmentId, or 'shared'); a head of department sees only
+  // the departments they head. includeShared adds the shared indicators.
+  list: (includeInactive = false, { departmentId, includeShared } = {}) => {
+    const params = {};
+    if (includeInactive) params.include_inactive = 'true';
+    if (departmentId) params.department_id = departmentId;
+    if (includeShared) params.include_shared = 'true';
+    return api
+      .get('/api/performance-indicators/', Object.keys(params).length ? { params } : undefined)
+      .then((res) => unwrapList(res, ['indicators', 'performance_indicators']));
+  },
   get: (id) => api.get(`/api/performance-indicators/${id}`),
   create: (data) => api.post('/api/performance-indicators/', data),
   update: (id, data) => api.put(`/api/performance-indicators/${id}`, data),
@@ -44,10 +52,15 @@ export const appraisalCycleService = {
   lockIndicators: (id) => api.post(`/api/appraisal-cycles/${id}/lock-indicators`, {}),
 
   // Department indicator selections (the per-cycle weighted KPI list).
-  listDepartmentIndicators: (cycleId, departmentId, jobRoleId) =>
-    api
-      .get(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/indicators`, jobRoleId ? { params: { job_role_id: jobRoleId } } : undefined)
-      .then((res) => unwrapList(res, ['indicators', 'selections'])),
+  // selfOnly: only what applies to the signed-in employee (Self-Service).
+  listDepartmentIndicators: (cycleId, departmentId, jobRoleId, { selfOnly = false } = {}) => {
+    const params = {};
+    if (jobRoleId) params.job_role_id = jobRoleId;
+    if (selfOnly) params.self_only = 'true';
+    return api
+      .get(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/indicators`, Object.keys(params).length ? { params } : undefined)
+      .then((res) => unwrapList(res, ['indicators', 'selections']));
+  },
   addDepartmentIndicator: (cycleId, departmentId, { performance_indicator_id, job_role_id, weight }) =>
     api.post(`/api/appraisal-cycles/${cycleId}/departments/${departmentId}/indicators`, {
       performance_indicator_id,

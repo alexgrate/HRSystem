@@ -1485,7 +1485,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
         appraisalCycleService.get(cycleId),
         setupService.getDepartments().then((r) => (Array.isArray(r) ? r : r?.departments || [])).catch(() => []),
         setupService.getJobRoles().then((r) => (Array.isArray(r) ? r : r?.jobRoles || r?.job_roles || [])).catch(() => []),
-        performanceIndicatorService.list().catch(() => []),
+        performanceIndicatorService.list(false, { includeShared: true }).catch(() => []),
         appraisalSessionService.list(cycleId).catch(() => []),
       ]);
       setCycle(c);
@@ -2275,7 +2275,7 @@ function CycleDetail({ cycleId, directory = [], isAdmin = false, headedDeptIds =
 
       {addOpen && (
         <AddIndicatorModal
-          catalog={catalog}
+          catalog={catalog.filter((i) => !i.department_id || i.department_id === deptId)}
           jobRoles={deptRoles}
           onClose={() => setAddOpen(false)}
           onAdd={async ({ performance_indicator_id, job_role_id, weight }) => {
@@ -2361,27 +2361,51 @@ function AddIndicatorModal({ catalog, jobRoles, onClose, onAdd }) {
 
 /* ==================================================== Indicators (catalog) */
 
-function IndicatorsSection() {
+function IndicatorsSection({ context = null, caps = {}, isAdmin = false }) {
   const toast = useToast();
   const confirm = useConfirm();
+  // Library admins see every department's indicators (plus shared ones); a
+  // head of department sees and manages only the departments they head.
+  const isLibraryAdmin = isAdmin || !!caps.can_manage_indicator_library;
+  const headed = context?.headed_departments || [];
+  const [allDepartments, setAllDepartments] = useState([]);
+  const departments = isLibraryAdmin ? (allDepartments.length ? allDepartments : context?.manageable_departments || []) : headed;
+  const deptName = (id) => departments.find((d) => d.id === id)?.name || allDepartments.find((d) => d.id === id)?.name || "—";
+
+  const [deptFilter, setDeptFilter] = useState(isLibraryAdmin ? "" : headed[0]?.id || "");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState(null); // indicator or {} for new
 
+  useEffect(() => {
+    if (!isLibraryAdmin) return;
+    let stale = false;
+    setupService
+      .getDepartments()
+      .then((r) => (Array.isArray(r) ? r : r?.departments || []))
+      .catch(() => [])
+      .then((list) => {
+        if (!stale) setAllDepartments(list);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [isLibraryAdmin]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const list = await performanceIndicatorService.list(showInactive);
+      const list = await performanceIndicatorService.list(showInactive, { departmentId: deptFilter || undefined });
       setRows(Array.isArray(list) ? list : []);
     } catch (err) {
       setError(errMsg(err, "Failed to load indicators."));
     } finally {
       setLoading(false);
     }
-  }, [showInactive]);
+  }, [showInactive, deptFilter]);
 
   useEffect(() => {
     load();
@@ -2414,19 +2438,36 @@ function IndicatorsSection() {
     }
   };
 
+  const showDeptColumn = isLibraryAdmin || headed.length > 1;
+
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-4">
         <div>
-          <h2 className="text-sm font-bold text-ink">Performance Indicators</h2>
-          <p className="text-xs text-ink-muted">The organization-wide catalog of KPIs used across appraisal cycles.</p>
+          <h2 className="text-sm font-bold text-ink">Indicator Library</h2>
+          <p className="text-xs text-ink-muted">
+            {isLibraryAdmin
+              ? "Each department's performance indicators, plus any shared across every department."
+              : headed.length === 1
+                ? `Performance indicators for ${headed[0].name}.`
+                : "Performance indicators for the departments you head."}
+          </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {(isLibraryAdmin || headed.length > 1) && (
+            <select className={`${inputCls} w-auto`} value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} aria-label="Department">
+              {isLibraryAdmin ? <option value="">All departments</option> : null}
+              {isLibraryAdmin ? <option value="shared">Shared (all departments)</option> : null}
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          )}
           <label className="flex items-center gap-1.5 text-xs text-ink-muted">
             <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
             Show inactive
           </label>
-          <PrimaryBtn onClick={() => setEditing({})}>
+          <PrimaryBtn onClick={() => setEditing({})} disabled={!isLibraryAdmin && headed.length === 0}>
             <Plus className="h-4 w-4" /> New indicator
           </PrimaryBtn>
         </div>
@@ -2437,47 +2478,66 @@ function IndicatorsSection() {
       ) : error ? (
         <ErrorState message={error} onRetry={load} />
       ) : rows.length === 0 ? (
-        <EmptyState Icon={Gauge} title="No performance indicators" hint="Create KPIs like “Sales Volume” or “Tickets Resolved” that can be selected into appraisal cycles." />
+        <EmptyState
+          Icon={Gauge}
+          title="No performance indicators here yet"
+          hint="Create KPIs like “Sales Volume” or “Tickets Resolved” for this department; they can then be selected into appraisal cycles."
+        />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-sunken/60 text-xs uppercase tracking-wider text-ink-muted">
               <tr>
                 <th className="px-5 py-3 text-left font-semibold">Name</th>
+                {showDeptColumn && <th className="px-4 py-3 text-left font-semibold">Department</th>}
                 <th className="px-4 py-3 text-left font-semibold">Unit</th>
                 <th className="px-4 py-3 text-left font-semibold">Status</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className={`border-t border-line-soft ${r.is_active ? "" : "opacity-60"}`}>
-                  <td className="px-5 py-3">
-                    <div className="font-semibold text-ink">{r.name}</div>
-                    {r.description ? <div className="text-xs text-ink-muted">{r.description}</div> : null}
-                  </td>
-                  <td className="px-4 py-3 text-ink-muted">{r.measurement_unit || "—"}</td>
-                  <td className="px-4 py-3">
-                    <StatusChip status={r.is_active ? "submitted" : "inactive"} label={r.is_active ? "Active" : "Inactive"} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <GhostBtn onClick={() => setEditing(r)}>
-                        <Pencil className="h-3.5 w-3.5" /> Edit
-                      </GhostBtn>
-                      {r.is_active ? (
-                        <GhostBtn onClick={() => deactivate(r)} className="border-red-200 text-red-600 hover:bg-red-50">
-                          <Trash2 className="h-3.5 w-3.5" /> Deactivate
-                        </GhostBtn>
-                      ) : (
-                        <GhostBtn onClick={() => reactivate(r)} className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
-                          <Check className="h-3.5 w-3.5" /> Reactivate
-                        </GhostBtn>
+              {rows.map((r) => {
+                const canEdit = isLibraryAdmin || (!!r.department_id && headed.some((d) => d.id === r.department_id));
+                return (
+                  <tr key={r.id} className={`border-t border-line-soft ${r.is_active ? "" : "opacity-60"}`}>
+                    <td className="px-5 py-3">
+                      <div className="font-semibold text-ink">{r.name}</div>
+                      {r.description ? <div className="text-xs text-ink-muted">{r.description}</div> : null}
+                    </td>
+                    {showDeptColumn && (
+                      <td className="px-4 py-3 text-ink-muted">
+                        {r.department_id ? (
+                          deptName(r.department_id)
+                        ) : (
+                          <span className="rounded-full bg-sunken px-2 py-0.5 text-[11px] font-semibold text-ink-muted">Shared</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-4 py-3 text-ink-muted">{r.measurement_unit || "—"}</td>
+                    <td className="px-4 py-3">
+                      <StatusChip status={r.is_active ? "submitted" : "inactive"} label={r.is_active ? "Active" : "Inactive"} />
+                    </td>
+                    <td className="px-4 py-3">
+                      {canEdit && (
+                        <div className="flex items-center justify-end gap-2">
+                          <GhostBtn onClick={() => setEditing(r)}>
+                            <Pencil className="h-3.5 w-3.5" /> Edit
+                          </GhostBtn>
+                          {r.is_active ? (
+                            <GhostBtn onClick={() => deactivate(r)} className="border-red-200 text-red-600 hover:bg-red-50">
+                              <Trash2 className="h-3.5 w-3.5" /> Deactivate
+                            </GhostBtn>
+                          ) : (
+                            <GhostBtn onClick={() => reactivate(r)} className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+                              <Check className="h-3.5 w-3.5" /> Reactivate
+                            </GhostBtn>
+                          )}
+                        </div>
                       )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -2486,6 +2546,9 @@ function IndicatorsSection() {
       {editing && (
         <IndicatorModal
           indicator={editing.id ? editing : null}
+          departments={departments}
+          allowShared={isLibraryAdmin}
+          defaultDepartmentId={deptFilter && deptFilter !== "shared" ? deptFilter : isLibraryAdmin ? "" : headed[0]?.id || ""}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -2498,10 +2561,11 @@ function IndicatorsSection() {
   );
 }
 
-function IndicatorModal({ indicator, onClose, onSaved, onToast }) {
+function IndicatorModal({ indicator, departments = [], allowShared = false, defaultDepartmentId = "", onClose, onSaved, onToast }) {
   const [name, setName] = useState(indicator?.name || "");
   const [description, setDescription] = useState(indicator?.description || "");
   const [unit, setUnit] = useState(indicator?.measurement_unit || "");
+  const [departmentId, setDepartmentId] = useState(indicator ? indicator.department_id || "" : defaultDepartmentId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const isEdit = !!indicator;
@@ -2512,9 +2576,18 @@ function IndicatorModal({ indicator, onClose, onSaved, onToast }) {
       setError("Name is required.");
       return;
     }
+    if (!allowShared && !departmentId) {
+      setError("Choose the department this indicator belongs to.");
+      return;
+    }
     setBusy(true);
     try {
-      const payload = { name: name.trim(), description: description || null, measurement_unit: unit || null };
+      const payload = {
+        name: name.trim(),
+        description: description || null,
+        measurement_unit: unit || null,
+        department_id: departmentId || null,
+      };
       if (isEdit) await performanceIndicatorService.update(indicator.id, payload);
       else await performanceIndicatorService.create(payload);
       onToast.success(isEdit ? "Indicator updated." : "Indicator created.");
@@ -2534,6 +2607,17 @@ function IndicatorModal({ indicator, onClose, onSaved, onToast }) {
           <label className="mb-1 block text-xs font-semibold text-ink-muted">Name</label>
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sales Volume" />
         </div>
+        {(allowShared || departments.length > 1) && (
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-ink-muted">Department</label>
+            <select className={inputCls} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
+              {allowShared ? <option value="">Shared — available to every department</option> : <option value="">Select a department…</option>}
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="mb-1 block text-xs font-semibold text-ink-muted">Description (optional)</label>
           <textarea className={inputCls} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />

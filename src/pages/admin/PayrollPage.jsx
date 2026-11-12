@@ -32,6 +32,22 @@ const lineItemsTooltip = (lineItems, itemType, currency) => {
   return matches.map((li) => `${li.name}: ${fmtMoney(li.amount, currency)}`).join("\n");
 };
 
+// Why someone isn't paid for the whole month, shown under their days worked.
+const shortDate = (ymd) => {
+  if (!ymd) return "";
+  const d = new Date(`${ymd}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? ymd : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+};
+const DAYS_BASIS_LABEL = (sn) => {
+  switch (sn?.days_basis) {
+    case "joined": return `Joined ${shortDate(sn.start_date)}`;
+    case "left": return `Left ${shortDate(sn.end_date)}`;
+    case "joined_and_left": return `${shortDate(sn.start_date)} – ${shortDate(sn.end_date)}`;
+    case "manual": return "Entered by hand";
+    default: return null;
+  }
+};
+
 // ── Payroll schedule export ────────────────────────────────────────────────
 // One row per employee in the same layout finance reconciles: days, annual
 // gross, every earning component, gross pay, every employer cost, staff cost,
@@ -62,7 +78,7 @@ function buildPayrollScheduleCsv(lines) {
   const hasAdjust = lines.some((l) => Number(l.adjustments_total) !== 0 && l.adjustments_total != null);
 
   const header = [
-    "S/N", "Name", "Staff ID", "Residence", "No. days worked", "No. working days in the month", "Annual gross",
+    "S/N", "Name", "Staff ID", "Residence", "No. days worked", "No. working days in the month", "Proration", "Annual gross",
     ...order.remuneration, ...(hasBalance ? ["Balance of base salary"] : []), ...(hasAllowance ? ["Benefit allowances"] : []),
     "Gross pay",
     ...order.employer_contribution, "Staff cost",
@@ -84,6 +100,7 @@ function buildPayrollScheduleCsv(lines) {
       sn.residence || "",
       sn.days_worked ?? "",
       sn.working_days ?? "",
+      DAYS_BASIS_LABEL(sn) || "",
       sn.annual_gross != null ? Number(sn.annual_gross) : Number(l.base_salary || 0) * 12,
       ...order.remuneration.map((n) => amt("remuneration", n)),
       ...(hasBalance ? [balance] : []),
@@ -107,7 +124,7 @@ function buildPayrollScheduleCsv(lines) {
   const total = (idx) => rows.reduce((a, r) => a + (typeof r[idx] === "number" ? r[idx] : 0), 0);
   const totalsRow = header.map((h, idx) => {
     if (idx === 1) return "TOTAL";
-    if (idx < 6 || idx >= header.length - 5) return "";
+    if (idx < 7 || idx >= header.length - 5) return "";
     return total(idx);
   });
 
@@ -356,8 +373,16 @@ const PayrollPage = () => {
     }
     setBusy(true);
     try {
-      await action.exec(id, approvalRequestId, comment);
-      toast.success(`${action.label} — done.`);
+      const before = target === "adjustment" ? source?.status : selectedRun?.status;
+      const result = await action.exec(id, approvalRequestId, comment);
+      // With a multi-step workflow an approval may only complete your stage:
+      // the status is unchanged and it has gone on to the next approver.
+      const isApprove = !action.danger;
+      if (isApprove && result?.status && before && result.status === before) {
+        toast.success("Your approval is recorded — it has been sent to the next approver.");
+      } else {
+        toast.success(`${action.label} — done.`);
+      }
       setApproveModal(null);
       await refreshAfterAction();
     } catch (err) {
@@ -383,13 +408,48 @@ const PayrollPage = () => {
   const workingDaysForRun = runLines.find((l) => l.snapshot?.working_days != null)?.snapshot?.working_days ?? null;
   const pendingDayEdits = Object.keys(daysEdits).length;
 
-  const recalculateDays = async () => {
-    if (!selectedRun) return;
+  const exclusions = useMemo(() => (Array.isArray(detail?.excluded_employees) ? detail.excluded_employees : []), [detail]);
+  const [selectedForExclusion, setSelectedForExclusion] = useState(() => new Set());
+  const [excludeReason, setExcludeReason] = useState("");
+  useEffect(() => {
+    setSelectedForExclusion(new Set());
+    setExcludeReason("");
+  }, [selectedId]);
+
+  // Re-generate this preview, keeping hand-entered days and the exclusion
+  // list unless the caller changes them.
+  const repreview = async ({ excluded = exclusions, extraDays = {} } = {}, successMsg) => {
+    if (!selectedRun) return false;
     const days_worked = {};
     runLines.forEach((l) => {
       const current = l.snapshot?.days_worked;
-      if (current != null) days_worked[l.employee_id] = Number(current);
+      if (current != null && l.snapshot?.days_basis === "manual") days_worked[l.employee_id] = Number(current);
     });
+    Object.assign(days_worked, extraDays);
+    setBusy(true);
+    try {
+      await payrollService.preview({
+        month: selectedRun.month,
+        year: selectedRun.year,
+        pay_group: selectedRun.pay_group,
+        currency: selectedRun.currency,
+        working_days: workingDaysForRun ?? undefined,
+        days_worked,
+        excluded_employees: excluded.map((e) => ({ employee_id: e.employee_id, reason: e.reason ?? null })),
+      });
+      await refreshAfterAction();
+      if (successMsg) toast.success(successMsg);
+      return true;
+    } catch (err) {
+      toast.error(err?.message || "Couldn't recalculate the payroll.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const recalculateDays = async () => {
+    const extraDays = {};
     for (const [id, v] of Object.entries(daysEdits)) {
       const n = Number(v);
       if (v === "" || !Number.isFinite(n) || n < 0) {
@@ -400,26 +460,46 @@ const PayrollPage = () => {
         toast.error(`Days worked can't be more than the ${workingDaysForRun} working days in the month.`);
         return;
       }
-      days_worked[id] = n;
+      extraDays[id] = n;
     }
-    setBusy(true);
-    try {
-      await payrollService.preview({
-        month: selectedRun.month,
-        year: selectedRun.year,
-        pay_group: selectedRun.pay_group,
-        currency: selectedRun.currency,
-        working_days: workingDaysForRun ?? undefined,
-        days_worked,
-      });
-      setDaysEdits({});
-      await refreshAfterAction();
-      toast.success("Payroll recalculated with the new days worked.");
-    } catch (err) {
-      toast.error(err?.message || "Couldn't recalculate the payroll.");
-    } finally {
-      setBusy(false);
+    if (await repreview({ extraDays }, "Payroll recalculated with the new days worked.")) setDaysEdits({});
+  };
+
+  const toggleExclusionPick = (employeeId) =>
+    setSelectedForExclusion((prev) => {
+      const next = new Set(prev);
+      if (next.has(employeeId)) next.delete(employeeId);
+      else next.add(employeeId);
+      return next;
+    });
+
+  const excludeSelected = async () => {
+    const ids = Array.from(selectedForExclusion);
+    if (!ids.length) return;
+    const names = ids.map((id) => runLines.find((l) => l.employee_id === id)?.snapshot?.employee_name || staffName(id));
+    const ok = await confirm({
+      title: `Leave ${ids.length} staff out of this payroll?`,
+      message: `${names.slice(0, 5).join(", ")}${names.length > 5 ? ` and ${names.length - 5} more` : ""} won't be paid in this run, and any loan repayment due from them this month is skipped. You can include them again until the run is submitted.`,
+      confirmLabel: "Exclude from payroll",
+      danger: true,
+    });
+    if (!ok) return;
+    const reason = excludeReason.trim() || null;
+    const merged = [
+      ...exclusions.filter((e) => !selectedForExclusion.has(e.employee_id)),
+      ...ids.map((employee_id) => ({ employee_id, reason })),
+    ];
+    if (await repreview({ excluded: merged }, `${ids.length} staff excluded from this run.`)) {
+      setSelectedForExclusion(new Set());
+      setExcludeReason("");
     }
+  };
+
+  const includeAgain = async (employeeId) => {
+    await repreview(
+      { excluded: exclusions.filter((e) => e.employee_id !== employeeId) },
+      "Added back to this payroll run.",
+    );
   };
 
   const downloadSchedule = () => {
@@ -706,10 +786,41 @@ const PayrollPage = () => {
                         )}
                       </div>
                     </div>
+                    {daysEditable && selectedForExclusion.size > 0 && (
+                      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-red-200 bg-red-50/60 px-3 py-2">
+                        <span className="text-xs font-semibold text-ink">{selectedForExclusion.size} selected</span>
+                        <input
+                          value={excludeReason}
+                          onChange={(e) => setExcludeReason(e.target.value)}
+                          placeholder="Reason (optional), e.g. on unpaid leave"
+                          maxLength={200}
+                          aria-label="Reason for excluding"
+                          className="min-w-0 flex-1 rounded-lg border border-line bg-card px-2.5 py-1.5 text-xs"
+                        />
+                        <button onClick={() => setSelectedForExclusion(new Set())} disabled={busy} className="rounded-lg border border-line bg-card px-2.5 py-1.5 text-xs font-semibold text-ink-muted">
+                          Clear
+                        </button>
+                        <button onClick={excludeSelected} disabled={busy} className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
+                          {busy ? "Updating…" : "Exclude from payroll"}
+                        </button>
+                      </div>
+                    )}
                     <div className="overflow-x-auto rounded-xl border border-line">
                       <table className="w-full min-w-[560px] text-sm">
                         <thead className="bg-sunken/60 text-[10px] uppercase tracking-wider text-ink-muted">
                           <tr>
+                            {daysEditable && (
+                              <th className="w-8 px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  aria-label="Select everyone"
+                                  checked={runLines.length > 0 && runLines.every((l) => selectedForExclusion.has(l.employee_id))}
+                                  onChange={(e) =>
+                                    setSelectedForExclusion(e.target.checked ? new Set(runLines.map((l) => l.employee_id)) : new Set())
+                                  }
+                                />
+                              </th>
+                            )}
                             <th className="px-3 py-2 text-left font-semibold">Employee</th>
                             <th className="px-3 py-2 text-right font-semibold">Days</th>
                             <th className="px-3 py-2 text-right font-semibold">Gross pay</th>
@@ -736,7 +847,17 @@ const PayrollPage = () => {
                         </thead>
                         <tbody>
                           {runLines.map((l, i) => (
-                            <tr key={l.id || i} className="border-t border-line-soft">
+                            <tr key={l.id || i} className={`border-t border-line-soft ${selectedForExclusion.has(l.employee_id) ? "bg-red-50/40" : ""}`}>
+                              {daysEditable && (
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${l.snapshot?.employee_name || "employee"}`}
+                                    checked={selectedForExclusion.has(l.employee_id)}
+                                    onChange={() => toggleExclusionPick(l.employee_id)}
+                                  />
+                                </td>
+                              )}
                               <td className="px-3 py-2 font-medium text-ink-2">
                                 {l.snapshot?.employee_name || l.employee_name || getEmployeeName(l.employee, null) || staffName(l.employee_id)}
                               </td>
@@ -764,6 +885,9 @@ const PayrollPage = () => {
                                   `${l.snapshot.days_worked}/${l.snapshot.working_days}`
                                 ) : (
                                   "—"
+                                )}
+                                {DAYS_BASIS_LABEL(l.snapshot) && (
+                                  <div className="mt-0.5 whitespace-nowrap text-[10px] font-semibold text-amber-700">{DAYS_BASIS_LABEL(l.snapshot)}</div>
                                 )}
                               </td>
                               {/* Gross pay = the earning components (they split the base salary) plus any benefit allowances. */}
@@ -818,6 +942,37 @@ const PayrollPage = () => {
                     </div>
                   </div>
                 ) : null}
+
+                {exclusions.length > 0 && (
+                  <div className="rounded-xl border border-line">
+                    <div className="border-b border-line-soft px-4 py-3">
+                      <h4 className="text-sm font-semibold text-ink">Excluded from this run ({exclusions.length})</h4>
+                      <p className="text-[11px] text-ink-muted">Not paid in this payroll, and their loan repayments are skipped this month.</p>
+                    </div>
+                    <ul className="divide-y divide-line-soft">
+                      {exclusions.map((e) => (
+                        <li key={e.employee_id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-ink">{e.employee_name || staffName(e.employee_id)}</div>
+                            <div className="text-[11px] text-ink-faint">
+                              {e.reason || "No reason given"}
+                              {e.excluded_at ? ` · excluded ${String(e.excluded_at).slice(0, 10)}` : ""}
+                            </div>
+                          </div>
+                          {daysEditable && (
+                            <button
+                              onClick={() => includeAgain(e.employee_id)}
+                              disabled={busy}
+                              className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-sunken disabled:opacity-60"
+                            >
+                              Include again
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {/* Adjustments */}
                 <div className="rounded-xl border border-line">
