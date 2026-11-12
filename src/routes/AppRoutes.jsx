@@ -12,6 +12,8 @@ import PlatformLayout from "../components/layout/PlatformLayout";
 import Login from "../pages/auth/Login";
 import SignUp from "../pages/auth/SignUp";
 import ForgotPassword from "../pages/auth/ForgotPassword";
+import FindWorkspace from "../pages/auth/FindWorkspace";
+import { isMainDomain } from "../utils/workspace";
 import SsoCallback from "../pages/auth/SsoCallback";
 import PlatformLoginPage from "../pages/platform/PlatformLoginPage";
 import { RESOURCES, pathFor } from "../config/resources";
@@ -23,6 +25,11 @@ const PlatformDashboardPage = lazy(() => import("../pages/platform/PlatformDashb
 const PlatformOrganizationsPage = lazy(() => import("../pages/platform/PlatformOrganizationsPage"));
 const PlatformLoansPage = lazy(() => import("../pages/platform/PlatformLoansPage"));
 const PlatformLoanAgreementPage = lazy(() => import("../pages/platform/PlatformLoanAgreementPage"));
+
+const Landing = lazy(() => import("../pages/landing/Landing"))
+const Terms = lazy(() => import("../pages/legal/Terms"))
+const Privacy = lazy(() => import("../pages/legal/Privacy"))
+const Docs = lazy(() => import("../pages/docs/Docs"))
 
 // Shown while a lazy route chunk downloads.
 function PageLoading() {
@@ -49,9 +56,21 @@ function OrgApp() {
       <PermissionProvider>
         <ConfigProvider>
           <Routes>
-            <Route path="/login" element={<Login />} />
+            <Route 
+              path="/" 
+              element={
+                <Suspense fallback={null}>
+                  <Landing />
+                </Suspense>
+              }
+            />
+            <Route path="/docs" element={<Suspense fallback={null}><Docs /></Suspense>} />
+            <Route path="/docs/:slug" element={<Suspense fallback={null}><Docs /></Suspense>} />
+            <Route path="/terms" element={<Suspense fallback={null}><Terms /></Suspense>} />
+            <Route path="/privacy" element={<Suspense fallback={null}><Privacy /></Suspense>} />
+            <Route path="/login" element={isMainDomain() ? <FindWorkspace /> : <Login />} />
             <Route path="/signup" element={<SignUp />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/forgot-password" element={isMainDomain() ? <FindWorkspace next="/forgot-password" /> : <ForgotPassword />} />
             <Route path="/sso-callback" element={<SsoCallback />} />
 
             <Route

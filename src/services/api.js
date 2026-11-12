@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 if (!import.meta.env.VITE_API_URL && import.meta.env.PROD) {
   console.error('[api] VITE_API_URL is not set — falling back to localhost:5000. Set it in the production environment.');
 }

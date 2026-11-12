@@ -1,3 +1,4 @@
+
 import { useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -7,6 +8,7 @@ import {
 } from "lucide-react";
 import { authService } from "../../services/authService";
 import logoImg from "../../assets/dashIcon.jpg";
+import { WORKSPACE_DOMAIN } from "../../utils/workspace";
 
 const emailValid = (e) => /^\S+@\S+\.\S+$/.test(e);
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -183,7 +185,7 @@ const SignUp = () => {
                         placeholder="acme"
                         required
                       />
-                      <span className="shrink-0 text-xs text-ink-faint">.dash-mfb.com</span>
+                      <span className="shrink-0 text-xs text-ink-faint">.{WORKSPACE_DOMAIN}</span>
                     </Field>
                   </div>
 
@@ -238,6 +240,13 @@ const SignUp = () => {
                       <ArrowRight className="h-4 w-4" />
                     </span>
                   </motion.button>
+
+                  <p className="text-center text-xs text-ink-muted">
+                    By creating a workspace, you agree to our{" "}
+                    <Link to="/terms" className="font-semibold text-brand hover:underline">Terms</Link>
+                    {" "}and{" "}
+                    <Link to="/privacy" className="font-semibold text-brand hover:underline">Privacy Policy</Link>.
+                  </p>
                 </form>
 
                 <Link to="/login" className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-brand">
@@ -247,9 +256,11 @@ const SignUp = () => {
             )}
           </div>
 
-          <div className="text-center text-[9px] uppercase tracking-[0.24em] text-ink-faint shrink-0 mt-8">
-            MFA · ISO 27001 · SOC 2
-          </div>
+          <nav aria-label="Help and legal" className="mt-8 flex shrink-0 justify-center gap-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">
+            <Link to="/docs" className="hover:text-brand">Help</Link>
+            <Link to="/terms" className="hover:text-brand">Terms</Link>
+            <Link to="/privacy" className="hover:text-brand">Privacy</Link>
+          </nav>
         </div>
       </div>
     </div>
